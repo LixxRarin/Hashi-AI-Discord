@@ -1,17 +1,30 @@
+<div align="center">
+
+<img src="character_cards/hashi.png" alt="Hashi" width="120" style="border-radius: 50%;"/>
+
 # Project Hashi - 橋
 ### AI Characters to Discord Servers
 
 [![License](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)  [![Python 3.11+](https://img.shields.io/badge/Python-3.11%2B-green.svg)](https://www.python.org/downloads/)
 
+</div>
+
 > This is an improved fork of the original [Hashi Character.AI Discord Bot](https://github.com/LixxRarin/Hashi-CharacterAI-Discord), completely rewritten to support multiple AI providers (OpenAI, DeepSeek, Claude, Ollama, Custom Endpoint), Character Card V3, and advanced conversation management features!
 
 Project Hashi allows AI personas to interact with users in your Discord server using various AI providers. Perfect for bringing AI personalities to your community with full control over their behavior and appearance.
 
-WARNING: 
+---
+
+<div align="center">
+
+<img src="imgs/prtscr01.png" alt="Hashi in action" width="650"/>
+
+</div>
+
+---
+
 
 **Demo Server**: [Join Discord (Not available at the moment)](https://discord.gg/******) | **Report Issues**: [GitHub Issues](https://github.com/LixxRarin/Hashi-AI-Discord/issues)
-
-<a href="add link later"><img src="add link later" alt="..." border="0"></a>
 
 ## Contents
 - [🌟 Features](#-features)
