@@ -1,0 +1,14 @@
+discord.py
+aiohttp
+aiofiles
+ruamel.yaml
+pyyaml
+colorama
+requests
+packaging
+PyNaCl
+openai
+tiktoken
+psutil
+ollama
+anthropic
