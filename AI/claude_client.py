@@ -65,8 +65,13 @@ class ClaudeClient(BaseAIClient):
         
         return content
     
-    def create_client(self, session: Dict[str, Any], server_id: Optional[str] = None) -> AsyncAnthropic:
-        """Creates an AsyncAnthropic client."""
+    def create_client(
+        self,
+        session: Dict[str, Any],
+        server_id: Optional[str] = None,
+        extra_headers: Optional[Dict[str, str]] = None
+    ) -> AsyncAnthropic:
+        """Creates an AsyncAnthropic client with optional extra headers."""
         api_key = self.resolve_api_key(session, server_id)
         base_url = self.resolve_base_url(session, server_id)
         
@@ -77,6 +82,9 @@ class ClaudeClient(BaseAIClient):
         
         if base_url:
             client_kwargs["base_url"] = base_url
+        
+        if extra_headers:
+            client_kwargs["default_headers"] = extra_headers
         
         return AsyncAnthropic(**client_kwargs)
     
@@ -160,9 +168,16 @@ class ClaudeClient(BaseAIClient):
         **kwargs
     ) -> str:
         """Generate a response from Claude API with optional tool calling and vision support."""
-        model = self.resolve_model(session, server_id, "claude-3-5-sonnet-20241022")
+        model = self.resolve_model(session, server_id, "claude-sonnet-4-5")
         llm_params = self.get_llm_params(session, server_id)
-        client = self.create_client(session, server_id)
+        
+        # Add beta header for interleaved thinking if using tools with thinking
+        extra_headers = None
+        think_switch = llm_params.get("think_switch", False)
+        if tools and think_switch:
+            extra_headers = {"anthropic-beta": "interleaved-thinking-2025-05-14"}
+        
+        client = self.create_client(session, server_id, extra_headers)
         
         try:
             # Extract system message (Claude requires it separate)
@@ -200,12 +215,24 @@ class ClaudeClient(BaseAIClient):
             think_switch = llm_params.get("think_switch", False)
             if think_switch:
                 think_depth = llm_params.get("think_depth", 3)
-                budget_tokens = think_depth * 2000  # 2000 tokens per level
+                
+                # Try adaptive thinking first (for Opus 4.6+), fallback to manual mode
+                # The API will handle compatibility , if adaptive isn't supported, it will error
+                # and we can catch it, but for now we'll use manual mode universally
+                # since it works across all thinking-capable models
+                budget_tokens = min(
+                    think_depth * 2000,  # 2000 tokens per level
+                    api_params["max_tokens"]  # Don't exceed max_tokens
+                )
                 
                 api_params["thinking"] = {
                     "type": "enabled",
                     "budget_tokens": budget_tokens
                 }
+                
+                # Remove temperature when thinking is enabled (not compatible)
+                if "temperature" in api_params:
+                    del api_params["temperature"]
             
             # Merge custom_extra_body if provided
             custom_extra = llm_params.get("custom_extra_body")
@@ -242,18 +269,28 @@ class ClaudeClient(BaseAIClient):
             # Extract response content and thinking
             ai_response = ""
             thinking_content = ""
+            has_redacted = False
             
             for content_block in response.content:
                 if content_block.type == "text":
                     ai_response += content_block.text
                 elif content_block.type == "thinking":
                     thinking_content += content_block.thinking
+                elif content_block.type == "redacted_thinking":
+                    # Redacted thinking blocks contain encrypted content
+                    # Don't try to display them, but note their presence
+                    has_redacted = True
+                    func.log.debug("Response contains redacted thinking blocks (encrypted for safety)")
             
             hide_tags = llm_params.get("hide_thinking_tags", True)
             
             # If has thinking and should not hide, add to content
             if thinking_content and not hide_tags:
                 ai_response = f"<thinking>\n{thinking_content}\n</thinking>\n\n{ai_response}"
+            
+            # Log if redacted thinking was present
+            if has_redacted and not hide_tags:
+                func.log.info("Note: Some thinking content was redacted for safety and is not displayed")
             
             if not ai_response or ai_response.isspace():
                 func.log.warning("Received empty response from Claude")
@@ -366,13 +403,27 @@ class ClaudeClient(BaseAIClient):
                 # Execute all tool calls
                 tool_results = await executor.execute_tool_calls(tool_call_objects, tool_context or {})
                 
-                # Build assistant message with tool use blocks
+                # Build assistant message with all content blocks (including thinking)
+                # Must preserve thinking blocks for reasoning continuity
                 assistant_content = []
                 for block in response.content:
                     if block.type == "text":
                         assistant_content.append({
                             "type": "text",
                             "text": block.text
+                        })
+                    elif block.type == "thinking":
+                        # Preserve thinking blocks with signature for verification
+                        assistant_content.append({
+                            "type": "thinking",
+                            "thinking": block.thinking,
+                            "signature": block.signature
+                        })
+                    elif block.type == "redacted_thinking":
+                        # Preserve redacted thinking blocks (encrypted content)
+                        assistant_content.append({
+                            "type": "redacted_thinking",
+                            "data": block.data
                         })
                     elif block.type == "tool_use":
                         assistant_content.append({
@@ -460,7 +511,7 @@ class ClaudeClient(BaseAIClient):
         Claude doesn't have native structured outputs like OpenAI, but we can
         achieve the same result by defining a tool that returns the desired schema.
         """
-        model = self.resolve_model(session, server_id, "claude-3-5-sonnet-20241022")
+        model = self.resolve_model(session, server_id, "claude-sonnet-4-5")
         client = self.create_client(session, server_id)
         
         try:
@@ -524,27 +575,41 @@ class ClaudeClient(BaseAIClient):
         Note: Anthropic doesn't have a models list endpoint, so we return
         hardcoded information based on the model name.
         """
-        model = self.resolve_model(session, server_id, default_model="claude-3-5-sonnet-20241022")
+        model = self.resolve_model(session, server_id, default_model="claude-sonnet-4-5")
         if not model:
             func.log.error("No model provided to get_bot_info")
             return None
 
-        # Hardcoded model information
+        # Model information (includes both Claude 3 and Claude 4 models)
         model_info = {
+            # Claude 4 models (with thinking support)
+            "claude-opus-4-6": {
+                "description": "Most capable Claude 4 model with adaptive thinking",
+                "context_window": "200K tokens"
+            },
+            "claude-sonnet-4-5": {
+                "description": "Best balance of intelligence and speed with thinking",
+                "context_window": "200K tokens"
+            },
+            "claude-haiku-4-5": {
+                "description": "Fast and efficient with thinking support",
+                "context_window": "200K tokens"
+            },
+            # Claude 3 models (no thinking support)
             "claude-3-opus-20240229": {
-                "description": "Most capable Claude model for complex tasks",
+                "description": "Most capable Claude 3 model",
                 "context_window": "200K tokens"
             },
             "claude-3-5-sonnet-20241022": {
-                "description": "Best combination of intelligence and speed",
+                "description": "Claude 3.5 Sonnet (no thinking support)",
                 "context_window": "200K tokens"
             },
             "claude-3-sonnet-20240229": {
-                "description": "Balanced performance and speed",
+                "description": "Balanced Claude 3 model",
                 "context_window": "200K tokens"
             },
             "claude-3-haiku-20240307": {
-                "description": "Fastest and most compact model",
+                "description": "Fastest Claude 3 model",
                 "context_window": "200K tokens"
             }
         }
@@ -610,7 +675,7 @@ def create_client(session: Dict[str, Any], server_id: Optional[str] = None) -> A
 
 def get_model(session: Dict[str, Any], server_id: Optional[str] = None) -> str:
     """Get model name from session/connection."""
-    return _claude_client.resolve_model(session, server_id, default_model="claude-3-5-sonnet-20241022")
+    return _claude_client.resolve_model(session, server_id, default_model="claude-sonnet-4-5")
 
 
 def get_llm_params(session: Dict[str, Any], server_id: Optional[str] = None) -> Dict[str, Any]:
@@ -646,7 +711,7 @@ register_provider(
     display_name="Anthropic",
     color="orange",
     icon="✴️ ",
-    default_model="claude-3-5-sonnet",
+    default_model="claude-sonnet-4-5",
     supports_thinking=True,
     description="Anthropic's Claude models"
 )

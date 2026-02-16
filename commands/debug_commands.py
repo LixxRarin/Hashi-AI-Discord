@@ -588,7 +588,7 @@ class DebugCommands(commands.Cog):
         
         embed.add_field(
             name="📦 Versions",
-            value=f"**Bot:** `{version}`\n"
+            value=f"**Project Hashi:** `{version}`\n"
                   f"**Python:** `{sys.version.split()[0]}`\n"
                   f"**Discord.py:** `{discord.__version__}`",
             inline=False
