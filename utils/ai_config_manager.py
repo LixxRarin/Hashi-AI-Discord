@@ -61,14 +61,14 @@ user_reply_format_syntax: "{quote}[{time}] {name} (@{username}) #{short_id} → 
 # - {username}: Discord username (use for mentions)
 # - {name}: Display name
 # - {message}: Message content
-# - {message_id}: Full Discord message ID (19 digits)
-# - {short_id}: Short message ID (1-3 digits), use for replies (save tokens)
+# - {message_id}: Full Discord message ID (17-20 digits)
+# - {short_id}: Short message ID (1-16 digits), use for replies (save tokens)
 # - {quote}: Quote of original message in replies (format: "> Author Name: content\n")
 # - {reply_username}: Reply target username
 # - {reply_name}: Reply target display name
 # - {reply_message}: Original message being replied to
-# - {reply_message_id}: Original message ID (19 digits)
-# - {reply_short_id}: Reply target short ID (1-3 digits)
+# - {reply_message_id}: Original message ID (17-20 digits)
+# - {reply_short_id}: Reply target short ID (1-16 digits)
 
 # Character Card Settings
 greeting_index: 0

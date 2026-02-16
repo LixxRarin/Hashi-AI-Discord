@@ -88,8 +88,8 @@ class MessageProcessor:
             "username": message.author_name,  # @lixxrarin (for mentions)
             "name": message.author_display_name,  # Rarin (display name)
             "message": message_content,
-            "message_id": message.message_id,  # Full Discord ID (19 digits)
-            "short_id": short_id  # Short ID (1-3 digits)
+            "message_id": message.message_id,  # Full Discord ID (17-20 digits)
+            "short_id": short_id  # Short ID (sequential integer)
         }
         
         # Add reply information if available

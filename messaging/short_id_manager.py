@@ -2,13 +2,14 @@
 Short ID Manager - Maps Discord IDs to Short IDs
 
 This module provides a mapping system to convert long Discord message IDs
-(19 digits) to short IDs (1-3 digits) for token optimization.
+(17-20 digits) to short IDs (sequential integers) for token optimization.
 
 Key Features:
 - Automatic ID assignment (sequential)
 - Bidirectional mapping (short <-> long)
 - Per-channel scope
 - Thread-safe operations (async locks)
+- Automatic fallback to Discord IDs when short IDs exceed 16 digits
 """
 
 import asyncio
@@ -16,6 +17,11 @@ import logging
 from typing import Dict, Optional
 
 log = logging.getLogger(__name__)
+
+# Maximum short ID before falling back to Discord IDs
+# 16 digits (9,999,999,999,999,999) - anything below Discord's 17-20 digit range
+# This is essentially unlimited while still saving tokens compared to Discord IDs
+MAX_SHORT_ID = 9999999999999999
 
 
 class ShortIDManager:
@@ -44,6 +50,7 @@ class ShortIDManager:
         """Initialize the short ID manager."""
         self._maps: Dict[str, Dict[str, Dict[str, Dict]]] = {}
         self._lock = asyncio.Lock()
+        self._fallback_warned: Dict[str, bool] = {}  # Track if we've warned about fallback per AI
 
     
     def _ensure_path(
@@ -76,6 +83,9 @@ class ShortIDManager:
         """
         Get or create a short ID for a Discord ID.
         
+        When short IDs exceed 16 digits, automatically falls back to using
+        Discord IDs directly to maintain token efficiency.
+        
         Args:
             server_id: Server ID
             channel_id: Channel ID
@@ -83,7 +93,7 @@ class ShortIDManager:
             discord_id: Discord message ID
             
         Returns:
-            Short ID (1, 2, 3, ...)
+            Short ID (1, 2, 3, ...) or Discord ID (if threshold exceeded)
         """
         async with self._lock:
             mapping = self._ensure_path(server_id, channel_id, ai_name)
@@ -92,12 +102,25 @@ class ShortIDManager:
             if discord_id in mapping["discord_to_short"]:
                 return mapping["discord_to_short"][discord_id]
             
+            # Check if we've exceeded the short ID threshold
+            if mapping["next_id"] > MAX_SHORT_ID:
+                # Warn once per AI when switching to Discord IDs
+                warn_key = f"{server_id}:{channel_id}:{ai_name}"
+                if warn_key not in self._fallback_warned:
+                    log.warning(
+                        f"Short ID limit ({MAX_SHORT_ID}) reached for AI {ai_name} in {server_id}/{channel_id}."
+                        f"Switching to Discord messages IDs."
+                    )
+                    self._fallback_warned[warn_key] = True
+                
+                # Return Discord ID directly (as int)
+                return int(discord_id)
+            
             # Create new mapping
             short_id = mapping["next_id"]
             mapping["discord_to_short"][discord_id] = short_id
             mapping["short_to_discord"][short_id] = discord_id
             mapping["next_id"] += 1
-
             
             return short_id
     

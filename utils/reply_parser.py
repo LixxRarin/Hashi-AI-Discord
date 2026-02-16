@@ -138,7 +138,7 @@ class ReplyParser:
         
         Args:
             message_id: Message ID to validate
-            allow_short_ids: Whether to accept short IDs (1-3 digits)
+            allow_short_ids: Whether to accept short IDs (1-16 digits)
             
         Returns:
             True if ID is valid, False otherwise
@@ -148,23 +148,18 @@ class ReplyParser:
         
         # Check if numeric
         if not message_id.isdigit():
-            func.log.warning(f"Invalid message_id format: {message_id} (not numeric)")
             return False
         
         id_len = len(message_id)
         
-        # Short IDs: 1-3 digits
-        if allow_short_ids and 1 <= id_len <= 3:
+        # Short IDs: 1-16 digits (below Discord's 17-20 digit range)
+        if allow_short_ids and 1 <= id_len <= 16:
             return True
         
         # Full Discord IDs: 17-20 digits (snowflakes)
         if 17 <= id_len <= 20:
             return True
         
-        func.log.warning(
-            f"Invalid message_id length: {message_id} "
-            f"(expected 1-3 for short IDs or 17-20 for Discord IDs, got {id_len})"
-        )
         return False
     
     @staticmethod
@@ -192,7 +187,7 @@ class ReplyParser:
         
         # Convert short ID to Discord ID if needed
         discord_id = message_id
-        if len(message_id) <= 3:  # Short ID
+        if len(message_id) < 17:  # Short ID (Discord IDs are 17-20 digits)
             if not server_id or not ai_name:
                 func.log.error(
                     f"Short ID {message_id} provided but missing server_id or ai_name for conversion"
