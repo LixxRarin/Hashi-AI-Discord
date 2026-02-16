@@ -206,8 +206,9 @@ class CardApplication(commands.Cog):
         ai_name="Name of the AI to apply the card to",
         card_name="Name of the registered card to apply",
         greeting_index="Which greeting to use (0=first_mes, 1+=alternate_greetings)",
-        update_avatar="Update the AI's avatar (webhook mode only)",
-        update_display_name="Update the AI's display name (webhook mode only)"
+        update_avatar="Update the AI's avatar (global for bot, per-webhook for webhook mode)",
+        update_display_name="Update the AI's display name (nickname for bot, webhook name for webhook mode)",
+        clear_history="Clear conversation history and add greeting (default: True)"
     )
     @app_commands.autocomplete(
         ai_name=ai_name_all_autocomplete,
@@ -220,7 +221,8 @@ class CardApplication(commands.Cog):
         card_name: str,
         greeting_index: int = 0,
         update_avatar: bool = True,
-        update_display_name: bool = True
+        update_display_name: bool = True,
+        clear_history: bool = True
     ):
         """Apply a registered character card to an existing AI."""
         await interaction.response.defer(ephemeral=True)
@@ -394,9 +396,9 @@ class CardApplication(commands.Cog):
         current_chat_id = session.get("chat_id", "default")
         existing_history = service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
         
-        # If there's existing history, ask for confirmation
+        # If clear_history is True and there's existing history, ask for confirmation
         confirm_msg = None
-        if existing_history and len(existing_history) > 1:
+        if clear_history and existing_history and len(existing_history) > 1:
             char_name = card_data.get("nickname") or card_data.get("name", card_name)
             greeting_preview = greeting_text[:200] + "..." if len(greeting_text) > 200 else greeting_text
             
@@ -440,12 +442,6 @@ class CardApplication(commands.Cog):
                 await confirm_msg.edit(content="⏱️ Timeout. Card application cancelled.")
                 return
         
-        # Process CBS in greeting
-        from utils.ccv3 import process_cbs
-        char_name = card_data.get("nickname") or card_data.get("name", ai_name)
-        user_name = "{{user}}"
-        greeting_text = process_cbs(greeting_text, char_name, user_name, session)
-        
         # Update session data with new card
         channel_data = func.get_session_data(server_id, found_channel_id)
         if not channel_data or ai_name not in channel_data:
@@ -465,14 +461,21 @@ class CardApplication(commands.Cog):
         channel_data[ai_name]["character_card_name"] = card_name
         channel_data[ai_name]["config"]["greeting_index"] = greeting_index
         
-        # Clear conversation history and add new greeting
-        service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id, keep_greeting=False)
-        service.append_to_history(server_id, found_channel_id, ai_name, "assistant", greeting_text, current_chat_id)
+        # Clear conversation history and add new greeting (only if clear_history=True)
+        if clear_history:
+            # Process CBS in greeting
+            from utils.ccv3 import process_cbs
+            char_name = card_data.get("nickname") or card_data.get("name", ai_name)
+            user_name = "{{user}}"
+            greeting_text = process_cbs(greeting_text, char_name, user_name, session)
+            
+            service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id, keep_greeting=False)
+            service.append_to_history(server_id, found_channel_id, ai_name, "assistant", greeting_text, current_chat_id)
         
         # Save updated session
         await func.update_session_data(server_id, found_channel_id, channel_data)
         
-        # Update avatar and display name if in webhook mode
+        # Update avatar and display name based on mode
         avatar_updated = False
         name_updated = False
         
@@ -498,8 +501,31 @@ class CardApplication(commands.Cog):
                 except Exception as e:
                     func.log.warning(f"Failed to update display name: {e}")
         
+        elif session.get("mode") == "bot":
+            # Update bot nickname and avatar
+            if update_display_name:
+                try:
+                    display_name = card_data.get("nickname") or card_data.get("name", ai_name)
+                    me = interaction.guild.me
+                    await me.edit(nick=display_name)
+                    name_updated = True
+                    func.log.info(f"Updated bot nickname to '{display_name}' in guild {interaction.guild.id}")
+                except Exception as e:
+                    func.log.warning(f"Failed to update bot nickname: {e}")
+            
+            if update_avatar:
+                try:
+                    avatar_bytes = await self.avatar_utils.extract_from_card(cache_path)
+                    if avatar_bytes:
+                        await self.bot.user.edit(avatar=avatar_bytes)
+                        avatar_updated = True
+                        func.log.info(f"Updated bot avatar globally")
+                except Exception as e:
+                    func.log.warning(f"Failed to update bot avatar: {e}")
+        
         # Build success message
         creator = card_data.get("creator", "Unknown")
+        char_name = card_data.get("nickname") or card_data.get("name", ai_name)
         success_msg = f"✅ **Character card applied successfully!**\n\n"
         success_msg += f"**AI:** `{ai_name}`\n"
         success_msg += f"**Card:** `{card_name}`\n"
@@ -508,7 +534,12 @@ class CardApplication(commands.Cog):
         success_msg += f"**Greeting:** #{greeting_index}\n"
         success_msg += f"**Avatar updated:** {'Yes' if avatar_updated else 'No'}\n"
         success_msg += f"**Display name updated:** {'Yes' if name_updated else 'No'}\n\n"
-        success_msg += f"💡 The history has been cleared and the new greeting has been set.\n"
+        
+        if clear_history:
+            success_msg += f"💡 **History cleared:** The conversation history has been cleared and the new greeting has been set.\n"
+        else:
+            success_msg += f"💡 **History preserved:** The conversation history has been kept intact. Only card metadata was updated.\n"
+        
         success_msg += f"Use `/character_info ai_name:{ai_name}` to view card details."
         
         if confirm_msg:
