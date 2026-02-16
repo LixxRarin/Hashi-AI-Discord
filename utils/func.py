@@ -191,7 +191,7 @@ def get_default_ai_config(provider: str = "openai") -> dict:
     Returns the default configuration for an AI session.
     This is the SINGLE source of truth for default configurations.
     
-    IMPORTANT: This function returns ONLY Discord behavioral configurations.
+This function returns only Discord behavioral configurations.
     LLM parameters (max_tokens, temperature, etc.) are now in api_connections.json.
     
     Now uses the new AI Config Manager system which loads defaults from
@@ -249,7 +249,7 @@ def get_default_ai_session(provider: str = "openai", channel_name: str = "defaul
     Returns the complete default session structure for an AI.
     Uses get_default_ai_config() internally to ensure consistency.
     
-    IMPORTANT: This structure is compatible with the new API connections system.
+    This structure is compatible with the new API connections system.
     - api_connection: Reference to connection in api_connections.json
     - model and base_url: REMOVED (now in the connection)
     - config: ONLY behavioral configurations (no LLM parameters)

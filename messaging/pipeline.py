@@ -136,6 +136,45 @@ class MessagePipeline:
                 ai_name,
                 pending_msg
             )
+                      
+            # Get the short ID that was assigned during formatting
+            short_id = await self.processor.short_id_manager.get_short_id(
+                metadata.server_id,
+                metadata.channel_id,
+                ai_name,
+                metadata.message_id
+            )
+            
+            # Resolve reply_to_short_id if this is a reply
+            reply_to_short_id = None
+            if metadata.reply_to_id:
+                reply_to_short_id = await self.processor.short_id_manager.get_short_id(
+                    metadata.server_id,
+                    metadata.channel_id,
+                    ai_name,
+                    metadata.reply_to_id
+                )
+            
+            # Save to conversation history immediately
+            await self.store.add_user_message(
+                metadata.server_id,
+                metadata.channel_id,
+                ai_name,
+                formatted_content,  # Already formatted
+                metadata.message_id,
+                session_with_context.get("chat_id", "default"),
+                author_id=metadata.author_id,
+                author_username=metadata.author_name,
+                author_display_name=metadata.author_display_name,
+                short_id=short_id,
+                attachments=metadata.attachments,
+                stickers=metadata.stickers,
+                reply_to_id=metadata.reply_to_id,
+                reply_to_short_id=reply_to_short_id,
+                reply_to_content=metadata.reply_to_content,
+                reply_to_author=metadata.reply_to_author_name,
+                reply_to_is_bot=metadata.reply_to_is_bot
+            )
         
         return True
     
@@ -332,38 +371,7 @@ class MessagePipeline:
                 if IgnoreParser.is_pure_ignore(response):
                     log.debug(f"AI {ai_name} sent <IGNORE>")
                     
-                    # IMPORTANT: Save to history even when ignoring
-                    # This allows the LLM to learn from its own ignore patterns
-                    
-                    # Save each user message individually (consolidation happens on retrieval)
-                    for msg in pending:
-                        # Resolve reply_to_short_id if this is a reply
-                        reply_to_short_id = None
-                        if msg.reply_to:
-                            reply_to_short_id = await self.processor.short_id_manager.get_short_id(
-                                server_id, channel_id, ai_name, msg.reply_to
-                            )
-                        
-                        # Use the already-formatted content from buffer (don't format again!)
-                        await self.store.add_user_message(
-                            server_id,
-                            channel_id,
-                            ai_name,
-                            msg.content,  # Already formatted in buffer
-                            msg.message_id,
-                            session_with_context.get("chat_id", "default"),
-                            author_id=msg.author_id,
-                            author_username=msg.author_name,
-                            author_display_name=msg.author_display_name,
-                            attachments=msg.attachments,
-                            stickers=msg.stickers,
-                            reply_to_id=msg.reply_to,
-                            reply_to_short_id=reply_to_short_id,
-                            reply_to_content=msg.reply_to_content,
-                            reply_to_author=msg.reply_to_author,
-                            reply_to_is_bot=msg.reply_to_is_bot
-                        )
-                    
+
                     await self.processor.short_id_manager.skip_next_id(
                         server_id, channel_id, ai_name
                     )
@@ -395,38 +403,6 @@ class MessagePipeline:
             discord_ids = []
             await send_callback(display_response, discord_ids)
             
-            for msg in pending:
-                # Get the short ID that was used for this message
-                short_id = await self.processor.short_id_manager.get_short_id(
-                    server_id, channel_id, ai_name, msg.message_id
-                )
-                
-                # Resolve reply_to_short_id if this is a reply
-                reply_to_short_id = None
-                if msg.reply_to:
-                    reply_to_short_id = await self.processor.short_id_manager.get_short_id(
-                        server_id, channel_id, ai_name, msg.reply_to
-                    )
-                
-                await self.store.add_user_message(
-                    server_id,
-                    channel_id,
-                    ai_name,
-                    msg.content,  # Already formatted in buffer
-                    msg.message_id,
-                    session_with_context.get("chat_id", "default"),
-                    author_id=msg.author_id,
-                    author_username=msg.author_name,
-                    author_display_name=msg.author_display_name,
-                    short_id=short_id,  # Store the short ID for persistence
-                    attachments=msg.attachments,
-                    stickers=msg.stickers,
-                    reply_to_id=msg.reply_to,
-                    reply_to_short_id=reply_to_short_id,
-                    reply_to_content=msg.reply_to_content,
-                    reply_to_author=msg.reply_to_author,
-                    reply_to_is_bot=msg.reply_to_is_bot
-                )
             
             formatted_user_content = await self.buffer.get_formatted_content(
                 server_id, channel_id, ai_name

@@ -243,7 +243,6 @@ class OllamaClient(BaseAIClient):
             
             executor = get_executor()
             # Deep copy messages to avoid carrying non-serializable objects
-            # IMPORTANT: Preserve 'images' field for vision support
             current_messages = []
             for msg in messages:
                 new_msg = {
