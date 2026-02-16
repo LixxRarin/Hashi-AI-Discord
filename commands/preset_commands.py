@@ -294,6 +294,7 @@ class PresetCommands(commands.Cog):
         await interaction.response.send_message(embed=embed, ephemeral=False)
     
     @app_commands.command(name="preset_export", description="Export a preset to a shareable file")
+    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(preset_name="Name of the preset to export")
     @app_commands.autocomplete(preset_name=preset_name_autocomplete)
     async def preset_export(
@@ -331,6 +332,7 @@ class PresetCommands(commands.Cog):
             )
     
     @app_commands.command(name="preset_import", description="Import a preset from a file")
+    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
         file="YAML preset file to import",
         preset_name="Optional: rename the preset (leave empty to use original name)"

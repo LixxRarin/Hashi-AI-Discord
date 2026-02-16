@@ -745,6 +745,7 @@ class APIConnections(commands.Cog):
         await interaction.followup.send(success_msg, ephemeral=True)
 
     @app_commands.command(name="show_api", description="Display detailed configuration of a specific API connection")
+    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(connection_name="Name of the API connection to show")
     @app_commands.autocomplete(connection_name=connection_name_autocomplete)
     async def show_api(self, interaction: discord.Interaction, connection_name: str):

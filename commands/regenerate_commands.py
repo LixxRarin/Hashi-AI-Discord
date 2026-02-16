@@ -43,8 +43,9 @@ class RegenerateCommands(commands.Cog):
             return []
     
     @app_commands.command(name="regenerate", description="Regenerate the last AI response")
+    @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
-        ai_name="Name of the AI (optional - will detect from context)"
+        ai_name="Name of the AI"
     )
     @app_commands.autocomplete(ai_name=ai_name_autocomplete)
     async def regenerate(
