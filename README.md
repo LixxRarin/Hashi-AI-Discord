@@ -59,7 +59,8 @@ Project Hashi allows AI personas to interact with users in your Discord server u
 
 
 ### Advanced Features
-- **Tool Calling (Function Calling)** - AI can query Discord information (messages, users, channels, emojis, server stats)
+- **Tool Calling (Function Calling)** - AI can query Discord information (messages, users, channels, emojis, server stats) and manage persistent memory
+- **Persistent Memory System** - AI can save and recall important information across conversations with token-based limits
 - **Lorebook System [BETA]** - Context injection with decorators and conditional activation
 - **CBS Processing** - Curly Braced Syntax support ({{char}}, {{user}}, {{random}}, etc.)
 - **Thinking Models** - Full support for reasoning models
@@ -74,6 +75,7 @@ This version is a complete rewrite with major improvements:
 - **Multi-Provider Architecture** - No longer limited to Character.AI, now supports OpenAI, DeepSeek, and extensible to other providers!
 - **Character Card V3** - Full implementation of the CCv3 specification including lorebooks, assets, decorators, and CBS
 - **Tool Calling System** - AI can query Discord information (messages, users, channels, emojis, server stats) using function calling
+- **Persistent Memory System** - AI can save and recall important information across conversations with independent memory per chat
 - **Intelligent Response System** - LLM-based filter that analyzes conversation context to decide when to respond
 - **Modern Message Pipeline** - Complete rewrite of message handling with better performance and reliability
 - **Configuration System** - Hierarchical configuration with presets, YAML defaults, and hot-reload support
@@ -292,6 +294,7 @@ You can also save configurations as presets and reuse them:
 - `/config_ignore` - Ignore system settings
 - `/config_advanced` - Advanced settings
 - `/config_tool_calling` - Tool calling (function calling) settings
+- `/config_memory` - Persistent memory system settings
 - `/config_help` - Show help for all configuration commands
 
 **Preset Commands:**
