@@ -193,6 +193,162 @@ class ChatService:
                 f"Available providers: {available}"
             )
     
+    def _process_template(self, template: str, variables: Dict[str, str]) -> str:
+        """
+        Process template string replacing {{variable}} with values.
+        
+        Args:
+            template: Template string with {{variable}} placeholders
+            variables: Dictionary of variable names and their values
+            
+        Returns:
+            Processed string with variables replaced
+        """
+        result = template
+        for key, value in variables.items():
+            result = result.replace(f"{{{{{key}}}}}", str(value))
+        return result
+    
+    def _build_context_components(
+        self,
+        config: Dict,
+        card_data: Dict,
+        char_name: str,
+        user_name: str,
+        session: Dict,
+        ai_name: str,
+        chat_id: str,
+        client,
+        model: str,
+        server_id: str,
+        channel_id: str
+    ) -> Dict[str, Optional[str]]:
+        """
+        Build all context components as a dictionary.
+        
+        Args:
+            config: AI configuration
+            card_data: Character card data
+            char_name: Character name
+            user_name: User name for CBS
+            session: Session data
+            ai_name: AI name
+            chat_id: Chat ID
+            client: AI client
+            model: Model name
+            server_id: Server ID
+            channel_id: Channel ID
+            
+        Returns:
+            Dictionary mapping component names to their content (None if disabled/empty)
+        """
+        components = {}
+        
+        # Character description
+        description = card_data.get("description", "")
+        if description:
+            description = process_cbs(description, char_name, user_name, session)
+            components["character_description"] = description
+        else:
+            components["character_description"] = None
+        
+        # System message
+        system_message = config.get("system_message")
+        if system_message:
+            system_message = process_cbs(system_message, char_name, user_name, session)
+            components["system_message"] = system_message
+        else:
+            components["system_message"] = None
+        
+        # Lorebook entries
+        if config.get("use_lorebook", True) and card_data.get("character_book"):
+            history = self.get_ai_history(server_id, channel_id, ai_name, chat_id)
+            recent_messages = [msg.get("content", "") for msg in history[-10:]]
+            
+            lorebook_entries = process_lorebook(
+                session,
+                recent_messages,
+                count_tokens_fn=client.count_tokens,
+                model=model
+            )
+            
+            if lorebook_entries:
+                lorebook_content = "\n\n".join([
+                    process_cbs(entry, char_name, user_name, session)
+                    for entry in lorebook_entries
+                ])
+                components["lorebook_entries"] = lorebook_content
+            else:
+                components["lorebook_entries"] = None
+        else:
+            components["lorebook_entries"] = None
+        
+        # Memory prompt
+        if config.get("enable_memory_system", False):
+            from AI.tools.memory_tools import read_memory_content, _load_memory
+            
+            memory_content = read_memory_content(ai_name, chat_id)
+            memory_data = _load_memory(ai_name, chat_id)
+            memory_count = len(memory_data)
+            
+            # Always inject memory prompt when system is enabled, even if no memories yet
+            if not memory_content:
+                memory_content = "No memories saved yet."
+            
+            # Process memory prompt template
+            memory_prompt_template = config.get("memory_prompt", "{{memory}}")
+            memory_prompt = self._process_template(memory_prompt_template, {
+                "memory": memory_content,
+                "char": char_name,
+                "user": user_name,
+                "memory_count": str(memory_count),
+                "ai_name": ai_name
+            })
+            components["memory_prompt"] = memory_prompt
+            func.log.debug(f"Injected memory prompt for {ai_name}/{chat_id} ({memory_count} entries)")
+        else:
+            components["memory_prompt"] = None
+        
+        # Tool calling prompt
+        tool_config = config.get("tool_calling", {})
+        if tool_config.get("enabled", False):
+            tool_prompt_template = config.get("tool_calling_prompt", "")
+            if tool_prompt_template:
+                tool_prompt = self._process_template(tool_prompt_template, {
+                    "char": char_name,
+                    "user": user_name
+                })
+                components["tool_calling_prompt"] = tool_prompt
+                func.log.debug(f"Injected tool calling prompt for {ai_name}")
+            else:
+                components["tool_calling_prompt"] = None
+        else:
+            components["tool_calling_prompt"] = None
+        
+        # Reply prompt
+        if config.get("enable_reply_system", False):
+            reply_prompt = config.get("reply_prompt")
+            if reply_prompt:
+                reply_prompt = process_cbs(reply_prompt, char_name, user_name, session)
+                components["reply_prompt"] = reply_prompt
+            else:
+                components["reply_prompt"] = None
+        else:
+            components["reply_prompt"] = None
+        
+        # Ignore prompt
+        if config.get("enable_ignore_system", False):
+            ignore_prompt = config.get("ignore_prompt")
+            if ignore_prompt:
+                ignore_prompt = process_cbs(ignore_prompt, char_name, user_name, session)
+                components["ignore_prompt"] = ignore_prompt
+            else:
+                components["ignore_prompt"] = None
+        else:
+            components["ignore_prompt"] = None
+        
+        return components
+    
     def _prepare_messages(
         self,
         user_content: str,
@@ -214,49 +370,39 @@ class ChatService:
         char_name = card_data.get("nickname") or card_data.get("name", ai_name)
         user_name = self._get_user_name_for_cbs(config, message_author)
         
-        description = card_data.get("description", "")
-        if description:
-            description = process_cbs(description, char_name, user_name, session)
-            conv_messages.append({"role": "system", "content": description})
+        # Build all context components
+        components = self._build_context_components(
+            config, card_data, char_name, user_name, session,
+            ai_name, chat_id, client, model, server_id, channel_id
+        )
         
-        system_message = config.get("system_message")
-        if system_message:
-            system_message = process_cbs(system_message, char_name, user_name, session)
-            conv_messages.append({"role": "system", "content": system_message})
+        # Get context order from config (with default fallback)
+        context_order = config.get("context_order", [
+            "character_description", "system_message", "lorebook_entries",
+            "memory_prompt", "tool_calling_prompt", "reply_prompt", "ignore_prompt",
+            "conversation_history", "user_message"
+        ])
         
-        if config.get("enable_reply_system", False):
-            reply_prompt = config.get("reply_prompt")
-            if reply_prompt:
-                reply_prompt = process_cbs(reply_prompt, char_name, user_name, session)
-                conv_messages.append({"role": "system", "content": reply_prompt})
+        # Process context order
+        history_position = None
+        user_message_position = None
+        
+        for i, component_name in enumerate(context_order):
+            if component_name == "conversation_history":
+                history_position = len(conv_messages)
+            elif component_name == "user_message":
+                user_message_position = len(conv_messages)
             else:
-                func.log.warning(f"Reply system enabled but no reply_prompt found for AI {ai_name}")
+                # Add system component if it exists
+                component_content = components.get(component_name)
+                if component_content:
+                    conv_messages.append({"role": "system", "content": component_content})
+                    func.log.debug(f"Injected context: {component_name}")
         
-        if config.get("enable_ignore_system", False):
-            ignore_prompt = config.get("ignore_prompt")
-            if ignore_prompt:
-                ignore_prompt = process_cbs(ignore_prompt, char_name, user_name, session)
-                conv_messages.append({"role": "system", "content": ignore_prompt})
-            else:
-                func.log.warning(f"Ignore system enabled but no ignore_prompt found for AI {ai_name}")
-        
-        if config.get("use_lorebook", True) and card_data.get("character_book"):
-            history = self.get_ai_history(server_id, channel_id, ai_name, chat_id)
-            recent_messages = [msg.get("content", "") for msg in history[-10:]]
-            
-            lorebook_entries = process_lorebook(
-                session,
-                recent_messages,
-                count_tokens_fn=client.count_tokens,
-                model=model
-            )
-            
-            for entry_content in lorebook_entries:
-                entry_content = process_cbs(entry_content, char_name, user_name, session)
-                conv_messages.append({"role": "system", "content": entry_content})
-        
+        # Get conversation history
         history = self.get_ai_history(server_id, channel_id, ai_name, chat_id)
         
+        # Token management
         context_size = llm_params.get("context_size", 4096)
         max_tokens = llm_params.get("max_tokens", 1000)
         
@@ -269,8 +415,11 @@ class ChatService:
             )
             max_tokens = max_allowed_tokens
         
-        reserve = max_tokens + client.count_tokens(user_content, model)
+        # Process user content
+        user_content_processed = process_cbs(user_content, char_name, user_name, session)
+        reserve = max_tokens + client.count_tokens(user_content_processed, model)
         
+        # Calculate tokens used by system messages
         system_tokens = sum(
             client.count_tokens(msg["content"], model)
             for msg in conv_messages
@@ -285,22 +434,41 @@ class ChatService:
                 f"Consider reducing max_tokens or using a model with larger context."
             )
         
+        # Truncate ONLY conversation_history to fit available space
         truncated_history = client.truncate_history_by_tokens(
             history, "", context_size - system_tokens, model, reserve,
             client.count_tokens
         )
-        conv_messages.extend(truncated_history)
         
-        user_content_processed = process_cbs(user_content, char_name, user_name, session)
-        
+        # Check if we should add current message (avoid duplicates)
         should_add_current = True
         if truncated_history and truncated_history[-1]["role"] == "user":
             last_history_content = truncated_history[-1]["content"]
             if user_content_processed in last_history_content or last_history_content in user_content_processed:
                 should_add_current = False
         
+        # Insert history and user message at their configured positions
+        # If positions weren't specified, add them at the end
+        if history_position is not None:
+            # Insert history at specified position
+            for msg in truncated_history:
+                conv_messages.insert(history_position, msg)
+                history_position += 1
+        else:
+            # Add at end if not specified
+            conv_messages.extend(truncated_history)
+        
         if should_add_current:
-            conv_messages.append({"role": "user", "content": user_content_processed})
+            if user_message_position is not None:
+                # Insert at specified position (adjust for history if needed)
+                if history_position is not None and user_message_position > history_position:
+                    user_message_position += len(truncated_history)
+                conv_messages.insert(user_message_position, {"role": "user", "content": user_content_processed})
+            else:
+                # Add at end if not specified
+                conv_messages.append({"role": "user", "content": user_content_processed})
+        
+        func.log.debug(f"Prepared {len(conv_messages)} messages for {ai_name} (context order: {len(context_order)} components)")
         
         return conv_messages
     

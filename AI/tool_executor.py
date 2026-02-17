@@ -37,7 +37,8 @@ class ToolExecutor:
             emoji_tools,
             user_tools,
             channel_tools,
-            server_tools
+            server_tools,
+            memory_tools
         )
         
         # Register message tools
@@ -54,6 +55,13 @@ class ToolExecutor:
         
         # Register server tools
         self.tools["get_server_info"] = server_tools.get_server_info
+        
+        # Register memory tools
+        self.tools["list_memories"] = memory_tools.list_memories
+        self.tools["add_memory"] = memory_tools.add_memory
+        self.tools["update_memory"] = memory_tools.update_memory
+        self.tools["remove_memory"] = memory_tools.remove_memory
+        self.tools["search_memories"] = memory_tools.search_memories
         
         log.info(f"Registered {len(self.tools)} tools: {list(self.tools.keys())}")
     
@@ -296,6 +304,7 @@ class ToolExecutor:
         """
         config = session.get("config", {})
         tool_config = config.get("tool_calling", {})
+        memory_max_tokens = config.get("memory_max_tokens", 1000)
         
         # Validate and fix guild if needed
         # If guild is None or doesn't have members attribute (fake guild),
@@ -317,6 +326,7 @@ class ToolExecutor:
             "bot_client": bot_client,
             "message": message,
             "allowed_tools": tool_config.get("allowed_tools", ["all"]),
+            "memory_max_tokens": memory_max_tokens,
             "session": session
         }
 

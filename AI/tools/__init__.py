@@ -11,7 +11,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_message_info",
-            "description": "Get detailed information about messages in the conversation. Use this when the user asks about specific messages, wants to see message content, or needs information about past messages.",
+            "description": "Automatically retrieve message details when you see: #N format (e.g., #5, #123), Discord message IDs (18-19 digits), or references to 'previous/last/recent messages'. Always use this to get accurate message content - never guess or rely on memory alone.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -22,7 +22,7 @@ TOOL_DEFINITIONS = [
                     },
                     "short_id": {
                         "type": "integer",
-                        "description": "Short ID of the message (1-999) when query_type is 'by_short_id'"
+                        "description": "Short ID of the message when query_type is 'by_short_id'"
                     },
                     "discord_id": {
                         "type": "string",
@@ -57,14 +57,14 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_emoji_info",
-            "description": "Get information about emojis and stickers available in the server. Use this when the user asks about emojis, stickers, figurinhas, wants to search for specific emojis/stickers, or needs to know what emojis/stickers are available.",
+            "description": "Automatically check emojis/stickers when you see: :emoji_name: syntax, mentions of 'emoji', 'sticker', or when suggesting reactions. Use 'search_emoji' for specific names, 'list_server_emojis' to show all available, 'list_server_stickers' for stickers.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query_type": {
                         "type": "string",
                         "enum": ["list_server_emojis", "list_server_stickers", "list_recent_emojis", "search_emoji", "search_sticker"],
-                        "description": "Type of query: 'list_server_emojis' for all server emojis, 'list_server_stickers' for all server stickers/figurinhas, 'list_recent_emojis' for recently created emojis, 'search_emoji' to search emoji by name, 'search_sticker' to search sticker by name"
+                        "description": "Type of query: 'list_server_emojis' for all server emojis, 'list_server_stickers' for all server stickers, 'list_recent_emojis' for recently created emojis, 'search_emoji' to search emoji by name, 'search_sticker' to search sticker by name"
                     },
                     "search_term": {
                         "type": "string",
@@ -83,7 +83,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_user_info",
-            "description": "Get information about Discord users. When user mentions someone (<@ID>) or asks about SPECIFIC user details (roles, join date, permissions), you MUST use 'by_id' with user_identifier=ID and include_fields=['all']. The 'list_all' query returns ONLY basic info (username, display_name, ID) - it does NOT include roles, join dates, or other details. Examples: User asks 'Who is <@123>?' or 'What roles does John have?' → use 'by_id' or 'search_any' then 'by_id', with include_fields=['all'].",
+            "description": "Automatically retrieve user details when you see: <@ID> mentions, user names referenced, or questions about users. For <@ID> or detailed info (roles, join date), ALWAYS use query_type='by_id' with include_fields=['all']. For name searches, use 'search_any'. Never guess user details - always fetch them.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -121,7 +121,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_channel_info",
-            "description": "Get information about Discord channels in the server. Use this when the user asks about channels, wants to see channel details, permissions, or list available channels.",
+            "description": "Automatically fetch channel info when you see: #channel-name mentions, 'this channel', 'current channel', or questions about channel permissions/settings. Use 'current_channel' for the active channel, 'by_name' for specific channels.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -151,7 +151,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_server_info",
-            "description": "Get information about the Discord server (guild). Use this when the user asks about server statistics, features, roles, boost status, or general server information.",
+            "description": "Automatically fetch server data when discussing: member counts, server features, roles, boost status, or server-wide topics. Use 'statistics' for counts, 'roles' for role lists, 'features' for server capabilities.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -170,6 +170,90 @@ TOOL_DEFINITIONS = [
                     }
                 },
                 "required": ["query_type"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_memories",
+            "description": "Check your saved memories before answering questions about past conversations, user preferences, or when asked 'do you remember...'. Use proactively to provide accurate, personalized responses.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "add_memory",
+            "description": "IMMEDIATELY save important info when user shares: preferences, personal facts, corrections, or anything they want you to remember. Don't wait - save it right away so you can recall it later.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "The information to remember. Be concise but clear."
+                    }
+                },
+                "required": ["content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_memory",
+            "description": "Update memories when user corrects previous information or when details change. First use list_memories to find the memory_id, then update it with new content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "integer",
+                        "description": "ID of the memory to update (from list_memories)"
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "New content for the memory"
+                    }
+                },
+                "required": ["memory_id", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "remove_memory",
+            "description": "Delete memories that are outdated, incorrect, or when user asks you to forget something. First use list_memories to find the memory_id, then remove it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_id": {
+                        "type": "integer",
+                        "description": "ID of the memory to remove (from list_memories)"
+                    }
+                },
+                "required": ["memory_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_memories",
+            "description": "Search your memories by keyword before answering questions about user preferences, past topics, or when you need to recall specific information. More targeted than list_memories.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search term or keyword to look for in your memories"
+                    }
+                },
+                "required": ["query"]
             }
         }
     }

@@ -14,15 +14,17 @@ import json
 from pathlib import Path
 from typing import Dict, Any, Optional
 from ruamel.yaml import YAML
+from packaging import version
 
 import utils.func as func
+from utils.config_updater import merge_ordered
 
 # Set up ruamel.yaml in round-trip mode (preserves order and comments)
 yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.1"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.2"
 # DEFAULT AI CONFIGURATION
 # This file contains all default configuration values for AI behavior.
 # Edit these values to change the default behavior for all new AIs.
@@ -90,31 +92,42 @@ response_filter_timeout: 5.0
 # Reply System - AI can reply to specific messages
 enable_reply_system: false
 reply_prompt: |
-  Reply Syntax:
+  Reply Syntax: <REPLY:ID> [your response]
   
-  You CAN reply to specific messages using: <REPLY:ID> [your response]
+  WHEN TO USE REPLIES (Be proactive):
   
-  CONTEXT: When users reply to messages, you'll see quoted content like:
+  ALWAYS use <REPLY:ID> when:
+  • Multiple people are actively talking (group chat) for clarity
+  • Responding to a message that's not the most recent one
+  • Answering a specific question from someone
+  • Continuing a conversation thread from earlier messages
+  • Any ambiguity about who/what you're responding to
+  
+  ONLY skip replies when:
+  • True 1:1 conversation (just you and one person, back-and-forth)
+  • Making a general statement to everyone
+  • Starting a new topic
+  
+  MENTIONS: Use @username when:
+  • You want to get someone's attention
+  • Replying to them (combine with <REPLY:ID>)
+  • Referring to someone in your message
+  
+  Example: '<REPLY:5> @user This is the user who was asking about XXXX.'
+  
+  CONTEXT: You'll see quoted content showing what users replied to:
   > Author: original message (ID #1)
   [time] User (@user) #2 → #1: their reply
   
-  This quote shows what they're replying to, giving you full context.
-  
-  You choose when it's useful:
-  - Want to reference a specific message? Use it.
-  - Multiple users and you want clarity? Use it.
-  - Natural 1:1 conversation flow? Skip it.
-  
   Rules:
-  1. Never use the same <REPLY:id> more than once per response
-  2. Line breaks (\n) send separate messages, keep single replies on one line
-  3. Use REPLY tags only when necessary to avoid ambiguity.
+  1. Never use the same <REPLY:id> twice in one response
+  2. Line breaks (\n) send separate messages
+  3. When in doubt, USE the reply - it's better to over-use than under-use
   
   EXAMPLES:
-  - '<REPLY:1> Hey!\n<REPLY:2> Hello to you too!'
-  - '<REPLY:3> Cats are amazing! They sleep 16h a day and are very independent.'
-  - Or just: '@everyone Hey everyone, what's up?' (no reply needed)
-  - 'Message 1!\nMessage 2!'
+  • Group chat: '<REPLY:3> Hello, user.' (ALWAYS reply in groups)
+  • Older message: '@John about your question earlier, yes!'
+  • General: 'Hey everyone! How's it going?' (no reply needed)
 
 # Ignore System, LLM decides during generation to skip responding
 enable_ignore_system: false
@@ -139,19 +152,98 @@ sleep_mode_enabled: false
 sleep_mode_threshold: 5
 
 # Tool Calling, LLM function calling for enhanced capabilities
-# Allows the AI to call tools like get_message_info, get_emoji_info, get_user_info
+# Allows the AI to call tools like get_message_info, get_emoji_info, get_user_info, and memory tools
+# Memory system requires tool_calling.enabled: true to work
 tool_calling:
   enabled: false
   allowed_tools: ["all"]
 
+# Memory System. Persistent memory across conversations
+# Allows the AI to save, read, update, and remove information using memory tools
+# REQUIRES: tool_calling.enabled: true
+# When enabled, saved memories are injected into the prompt and LLM can manage them
+enable_memory_system: false
+memory_max_tokens: 1500  # Maximum tokens allowed in memory
+
+# Memory System Prompt Template
+# Variables: {{memory}}, {{char}}, {{user}}, {{memory_count}}, {{ai_name}}
+memory_prompt: |
+  Your Persistent Memory:
+  
+  {{memory}}
+  
+  You can manage your memories using: list_memories, add_memory, update_memory, remove_memory, search_memories
+
+# Tool Calling Instructions
+# Helps the LLM understand when and how to use tools proactively
+# Variables: {{char}}, {{user}}
+tool_calling_prompt: |
+  # Use Tools Proactively
+  
+  You MUST use tools automatically when you encounter these patterns - don't wait to be asked:
+  
+  - #N or message IDs → get_message_info (always check actual message content)
+  - <@ID> or user names → get_user_info (get real user details, don't guess)
+  - :emoji: or "sticker" → get_emoji_info
+  - #channel or "this channel" → get_channel_info
+  - "server", "members", "roles" → get_server_info
+  - Questions about past → search_memories or list_memories (check before answering)
+  
+  CRITICAL - Memory Management (Save/Update IMMEDIATELY):
+  
+  ALWAYS save NEW information:
+  • Preferences: "I prefer X", "I like Y" → add_memory
+  • Personal facts: "I'm a developer", "My name is X" → add_memory
+  • Important context: "I'm working on X", "We have 50 members" → add_memory
+  
+  ALWAYS update CHANGED information:
+  • Status updates: "We reached 100 members" (if you had ~100 saved) → update_memory
+  • Corrections: "Actually I prefer Y" (if you had X saved) → update_memory
+  • Progress: "I finished project X" (if you had "working on X") → update_memory
+  • Any information that supersedes what you have saved → update_memory
+  
+  Process: When user shares info, FIRST check memories (list_memories/search_memories), THEN:
+  - If it's new → add_memory
+  - If it updates existing info → update_memory
+  - If it contradicts saved info → update_memory
+  
+  Examples:
+  • "I prefer dark mode" → add_memory(content="User prefers dark mode")
+  • "We reached 100 members" → search_memories("members") → update_memory(memory_id=X, content="Server has 100 members")
+  • "I finished the Python project" → search_memories("Python project") → update_memory
+  • "Actually I'm a JavaScript developer" → search_memories("developer") → update_memory
+  
+  Key rule: Information changes over time. Keep your memory current by updating it automatically.
+
+# Context Injection Order
+# Customize the order in which context components are sent to the LLM
+# Components are only included if their respective systems are enabled
+# Available components:
+#   - character_description: Character card description/personality
+#   - system_message: Main system message
+#   - lorebook_entries: Lorebook/world info entries
+#   - memory_prompt: Persistent memory content
+#   - tool_calling_prompt: Tool usage instructions
+#   - reply_prompt: Reply system instructions
+#   - ignore_prompt: Ignore system instructions
+#   - conversation_history: Past messages in the conversation
+#   - user_message: Current user message
+context_order:
+  - character_description
+  - lorebook_entries
+  - memory_prompt
+  - tool_calling_prompt
+  - reply_prompt
+  - ignore_prompt
+  - conversation_history
+  - user_message
+  - system_message
+
 # Advanced Settings
 system_message: |
   You are in a Discord chat. Keep responses short and casual, match the conversation's vibe.
-
   Respond proportionally. Short question = short answer. Don't write essays.
-
   Discord style: casual, quick messages. Use @username to mention, :emoji_name: for custom emojis.
-
   Respond naturally as your character, only your response, without the user format syntax.
 """
 
@@ -188,6 +280,7 @@ DISCORD_CHAT_PRESET_OVERRIDES = {
     "error_handling_mode": "friendly",
     "save_errors_in_history": True,
     "send_errors_to_chat": True,
+    "enable_memory_system": True,
     "tool_calling": {
         "enabled": True,
         "allowed_tools": ["all"]
@@ -248,6 +341,72 @@ class AIConfigManager:
         self.config_dir.mkdir(exist_ok=True)
         self.presets_dir.mkdir(exist_ok=True)
     
+    def _load_defaults_file(self):
+        """
+        Load the existing defaults.yml file.
+        
+        Returns:
+            The parsed configuration if the file exists and is valid,
+            otherwise returns None.
+        """
+        if not self.defaults_file.exists():
+            return None
+        try:
+            with open(self.defaults_file, "r", encoding="utf-8") as f:
+                return yaml.load(f)
+        except Exception as e:
+            func.log.error(f"Error loading defaults.yml: {e}")
+            return None
+    
+    def _is_version_outdated(self, user_config):
+        """
+        Check if the user configuration is outdated compared to the default configuration.
+        
+        Args:
+            user_config: The loaded user configuration
+            
+        Returns:
+            True if the user's version is less than the default version, False otherwise.
+        """
+        if user_config is None:
+            return False
+        
+        user_version = user_config.get("version")
+        default_version = self.default_config.get("version")
+        
+        if user_version is None:
+            func.log.warning("No version found in defaults.yml. Assuming outdated.")
+            return True
+        
+        try:
+            return version.parse(user_version) < version.parse(default_version)
+        except Exception as e:
+            func.log.error(f"Error comparing versions: {e}")
+            return False
+    
+    def _merge_configs(self, user_config):
+        """
+        Merge the user configuration with the default configuration.
+        
+        This method:
+          - Preserves the order of keys as defined in the default configuration.
+          - Discards any extra keys that are not present in the default configuration.
+          - Updates the root "version" key to match the default configuration.
+          
+        Args:
+            user_config: The loaded user configuration
+            
+        Returns:
+            Merged configuration
+        """
+        if user_config is None:
+            return self.default_config
+        
+        merged = merge_ordered(user_config, self.default_config)
+        # Ensure the "version" key is updated to the default version
+        merged["version"] = self.default_config.get("version")
+        return merged
+    
     def _merge_config(self, overrides: Dict[str, Any]) -> Dict[str, Any]:
         """
         Merge default configuration with specific overrides.
@@ -300,18 +459,36 @@ class AIConfigManager:
         """
         Initialize configuration system.
         Creates default files and builtin presets if they don't exist.
+        Checks and updates defaults.yml if version is outdated.
         """
         self._ensure_directories()
         
+        # Load existing defaults.yml if it exists
+        user_config = self._load_defaults_file()
+        
         # Create defaults.yml if it doesn't exist
-        if not self.defaults_file.exists():
-            func.log.info("Creating default AI configuration file...")
+        if user_config is None:
+            func.log.warning(f"Configuration file '{self.defaults_file}' not found. Creating a new one...")
             try:
                 with open(self.defaults_file, "w", encoding="utf-8") as f:
                     yaml.dump(self.default_config, f)
                 func.log.info(f"Created {self.defaults_file}")
             except Exception as e:
-                func.log.error(f"Error creating defaults file: {e}")
+                func.log.critical(f"Failed to create defaults file: {e}")
+        # Update defaults.yml if version is outdated
+        elif self._is_version_outdated(user_config):
+            func.log.warning(
+                f"Updating configuration '{self.defaults_file}' to version {self.default_config.get('version')}"
+            )
+            updated_config = self._merge_configs(user_config)
+            try:
+                with open(self.defaults_file, "w", encoding="utf-8") as f:
+                    yaml.dump(updated_config, f)
+                func.log.info(f"Configuration file '{self.defaults_file}' updated successfully!")
+            except Exception as e:
+                func.log.critical(f"Failed to update configuration file: {e}")
+        else:
+            func.log.info(f"Configuration file '{self.defaults_file}' is up-to-date.")
         
         # Create builtin presets
         for preset_key in BUILTIN_PRESETS.keys():

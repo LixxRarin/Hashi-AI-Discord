@@ -753,6 +753,88 @@ class ConfigCommands(commands.Cog):
             ephemeral=True
         )
     
+    @app_commands.command(name="config_memory", description="Configure persistent memory system settings")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(
+        ai_name="Name of the AI to configure",
+        enabled="Enable or disable persistent memory system",
+        max_tokens="Maximum tokens allowed in memory (default: 1000)"
+    )
+    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
+    async def config_memory(
+        self,
+        interaction: discord.Interaction,
+        ai_name: str,
+        enabled: bool = None,
+        max_tokens: int = None
+    ):
+        """Configure memory system settings for an AI."""
+        server_id = str(interaction.guild.id)
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        
+        if not found_ai_data:
+            await interaction.response.send_message(f"❌ AI '{ai_name}' not found.", ephemeral=True)
+            return
+        
+        found_channel_id, session = found_ai_data
+        if session is None:
+            await interaction.response.send_message(f"❌ AI '{ai_name}' session data is invalid.", ephemeral=True)
+            return
+        
+        config = session.setdefault("config", {})
+        changes = []
+        
+        # Check if tool_calling is enabled for warning
+        tool_config = config.get("tool_calling", {})
+        tool_calling_enabled = tool_config.get("enabled", False)
+        show_warning = False
+        
+        if enabled is not None:
+            if enabled and not tool_calling_enabled:
+                show_warning = True
+            
+            config["enable_memory_system"] = enabled
+            changes.append(f"• Memory System: `{enabled}`")
+        
+        if max_tokens is not None:
+            if max_tokens < 100 or max_tokens > 10000:
+                await interaction.response.send_message(
+                    "❌ Max tokens must be between 100 and 10000.",
+                    ephemeral=True
+                )
+                return
+            config["memory_max_tokens"] = max_tokens
+            changes.append(f"• Max Tokens: `{max_tokens}`")
+        
+        if not changes:
+            await interaction.response.send_message("❌ No changes specified.", ephemeral=True)
+            return
+        
+        channel_data = func.get_session_data(server_id, found_channel_id)
+        channel_data[ai_name] = session
+        await func.update_session_data(server_id, found_channel_id, channel_data)
+        
+        # Build response message
+        response = f"✅ **Memory system updated for '{ai_name}':**\n" + "\n".join(changes)
+        
+        # Add warning if tool calling is not enabled
+        if show_warning:
+            response += "\n\n⚠️ **Warning:** Memory system requires tool calling to be enabled!"
+            response += "\n\nMemory tools won't work without tool calling. Enable it with:"
+            response += f"\n`/config_tool_calling ai_name:{ai_name} enabled:True`"
+        
+        # Add helpful info
+        if enabled:
+            response += "\n\n💡 **Memory Tools Available:**"
+            response += "\n• `list_memories` - View saved memories"
+            response += "\n• `add_memory` - Save new information"
+            response += "\n• `update_memory` - Modify existing memory"
+            response += "\n• `remove_memory` - Delete specific memory"
+            response += "\n• `search_memories` - Search by keyword"
+            response += "\n\n📁 Memory files: `data/memory/{ai_name}_{{chat_id}}.json`"
+        
+        await interaction.response.send_message(response, ephemeral=True)
+    
     @app_commands.command(name="view_tool_config", description="View current tool calling configuration for an AI")
     @app_commands.describe(ai_name="Name of the AI to view configuration for")
     @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)

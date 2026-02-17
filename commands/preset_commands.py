@@ -350,6 +350,20 @@ class PresetCommands(commands.Cog):
                     inline=True
                 )
         
+        # Memory System
+        memory_settings = []
+        if "enable_memory_system" in preset_config:
+            memory_settings.append(f"• Enabled: `{preset_config['enable_memory_system']}`")
+        if "memory_max_tokens" in preset_config:
+            memory_settings.append(f"• Max Tokens: `{preset_config['memory_max_tokens']}`")
+        
+        if memory_settings:
+            embed.add_field(
+                name="🧠 Memory System",
+                value="\n".join(memory_settings),
+                inline=True
+            )
+        
         # Character Card Settings
         card_settings = []
         if "user_syntax_replacement" in preset_config:
@@ -364,6 +378,36 @@ class PresetCommands(commands.Cog):
                 name="📇 Character Card",
                 value="\n".join(card_settings),
                 inline=True
+            )
+        
+        # Context & Prompts
+        context_prompts = []
+        
+        if "tool_calling_prompt" in preset_config:
+            prompt = preset_config["tool_calling_prompt"]
+            if prompt:
+                preview = prompt.strip()[:100] + "..." if len(prompt.strip()) > 100 else prompt.strip()
+                context_prompts.append(f"• Tool Calling Prompt: `{preview}`")
+        
+        if "memory_prompt" in preset_config:
+            prompt = preset_config["memory_prompt"]
+            if prompt:
+                preview = prompt.strip()[:100] + "..." if len(prompt.strip()) > 100 else prompt.strip()
+                context_prompts.append(f"• Memory Prompt: `{preview}`")
+        
+        if "context_order" in preset_config:
+            order = preset_config["context_order"]
+            if order and isinstance(order, list):
+                order_str = " → ".join(order[:5])
+                if len(order) > 5:
+                    order_str += f" (+{len(order)-5} more)"
+                context_prompts.append(f"• Context Order: `{order_str}`")
+        
+        if context_prompts:
+            embed.add_field(
+                name="📋 Context & Prompts",
+                value="\n".join(context_prompts),
+                inline=False
             )
         
         # Text Processing & Error Handling

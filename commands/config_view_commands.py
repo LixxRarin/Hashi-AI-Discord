@@ -44,6 +44,7 @@ class ConfigViewCommands(commands.Cog):
         app_commands.Choice(name="Response Filter", value="filter"),
         app_commands.Choice(name="Reply System", value="reply"),
         app_commands.Choice(name="Tool Calling", value="tools"),
+        app_commands.Choice(name="Memory System", value="memory"),
         app_commands.Choice(name="Sleep Mode", value="sleep"),
         app_commands.Choice(name="Advanced", value="advanced")
     ])
@@ -114,7 +115,7 @@ class ConfigViewCommands(commands.Cog):
         
         # Display Settings
         display_settings = []
-        display_settings.append(f"• Display Name: `{config.get('use_chub_ai_display_name', 'N/A')}`")
+        display_settings.append(f"• Display Name: `{config.get('use_card_ai_display_name', 'N/A')}`")
         display_settings.append(f"• Send Greeting: `{config.get('send_the_greeting_message', 'N/A')}`")
         display_settings.append(f"• Line by Line: `{config.get('send_message_line_by_line', 'N/A')}`")
         embed.add_field(name="🖥️ Display", value="\n".join(display_settings), inline=True)
@@ -153,6 +154,11 @@ class ConfigViewCommands(commands.Cog):
         tool_enabled = tool_config.get('enabled', False)
         tool_status = "✅ Enabled" if tool_enabled else "❌ Disabled"
         embed.add_field(name="🔧 Tool Calling", value=tool_status, inline=True)
+        
+        # Memory System
+        memory_enabled = config.get('enable_memory_system', False)
+        memory_status = "✅ Enabled" if memory_enabled else "❌ Disabled"
+        embed.add_field(name="🧠 Memory System", value=memory_status, inline=True)
         
         # Sleep Mode
         sleep_enabled = config.get('sleep_mode_enabled', False)
@@ -365,6 +371,57 @@ class ConfigViewCommands(commands.Cog):
             
             embed.set_footer(text=f"Tool calling allows AI to query information dynamically • {len(TOOL_DEFINITIONS)} tools available")
         
+        elif category == "memory":
+            memory_enabled = config.get('enable_memory_system', False)
+            max_tokens = config.get('memory_max_tokens', 1000)
+            
+            embed.add_field(
+                name="Memory System Enabled",
+                value=f"`{memory_enabled}`\nPersistent memory across conversations",
+                inline=False
+            )
+            embed.add_field(
+                name="Maximum Tokens",
+                value=f"`{max_tokens}` tokens\nMaximum tokens allowed in memory (counted with tiktoken)",
+                inline=False
+            )
+            
+            # Check if tool calling is enabled
+            tool_config = config.get('tool_calling', {})
+            tool_calling_enabled = tool_config.get('enabled', False)
+            
+            if memory_enabled and not tool_calling_enabled:
+                embed.add_field(
+                    name="⚠️ Warning",
+                    value="Memory system is enabled but tool calling is disabled!\nMemory tools won't work without tool calling.",
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="📋 Memory Tools",
+                value=(
+                    "• `list_memories` - View saved memories\n"
+                    "• `add_memory` - Save new information\n"
+                    "• `update_memory` - Modify existing memory\n"
+                    "• `remove_memory` - Delete specific memory\n"
+                    "• `search_memories` - Search by keyword"
+                ),
+                inline=False
+            )
+            
+            embed.add_field(
+                name="💡 How It Works",
+                value=(
+                    "1. LLM can save important information using memory tools\n"
+                    "2. Saved memories are injected into the prompt automatically\n"
+                    "3. Each chat has its own independent memory\n"
+                    "4. Memory files: `data/memory/{ai_name}_{chat_id}.json`"
+                ),
+                inline=False
+            )
+            
+            embed.set_footer(text="Use /config_memory to modify these settings • Requires tool_calling.enabled: true")
+        
         elif category == "sleep":
             embed.add_field(
                 name="Sleep Mode Enabled",
@@ -426,6 +483,17 @@ class ConfigViewCommands(commands.Cog):
                 value=f"`{config.get('auto_add_generation_reactions', False)}`\nAdd ◀️▶️🔄 reactions automatically",
                 inline=False
             )
+            
+            # Context Order
+            context_order = config.get('context_order', [])
+            if context_order and isinstance(context_order, list):
+                order_display = "\n".join([f"{i+1}. `{component}`" for i, component in enumerate(context_order)])
+                embed.add_field(
+                    name="📋 Context Injection Order",
+                    value=order_display,
+                    inline=False
+                )
+            
             embed.set_footer(text="Use /config_advanced to modify these settings")
         
         return embed
@@ -440,6 +508,7 @@ class ConfigViewCommands(commands.Cog):
             "filter": "Response Filter",
             "reply": "Reply System",
             "tools": "Tool Calling",
+            "memory": "Memory System",
             "ignore": "Ignore System",
             "sleep": "Sleep Mode",
             "advanced": "Advanced Settings"
@@ -476,6 +545,7 @@ class ConfigViewCommands(commands.Cog):
                 "`/config_ignore` - Ignore system settings\n"
                 "`/config_sleep` - Sleep mode settings\n"
                 "`/config_tool_calling` - Tool calling (function calling) settings\n"
+                "`/config_memory` - Persistent memory system settings\n"
                 "`/config_advanced` - Advanced settings"
             ),
             inline=False

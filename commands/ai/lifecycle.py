@@ -687,6 +687,15 @@ class AILifecycle(commands.Cog):
         await service.clear_ai_history(server_id, found_channel_id, ai_name, chat_id=None, keep_greeting=False)
         func.log.info(f"Cleared conversation history for AI '{ai_name}'")
         
+        # Clear memory files
+        try:
+            from AI.tools.memory_tools import delete_memory_file
+            deleted = delete_memory_file(ai_name)  # Deletes all chats for this AI
+            if deleted:
+                func.log.info(f"Deleted memory files for AI '{ai_name}'")
+        except Exception as e:
+            func.log.warning(f"Failed to delete memory files for AI '{ai_name}': {e}")
+        
         # Clear ResponseManager data
         try:
             if hasattr(self.bot, 'message_pipeline'):
@@ -724,6 +733,7 @@ class AILifecycle(commands.Cog):
             f"**Deleted data:**\n"
             f"• Session configuration\n"
             f"• Conversation history (all chats)\n"
+            f"• Memory files\n"
             f"• Response manager data (generations)\n"
             f"• Message buffer\n"
             f"• Webhook (if applicable)\n\n"
