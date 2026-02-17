@@ -95,30 +95,42 @@ class HistoryManager(commands.Cog):
             
             if str(reaction.emoji) == "✅":
                 # Clear the history
-                service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
+                await service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
                 
-                await confirm_msg.edit(
-                    content=f"✅ **History Cleared Successfully**\n\n"
-                    f"**AI:** {ai_name}\n"
-                    f"**Channel:** <#{found_channel_id}>\n"
-                    f"**Cleared by:** {interaction.user.mention}\n\n"
-                    f"The conversation history has been permanently deleted."
-                )
-                await confirm_msg.clear_reactions()
+                try:
+                    await confirm_msg.edit(
+                        content=f"✅ **History Cleared Successfully**\n\n"
+                        f"**AI:** {ai_name}\n"
+                        f"**Channel:** <#{found_channel_id}>\n"
+                        f"**Cleared by:** {interaction.user.mention}\n\n"
+                        f"The conversation history has been permanently deleted."
+                    )
+                    await confirm_msg.clear_reactions()
+                except discord.NotFound:
+                    # Message was deleted, that's okay! :)
+                    pass
                 func.log.info(f"Cleared history for AI '{ai_name}' in server {server_id}")
             else:
-                await confirm_msg.edit(
-                    content=f"❌ **Clear History Cancelled**\n\n"
-                    f"No changes were made to the conversation history."
-                )
-                await confirm_msg.clear_reactions()
+                try:
+                    await confirm_msg.edit(
+                        content=f"❌ **Clear History Cancelled**\n\n"
+                        f"No changes were made to the conversation history."
+                    )
+                    await confirm_msg.clear_reactions()
+                except discord.NotFound:
+                    # Message was deleted, that's okay! :)
+                    pass
                 
         except TimeoutError:
-            await confirm_msg.edit(
-                content=f"⏱️ **Clear History Timed Out**\n\n"
-                f"No reaction received within 60 seconds. No changes were made."
-            )
-            await confirm_msg.clear_reactions()
+            try:
+                await confirm_msg.edit(
+                    content=f"⏱️ **Clear History Timed Out**\n\n"
+                    f"No reaction received within 60 seconds. No changes were made."
+                )
+                await confirm_msg.clear_reactions()
+            except discord.NotFound:
+                # Message was deleted, that's okay! :)
+                pass
 
 
 async def setup(bot):

@@ -217,7 +217,7 @@ class ResponseManager:
         
         if to_remove:
             log.info(
-                f"[RESPONSE MANAGER CLEANUP] Removed {len(to_remove)} inactive response states "
+                f"Removed {len(to_remove)} inactive response states "
                 f"(inactive > {self._max_inactive_time/3600:.1f} hours)"
             )
     
