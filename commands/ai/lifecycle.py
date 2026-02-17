@@ -475,8 +475,8 @@ class AILifecycle(commands.Cog):
         
         session["api_connection"] = api_connection
         session["mode"] = mode
-        session["chat_id"] = "default"
         session["last_message_time"] = time.time()
+        # chat_id will be set by initialize_session_messages -> new_chat_id
         
         session["character_card"] = {
             "spec": character_card.spec,
@@ -486,12 +486,13 @@ class AILifecycle(commands.Cog):
             "card_url": card_url if card_url else "local://hashi.png"
         }
         
-        # Override greeting_index regardless of preset
+        # Set greeting_index
         session["config"]["greeting_index"] = greeting_index
-        session["config"]["send_the_greeting_message"] = True
         
+        # send_the_greeting_message is controlled by preset/defaults.yml
         preset_info = f" with preset '{preset}'" if preset else ""
-        func.log.info(f"Created session for AI '{ai_name}'{preset_info} with greeting_index={greeting_index}")
+        send_greeting = session["config"].get("send_the_greeting_message", True)
+        func.log.info(f"Created session for AI '{ai_name}'{preset_info} with greeting_index={greeting_index}, send_greeting={send_greeting}")
         
         return session
     
@@ -519,7 +520,7 @@ class AILifecycle(commands.Cog):
         
         service = get_service()
         greetings = await service.initialize_session_messages(
-            session, server_id, channel_id_str, session["chat_id"]
+            session, server_id, channel_id_str, "default"
         )
         
         messages_sent = False
@@ -584,7 +585,7 @@ class AILifecycle(commands.Cog):
         
         service = get_service()
         greetings = await service.initialize_session_messages(
-            session, server_id, channel_id_str, session["chat_id"]
+            session, server_id, channel_id_str, "default"
         )
         
         messages_sent = False
@@ -641,7 +642,7 @@ class AILifecycle(commands.Cog):
             success_msg += f"**Configuration:** Default settings\n"
         
         success_msg += "\n🎭 Character card loaded successfully!\n"
-        success_msg += f"💡 Use `/select_greeting` to change greetings or `/config` for more options."
+        success_msg += f"💡 Use `/select_greeting` to change greetings or `/config_*` for more options."
         
         await interaction.followup.send(success_msg, ephemeral=True)
     
