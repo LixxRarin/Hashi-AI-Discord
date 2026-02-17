@@ -190,3 +190,34 @@ class AutocompleteHelpers:
         except Exception as e:
             func.log.error(f"Error in chat_id autocomplete: {e}")
             return []
+    
+    @staticmethod
+    async def preset_name(
+        interaction: discord.Interaction,
+        current: str
+    ) -> List[app_commands.Choice[str]]:
+        """
+        Autocomplete for preset names.
+        
+        Shows all available configuration presets with their descriptions.
+        """
+        try:
+            from utils.ai_config_manager import get_ai_config_manager
+            config_manager = get_ai_config_manager()
+            presets = config_manager.list_presets()
+            
+            if not presets:
+                return []
+            
+            choices = []
+            for preset in presets:
+                name = preset["name"]
+                if current.lower() in name.lower():
+                    description = preset.get("description", "")
+                    display = f"{name} - {description[:40]}" if description else name
+                    choices.append(app_commands.Choice(name=display[:100], value=name))
+            
+            return choices[:25]
+        except Exception as e:
+            func.log.error(f"Error in preset_name autocomplete: {e}")
+            return []

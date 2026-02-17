@@ -18,12 +18,12 @@ class PresetCommands(commands.Cog):
         self.bot = bot
         self.config_manager = get_ai_config_manager()
     
-    async def ai_name_all_autocomplete(
+    async def ai_name_autocomplete(
         self,
         interaction: discord.Interaction,
         current: str
     ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for all AI names."""
+        """Autocomplete for AI names."""
         return await AutocompleteHelpers.ai_name_all(interaction, current)
     
     async def preset_name_autocomplete(
@@ -31,26 +31,8 @@ class PresetCommands(commands.Cog):
         interaction: discord.Interaction,
         current: str
     ) -> list[app_commands.Choice[str]]:
-        """Autocomplete function for preset names."""
-        try:
-            presets = self.config_manager.list_presets()
-            
-            if not presets:
-                return []
-            
-            choices = []
-            for preset in presets:
-                name = preset["name"]
-                if current.lower() in name.lower():
-                    description = preset.get("description", "")
-                    author = preset.get("author", "unknown")
-                    display = f"{name} - {description[:30]}" if description else f"{name} (by {author})"
-                    choices.append(app_commands.Choice(name=display[:100], value=name))
-            
-            return choices[:25]
-        except Exception as e:
-            func.log.error(f"Error in preset_name_autocomplete: {e}")
-            return []
+        """Autocomplete for preset names."""
+        return await AutocompleteHelpers.preset_name(interaction, current)
     
     @app_commands.command(name="preset_save", description="Save current AI configuration as a preset")
     @app_commands.default_permissions(administrator=True)
@@ -59,7 +41,7 @@ class PresetCommands(commands.Cog):
         preset_name="Name for the preset (will be used to load it later)",
         description="Optional description of what this preset is for"
     )
-    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
+    @app_commands.autocomplete(ai_name=ai_name_autocomplete)
     async def preset_save(
         self,
         interaction: discord.Interaction,
@@ -131,7 +113,7 @@ class PresetCommands(commands.Cog):
         ai_name="Name of the AI to apply the preset to"
     )
     @app_commands.autocomplete(preset_name=preset_name_autocomplete)
-    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
+    @app_commands.autocomplete(ai_name=ai_name_autocomplete)
     async def preset_apply(
         self,
         interaction: discord.Interaction,
@@ -254,42 +236,177 @@ class PresetCommands(commands.Cog):
         preset_name: str
     ):
         """Show detailed information about a preset."""
-        preset_config = self.config_manager.load_preset(preset_name)
+        from pathlib import Path
+        from ruamel.yaml import YAML
         
-        if preset_config is None:
+        # Load full preset file (not just config)
+        preset_file = self.config_manager.presets_dir / f"{preset_name}.yml"
+        
+        if not preset_file.exists():
             await interaction.response.send_message(
                 f"❌ Preset '{preset_name}' not found.",
                 ephemeral=True
             )
             return
         
-        # Build embed with preset details
+        try:
+            yaml = YAML(typ='rt')
+            with open(preset_file, "r", encoding="utf-8") as f:
+                preset_data = yaml.load(f)
+        except Exception as e:
+            await interaction.response.send_message(
+                f"❌ Error loading preset: {e}",
+                ephemeral=True
+            )
+            return
+        
+        preset_config = preset_data.get("config", {})
+        
+        # Build comprehensive embed
         embed = discord.Embed(
-            title=f"📦 Preset: {preset_name}",
+            title=f"📦 {preset_data.get('name', preset_name)}",
+            description=preset_data.get("description", "No description available"),
             color=discord.Color.blue()
         )
         
-        # Count configurations by category
-        config_count = len(preset_config)
+        # Metadata - Count only modified settings (different from defaults)
+        defaults = self.config_manager.get_defaults()
+        modified_count = sum(1 for key, value in preset_config.items() if defaults.get(key) != value)
         
-        # Show some key configurations
-        key_configs = []
-        if "delay_for_generation" in preset_config:
-            key_configs.append(f"• Delay: `{preset_config['delay_for_generation']}s`")
-        if "use_response_filter" in preset_config:
-            key_configs.append(f"• Response Filter: `{preset_config['use_response_filter']}`")
-        if "enable_reply_system" in preset_config:
-            key_configs.append(f"• Reply System: `{preset_config['enable_reply_system']}`")
-        if "auto_add_generation_reactions" in preset_config:
-            key_configs.append(f"• Auto Reactions: `{preset_config['auto_add_generation_reactions']}`")
-        
+        metadata_lines = [
+            f"**Author:** {preset_data.get('author', 'Unknown')}",
+            f"**Version:** {preset_data.get('version', '1.0.0')}",
+            f"**Modified Settings:** {modified_count} (from {len(preset_config)} total)"
+        ]
         embed.add_field(
-            name="📊 Configuration Summary",
-            value=f"**Total Settings:** {config_count}\n" + "\n".join(key_configs[:10]),
+            name="ℹ️ Metadata",
+            value="\n".join(metadata_lines),
             inline=False
         )
         
-        embed.set_footer(text=f"Use /preset_apply {preset_name} <ai_name> to apply this preset")
+        # Display Settings
+        display_settings = []
+        if "use_card_ai_display_name" in preset_config:
+            display_settings.append(f"• Use Card Display Name: `{preset_config['use_card_ai_display_name']}`")
+        if "send_the_greeting_message" in preset_config:
+            display_settings.append(f"• Send Greeting: `{preset_config['send_the_greeting_message']}`")
+        if "send_message_line_by_line" in preset_config:
+            display_settings.append(f"• Line by Line: `{preset_config['send_message_line_by_line']}`")
+        
+        if display_settings:
+            embed.add_field(
+                name="🎨 Display",
+                value="\n".join(display_settings),
+                inline=True
+            )
+        
+        # Timing Settings
+        timing_settings = []
+        if "delay_for_generation" in preset_config:
+            timing_settings.append(f"• Generation Delay: `{preset_config['delay_for_generation']}s`")
+        if "engaged_delay" in preset_config:
+            timing_settings.append(f"• Engaged Delay: `{preset_config['engaged_delay']}s`")
+        if "cache_count_threshold" in preset_config:
+            timing_settings.append(f"• Cache Threshold: `{preset_config['cache_count_threshold']}`")
+        
+        if timing_settings:
+            embed.add_field(
+                name="⏱️ Timing",
+                value="\n".join(timing_settings),
+                inline=True
+            )
+        
+        # System Features
+        system_features = []
+        if "enable_reply_system" in preset_config:
+            system_features.append(f"• Reply System: `{preset_config['enable_reply_system']}`")
+        if "enable_ignore_system" in preset_config:
+            system_features.append(f"• Ignore System: `{preset_config['enable_ignore_system']}`")
+        if "sleep_mode_enabled" in preset_config:
+            system_features.append(f"• Sleep Mode: `{preset_config['sleep_mode_enabled']}`")
+        if "use_response_filter" in preset_config:
+            system_features.append(f"• Response Filter: `{preset_config['use_response_filter']}`")
+        if "auto_add_generation_reactions" in preset_config:
+            system_features.append(f"• Auto Reactions: `{preset_config['auto_add_generation_reactions']}`")
+        
+        if system_features:
+            embed.add_field(
+                name="⚙️ Systems",
+                value="\n".join(system_features),
+                inline=False
+            )
+        
+        # Tool Calling
+        if "tool_calling" in preset_config:
+            tool_config = preset_config["tool_calling"]
+            if isinstance(tool_config, dict):
+                tool_info = [
+                    f"• Enabled: `{tool_config.get('enabled', False)}`",
+                    f"• Allowed Tools: `{', '.join(tool_config.get('allowed_tools', ['none']))}`"
+                ]
+                embed.add_field(
+                    name="🔧 Tool Calling",
+                    value="\n".join(tool_info),
+                    inline=True
+                )
+        
+        # Character Card Settings
+        card_settings = []
+        if "user_syntax_replacement" in preset_config:
+            card_settings.append(f"• User Syntax: `{preset_config['user_syntax_replacement']}`")
+        if "use_lorebook" in preset_config:
+            card_settings.append(f"• Use Lorebook: `{preset_config['use_lorebook']}`")
+        if "greeting_index" in preset_config:
+            card_settings.append(f"• Greeting Index: `{preset_config['greeting_index']}`")
+        
+        if card_settings:
+            embed.add_field(
+                name="📇 Character Card",
+                value="\n".join(card_settings),
+                inline=True
+            )
+        
+        # Text Processing & Error Handling
+        text_processing = []
+        if "remove_ai_emoji" in preset_config:
+            text_processing.append(f"• Remove Emoji: `{preset_config['remove_ai_emoji']}`")
+        if "remove_ai_text_from" in preset_config:
+            patterns = preset_config['remove_ai_text_from']
+            if patterns:
+                text_processing.append(f"• Remove Patterns: `{len(patterns)} pattern(s)`")
+            else:
+                text_processing.append(f"• Remove Patterns: `None`")
+        if "error_handling_mode" in preset_config:
+            error_mode_display = {
+                "friendly": "Friendly",
+                "detailed": "Detailed",
+                "silent": "Silent"
+            }.get(preset_config['error_handling_mode'], preset_config['error_handling_mode'])
+            text_processing.append(f"• Error Mode: `{error_mode_display}`")
+        if "save_errors_in_history" in preset_config:
+            text_processing.append(f"• Save Errors in History: `{preset_config['save_errors_in_history']}`")
+        if "send_errors_to_chat" in preset_config:
+            text_processing.append(f"• Send Errors to Chat: `{preset_config['send_errors_to_chat']}`")
+        
+        if text_processing:
+            embed.add_field(
+                name="✂️ Text & Error Handling",
+                value="\n".join(text_processing),
+                inline=False
+            )
+        
+        # System Message Preview
+        if "system_message" in preset_config:
+            sys_msg = preset_config["system_message"]
+            if sys_msg:
+                preview = sys_msg[:100] + "..." if len(sys_msg) > 100 else sys_msg
+                embed.add_field(
+                    name="💬 System Message",
+                    value=f"```{preview}```",
+                    inline=False
+                )
+        
+        embed.set_footer(text=f"Use /preset_apply {preset_name} <ai_name> to apply • /preset_export to share")
         
         await interaction.response.send_message(embed=embed, ephemeral=False)
     

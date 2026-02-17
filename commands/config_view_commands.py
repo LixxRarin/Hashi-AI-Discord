@@ -237,8 +237,18 @@ class ConfigViewCommands(commands.Cog):
             }.get(error_mode, error_mode)
             
             embed.add_field(
-                name="Error Handling",
-                value=f"`{error_mode_display}`\nHow LLM errors are displayed in chat",
+                name="Error Handling Mode",
+                value=f"`{error_mode_display}`\nHow LLM errors are formatted",
+                inline=False
+            )
+            embed.add_field(
+                name="Save Errors in History",
+                value=f"`{config.get('save_errors_in_history', False)}`\nSave error messages in conversation history (LLM can see past errors)",
+                inline=False
+            )
+            embed.add_field(
+                name="Send Errors to Chat",
+                value=f"`{config.get('send_errors_to_chat', True)}`\nSend error messages to Discord channel (visible to users)",
                 inline=False
             )
             embed.set_footer(text="Use /config_text to modify these settings")

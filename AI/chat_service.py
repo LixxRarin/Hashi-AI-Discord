@@ -288,7 +288,7 @@ class ChatService:
         
         return "{{user}}"
     
-    def _handle_llm_error(self, error, session: Dict[str, Any]) -> Optional[str]:
+    def _handle_llm_error(self, error, session: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
         """
         Process an LLM error based on configuration.
         
@@ -297,23 +297,42 @@ class ChatService:
             session: AI session with configuration
             
         Returns:
-            Error message string or None (for silent mode)
+            tuple[display_message, history_message]:
+                - display_message: Message to send to Discord (None = don't send)
+                - history_message: Message to save in history (None = don't save)
         """
         config = session.get("config", {})
         error_mode = config.get("error_handling_mode", "friendly")
+        save_in_history = config.get("save_errors_in_history", False)
+        send_to_chat = config.get("send_errors_to_chat", True)
         
-        if error_mode == "silent":
-            # Silent mode: don't send any message
-            func.log.info(f"Error in silent mode, not sending message: {error.to_detailed_string()}")
-            return None
-        
-        elif error_mode == "detailed":
-            # Detailed mode: show type and message
-            return error.to_detailed_string()
-        
+        # Determine the formatted error message based on mode
+        if error_mode == "detailed":
+            formatted_error = error.to_detailed_string()
+        elif error_mode == "silent":
+            formatted_error = None
         else:  # "friendly" or any other value
-            # Friendly mode: user-friendly message
-            return error.to_friendly_string()
+            formatted_error = error.to_friendly_string()
+        
+        # Determine what to send to chat
+        display_message = None
+        if send_to_chat and formatted_error and error_mode != "silent":
+            display_message = formatted_error
+        
+        # Determine what to save in history
+        history_message = None
+        if save_in_history and formatted_error:
+            history_message = formatted_error
+        
+        # Log the error
+        if display_message is None and history_message is None:
+            func.log.debug(f"Error suppressed (not sent or saved): {error.to_detailed_string()}")
+        elif display_message is None:
+            func.log.debug(f"Error saved to history but not sent to chat: {error.to_detailed_string()}")
+        elif history_message is None:
+            func.log.debug(f"Error sent to chat but not saved to history: {error.to_detailed_string()}")
+        
+        return (display_message, history_message)
     
     def _post_process_response(
         self,
@@ -336,7 +355,13 @@ class ChatService:
         if LLMError.is_error_response(raw_response):
             error = LLMError.from_string(raw_response)
             if error:
-                return self._handle_llm_error(error, session)
+                display_msg, history_msg = self._handle_llm_error(error, session)
+                # Return special marker that pipeline can detect
+                # Format: __ERROR_CONTROL__:display|history
+                # Empty parts mean None (don't send/save)
+                display_part = display_msg if display_msg else ""
+                history_part = history_msg if history_msg else ""
+                return f"__ERROR_CONTROL__:{display_part}|{history_part}"
         
         # Legacy error detection by patterns (for backward compatibility)
         is_error = False
@@ -365,7 +390,8 @@ class ChatService:
                 error_message="Error detected by pattern matching",
                 friendly_message=raw_response
             )
-            return self._handle_llm_error(error, session)
+            display_msg, history_msg = self._handle_llm_error(error, session)
+            return ("__ERROR__", display_msg, history_msg)
         
         cleaned_response = text_processor.clean_ai_response(
             raw_response,
@@ -647,11 +673,19 @@ class ChatService:
             if LLMError.is_error_response(raw_response):
                 error = LLMError.from_string(raw_response)
                 if error:
-                    return self._handle_llm_error(error, session)
+                    display_msg, history_msg = self._handle_llm_error(error, session)
+                    # Return special marker: __ERROR_CONTROL__:display|history
+                    display_part = display_msg if display_msg else ""
+                    history_part = history_msg if history_msg else ""
+                    return f"__ERROR_CONTROL__:{display_part}|{history_part}"
             
             final_response = self._post_process_response(
                 raw_response, formatted_data, server_id, channel_id, ai_name, session, client, chat_id
             )
+            
+            # Check if post-processing returned an error marker
+            if isinstance(final_response, str) and final_response.startswith("__ERROR_CONTROL__:"):
+                return final_response
             
             return final_response
             
@@ -664,7 +698,11 @@ class ChatService:
                 error_message=str(e),
                 friendly_message="An error occurred while generating a response. Please try again later."
             )
-            return self._handle_llm_error(error, session)
+            display_msg, history_msg = self._handle_llm_error(error, session)
+            # Return special marker: __ERROR_CONTROL__:display|history
+            display_part = display_msg if display_msg else ""
+            history_part = history_msg if history_msg else ""
+            return f"__ERROR_CONTROL__:{display_part}|{history_part}"
 
 
 _service = ChatService()

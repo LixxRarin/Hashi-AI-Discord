@@ -57,6 +57,14 @@ class AILifecycle(commands.Cog):
         """Autocomplete for card names."""
         return await AutocompleteHelpers.card_name(interaction, current)
     
+    async def preset_name_autocomplete(
+        self,
+        interaction: discord.Interaction,
+        current: str
+    ) -> list[app_commands.Choice[str]]:
+        """Autocomplete for preset names."""
+        return await AutocompleteHelpers.preset_name(interaction, current)
+    
     def _generate_unique_ai_name(self, base_name: str, existing_names: set) -> str:
         """Generate a unique AI name by adding a suffix if the name already exists."""
         if base_name not in existing_names:
@@ -81,7 +89,8 @@ class AILifecycle(commands.Cog):
         card_name="Name of a registered card to use",
         card_attachment="Upload a card file directly (PNG/JSON/CHARX)",
         card_url="URL to Character Card (PNG/JSON/CHARX)",
-        greeting_index="Which greeting to use (0=first_mes, 1+=alternate_greetings)"
+        greeting_index="Which greeting to use (0=first_mes, 1+=alternate_greetings)",
+        preset="Configuration preset to apply (Default Preset, Roleplayer!, Discord-Chat, etc.)"
     )
     @app_commands.choices(
         mode=[
@@ -91,7 +100,8 @@ class AILifecycle(commands.Cog):
     )
     @app_commands.autocomplete(
         api_connection=connection_name_autocomplete,
-        card_name=card_name_autocomplete
+        card_name=card_name_autocomplete,
+        preset=preset_name_autocomplete
     )
     async def setup(
         self,
@@ -102,7 +112,8 @@ class AILifecycle(commands.Cog):
         card_name: str = None,
         card_attachment: discord.Attachment = None,
         card_url: str = None,
-        greeting_index: int = 0
+        greeting_index: int = 0,
+        preset: str = None
     ):
         """
         Setup command to configure an AI for a server channel (bot or webhook mode).
@@ -198,7 +209,7 @@ class AILifecycle(commands.Cog):
         session = await self._create_ai_session(
             server_id, channel_id_str, ai_name, provider_value, channel.name,
             api_connection, mode.value, character_card, card_cache_path,
-            card_url, card_name_registered, greeting_index
+            card_url, card_name_registered, greeting_index, preset
         )
         
         # Setup webhook or bot mode
@@ -220,7 +231,7 @@ class AILifecycle(commands.Cog):
         await self._send_setup_success_message(
             interaction, ai_name, character_card, card_source_type,
             card_name_registered, api_connection, provider_value, model,
-            connection, channel, mode.value
+            connection, channel, mode.value, preset
         )
     
     async def _load_character_card(
@@ -444,10 +455,23 @@ class AILifecycle(commands.Cog):
     async def _create_ai_session(
         self, server_id, channel_id_str, ai_name, provider_value, channel_name,
         api_connection, mode, character_card, card_cache_path, card_url,
-        card_name_registered, greeting_index
+        card_name_registered, greeting_index, preset=None
     ):
         """Create AI session with all necessary configuration."""
         session = func.get_default_ai_session(provider=provider_value, channel_name=channel_name)
+        
+        # Apply preset if provided
+        if preset:
+            from utils.ai_config_manager import get_ai_config_manager
+            config_manager = get_ai_config_manager()
+            preset_config = config_manager.load_preset(preset)
+            
+            if preset_config:
+                # Replace the default config with preset config
+                session["config"] = preset_config
+                func.log.info(f"Applied preset '{preset}' to AI '{ai_name}'")
+            else:
+                func.log.warning(f"Preset '{preset}' not found, using default config")
         
         session["api_connection"] = api_connection
         session["mode"] = mode
@@ -462,10 +486,12 @@ class AILifecycle(commands.Cog):
             "card_url": card_url if card_url else "local://hashi.png"
         }
         
+        # Override greeting_index regardless of preset
         session["config"]["greeting_index"] = greeting_index
         session["config"]["send_the_greeting_message"] = True
         
-        func.log.info(f"Created session for AI '{ai_name}' with greeting_index={greeting_index}")
+        preset_info = f" with preset '{preset}'" if preset else ""
+        func.log.info(f"Created session for AI '{ai_name}'{preset_info} with greeting_index={greeting_index}")
         
         return session
     
@@ -579,7 +605,7 @@ class AILifecycle(commands.Cog):
     async def _send_setup_success_message(
         self, interaction, ai_name, character_card, card_source_type,
         card_name_registered, api_connection, provider_value, model,
-        connection, channel, mode_value
+        connection, channel, mode_value, preset=None
     ):
         """Send success message after setup."""
         success_msg = f"✅ **Setup successful!**\n"
@@ -606,9 +632,15 @@ class AILifecycle(commands.Cog):
         if connection.get("base_url"):
             success_msg += f"**Custom Endpoint:** ✅\n"
         success_msg += f"**Channel:** {channel.mention}\n"
-        success_msg += f"**Mode:** {'Webhook' if mode_value == 'webhook' else 'Bot'}\n\n"
+        success_msg += f"**Mode:** {'Webhook' if mode_value == 'webhook' else 'Bot'}\n"
         
-        success_msg += f"🎭 Character card loaded successfully!\n"
+        # Show preset information
+        if preset:
+            success_msg += f"**Configuration Preset:** `{preset}` ✨\n"
+        else:
+            success_msg += f"**Configuration:** Default settings\n"
+        
+        success_msg += "\n🎭 Character card loaded successfully!\n"
         success_msg += f"💡 Use `/select_greeting` to change greetings or `/config` for more options."
         
         await interaction.followup.send(success_msg, ephemeral=True)

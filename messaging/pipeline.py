@@ -348,6 +348,52 @@ class MessagePipeline:
                 session_with_context
             )
             
+            # Check for error control marker
+            if isinstance(response, str) and response.startswith("__ERROR_CONTROL__:"):
+                # Parse error control: __ERROR_CONTROL__:display|history
+                try:
+                    parts = response[18:].split("|", 1)  # Skip "__ERROR_CONTROL__:"
+                    display_msg = parts[0] if parts[0] else None
+                    history_msg = parts[1] if len(parts) > 1 and parts[1] else None
+                    
+                    # Save to history if configured
+                    if history_msg:
+                        # Skip short_id for error messages (they don't have Discord IDs)
+                        await self.processor.short_id_manager.skip_next_id(
+                            server_id, channel_id, ai_name
+                        )
+                        await self.store.add_assistant_message(
+                            server_id,
+                            channel_id,
+                            ai_name,
+                            history_msg,
+                            [],  # No Discord IDs for errors
+                            session_with_context.get("chat_id", "default"),
+                            short_id=None  # No short_id for error messages
+                        )
+                        log.debug(f"Error saved to history for AI {ai_name}")
+                    
+                    # Send to Discord if configured
+                    discord_ids = []
+                    if display_msg:
+                        await send_callback(display_msg, discord_ids)
+                        log.debug(f"Error sent to chat for AI {ai_name}")
+                    
+                    # Clear buffer
+                    await self.buffer.clear_specific_messages(
+                        server_id, channel_id, ai_name, processing_message_ids
+                    )
+                    
+                    # Return None to indicate error was handled
+                    return None
+                    
+                except Exception as e:
+                    log.error(f"Error parsing error control marker: {e}")
+                    await self.buffer.clear_specific_messages(
+                        server_id, channel_id, ai_name, processing_message_ids
+                    )
+                    return None
+            
             if response is None:
                 log.warning("Error response detected by chat_service for AI %s, not saving to history", ai_name)
                 # Clear only the messages that were processed (prevents race condition)

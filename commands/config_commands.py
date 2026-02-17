@@ -176,7 +176,9 @@ class ConfigCommands(commands.Cog):
         ai_name="Name of the AI to configure",
         remove_patterns="Comma-separated regex patterns to remove (or 'none')",
         remove_emoji="Remove emojis from AI responses",
-        error_mode="How to handle LLM errors"
+        error_mode="How to handle LLM errors",
+        save_errors_in_history="Save error messages in conversation history",
+        send_errors_to_chat="Send error messages to Discord channel"
     )
     @app_commands.choices(error_mode=[
         app_commands.Choice(name="Friendly (user-friendly messages)", value="friendly"),
@@ -190,7 +192,9 @@ class ConfigCommands(commands.Cog):
         ai_name: str,
         remove_patterns: str = None,
         remove_emoji: bool = None,
-        error_mode: app_commands.Choice[str] = None
+        error_mode: app_commands.Choice[str] = None,
+        save_errors_in_history: bool = None,
+        send_errors_to_chat: bool = None
     ):
         """Configure text processing settings."""
         server_id = str(interaction.guild.id)
@@ -228,7 +232,15 @@ class ConfigCommands(commands.Cog):
                 "detailed": "Detailed (show exception details)",
                 "silent": "Silent (don't send errors)"
             }.get(error_mode.value, error_mode.value)
-            changes.append(f"• Error Handling: `{mode_display}`")
+            changes.append(f"• Error Handling Mode: `{mode_display}`")
+        
+        if save_errors_in_history is not None:
+            config["save_errors_in_history"] = save_errors_in_history
+            changes.append(f"• Save Errors in History: `{save_errors_in_history}`")
+        
+        if send_errors_to_chat is not None:
+            config["send_errors_to_chat"] = send_errors_to_chat
+            changes.append(f"• Send Errors to Chat: `{send_errors_to_chat}`")
         
         if not changes:
             await interaction.response.send_message("❌ No changes specified.", ephemeral=True)

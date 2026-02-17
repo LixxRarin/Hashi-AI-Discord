@@ -50,7 +50,7 @@ Options:
   # If true, the program will check for a new update every time it starts up.
   # For releases or commits, this depends on how you run the bot.
   
-  repo_url: "https://github.com/LixxRarin/*******"
+  repo_url: "https://github.com/LixxRarin/Hashi-AI-Discord.git"
   # This is the repository where the program will check and update.
   # Only touch this if you know what you're doing here!
 

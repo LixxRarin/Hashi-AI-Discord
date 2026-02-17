@@ -22,7 +22,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.0"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.1"
 # DEFAULT AI CONFIGURATION
 # This file contains all default configuration values for AI behavior.
 # Edit these values to change the default behavior for all new AIs.
@@ -40,6 +40,11 @@ engaged_message_threshold: 3
 
 new_chat_on_reset: false
 auto_add_generation_reactions: false # Automatically adds navigation reactions to the bot's most recent message. (◀️, ▶️, 🔄)
+
+# Error Handling, how LLM errors are processed and displayed
+error_handling_mode: "friendly"  # Options: friendly (user-friendly messages), detailed (show exception details), silent (don't send errors)
+save_errors_in_history: false    # Save error messages in conversation history (allows LLM to see past errors)
+send_errors_to_chat: true        # Send error messages to Discord channel (if false, errors are silent to users)
 
 # Text Processing - How messages are formatted
 remove_ai_text_from:
@@ -123,6 +128,7 @@ ignore_prompt: |
   - Users are talking among themselves
   - Conversation is not directed at you
   - You have nothing useful to contribute
+  - A complement to the user's previous sentence that does not need to be responded to (e.g., emoji)
   - Context makes it clear you shouldn't respond
   
   When you decide not to respond, output ONLY: <IGNORE>
@@ -140,10 +146,78 @@ tool_calling:
 
 # Advanced Settings
 system_message: |
-  You are in a Discord chat.
-  To mention users, use @username format. To use custom server emojis, use the :emoji_name: format.
-  Respond naturally as your character, only your response, without user format.
+  You are in a Discord chat. Keep responses short and casual, match the conversation's vibe.
+
+  Respond proportionally. Short question = short answer. Don't write essays.
+
+  Discord style: casual, quick messages. Use @username to mention, :emoji_name: for custom emojis.
+
+  Respond naturally as your character, only your response, without the user format syntax.
 """
+
+
+# Roleplay Preset. Optimized for 1-on-1 roleplay scenarios
+ROLEPLAY_PRESET_OVERRIDES = {
+    "delay_for_generation": 0.0,
+    "cache_count_threshold": 1,
+    "engaged_delay": 0.0,
+    "enable_reply_system": False,
+    "send_message_line_by_line": False,
+    "user_syntax_replacement": "display_name",
+    "use_lorebook": True,
+    "system_message": "Write {{char}}'s next reply in a fictional chat between {{char}} and {{user}}.",
+    "user_format_syntax": "{message}",
+    "user_reply_format_syntax": "{message}",
+    "remove_ai_text_from": [],
+    "auto_add_generation_reactions": True,
+    "error_handling_mode": "detailed",
+    "save_errors_in_history": False,
+    "send_errors_to_chat": True,
+    "tool_calling": {
+        "enabled": False,
+        "allowed_tools": []
+    }
+}
+
+# Discord Chat Preset. Natural casual behavior like a real server member
+DISCORD_CHAT_PRESET_OVERRIDES = {
+    "enable_reply_system": True,
+    "enable_ignore_system": True,
+    "sleep_mode_enabled": True,
+    "send_message_line_by_line": True,
+    "error_handling_mode": "friendly",
+    "save_errors_in_history": True,
+    "send_errors_to_chat": True,
+    "tool_calling": {
+        "enabled": True,
+        "allowed_tools": ["all"]
+    }
+}
+
+# Builtin presets metadata
+BUILTIN_PRESETS = {
+    "default": {
+        "name": "Default Preset",
+        "description": "Default configuration. Original settings",
+        "author": "LixxRarin",
+        "version": "1.0.0",
+        "overrides": {}  # No overrides. Pure default configuration!
+    },
+    "roleplay": {
+        "name": "Roleplayer!",
+        "description": "Optimized for 1-on-1 roleplay scenarios with immediate responses",
+        "author": "LixxRarin",
+        "version": "1.0.0",
+        "overrides": ROLEPLAY_PRESET_OVERRIDES
+    },
+    "discord-chat": {
+        "name": "Discord-Chat",
+        "description": "Natural and casual Discord chat behavior, acts like a real server member (Works best with optimized character cards)",
+        "author": "LixxRarin",
+        "version": "1.0.0",
+        "overrides": DISCORD_CHAT_PRESET_OVERRIDES
+    }
+}
 
 
 class AIConfigManager:
@@ -174,10 +248,59 @@ class AIConfigManager:
         self.config_dir.mkdir(exist_ok=True)
         self.presets_dir.mkdir(exist_ok=True)
     
+    def _merge_config(self, overrides: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Merge default configuration with specific overrides.
+        
+        Args:
+            overrides: Dictionary with values that differ from defaults
+            
+        Returns:
+            Complete merged configuration
+        """
+        merged = dict(self.default_config)
+        merged.pop("version", None)  # Remove version from config
+        merged.update(overrides)
+        return merged
+    
+    def _create_builtin_preset(self, preset_key: str) -> bool:
+        """
+        Create a builtin preset from its overrides.
+        
+        Args:
+            preset_key: Key in BUILTIN_PRESETS dict
+            
+        Returns:
+            True if created successfully
+        """
+        if preset_key not in BUILTIN_PRESETS:
+            func.log.error(f"Unknown builtin preset: {preset_key}")
+            return False
+        
+        preset_meta = BUILTIN_PRESETS[preset_key]
+        preset_name = preset_meta["name"]
+        
+        # Check if preset already exists
+        preset_file = self.presets_dir / f"{preset_name}.yml"
+        if preset_file.exists():
+            func.log.debug(f"Builtin preset '{preset_name}' already exists, skipping")
+            return True
+        
+        # Merge default config with overrides
+        config = self._merge_config(preset_meta["overrides"])
+        
+        # Save the preset
+        return self.save_preset(
+            preset_name=preset_name,
+            config=config,
+            description=preset_meta["description"],
+            author=preset_meta["author"]
+        )
+    
     async def initialize(self):
         """
         Initialize configuration system.
-        Creates default files if they don't exist.
+        Creates default files and builtin presets if they don't exist.
         """
         self._ensure_directories()
         
@@ -190,6 +313,15 @@ class AIConfigManager:
                 func.log.info(f"Created {self.defaults_file}")
             except Exception as e:
                 func.log.error(f"Error creating defaults file: {e}")
+        
+        # Create builtin presets
+        func.log.info("Checking builtin presets...")
+        for preset_key in BUILTIN_PRESETS.keys():
+            try:
+                if self._create_builtin_preset(preset_key):
+                    func.log.info(f"✓ Builtin preset '{preset_key}' ready")
+            except Exception as e:
+                func.log.error(f"Error creating builtin preset '{preset_key}': {e}")
     
     def get_defaults(self) -> Dict[str, Any]:
         """
