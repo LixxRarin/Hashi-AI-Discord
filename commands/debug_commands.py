@@ -564,7 +564,7 @@ class DebugCommands(commands.Cog):
     @app_commands.default_permissions(administrator=True)
     async def system_info(self, interaction: discord.Interaction):
         """Display comprehensive system information."""
-        await interaction.response.defer(ephemeral=True)
+        await interaction.response.defer(ephemeral=True) 
         
         # Collect all statistics
         sys_stats = self._get_system_stats()

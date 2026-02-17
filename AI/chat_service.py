@@ -52,15 +52,34 @@ class ChatService:
             func.log.error(f"Error reading from unified store: {e}")
             return []
     
-    async def set_ai_history(self, server_id: str, channel_id: str, ai_name: str, messages: List[Dict[str, str]], chat_id: str = "default") -> None:
-        """Set conversation history for a specific AI and chat."""
-        await self.store.clear_history(server_id, channel_id, ai_name, chat_id, keep_greeting=False)
+    async def set_ai_history(self, server_id: str, channel_id: str, ai_name: str, messages: List[Dict[str, str]], chat_id: str = "default", immediate: bool = False) -> bool:
+        """Set conversation history for a specific AI and chat.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            messages: List of messages to set
+            chat_id: Chat ID
+            immediate: If True, save immediately to disk
+            
+        Returns:
+            True if successful and persisted
+        """
+        success = await self.store.clear_history(server_id, channel_id, ai_name, chat_id, keep_greeting=False, immediate=immediate)
+        
+        if not success:
+            return False
         
         for msg in messages:
             if msg["role"] == "user":
                 await self.store.add_user_message(server_id, channel_id, ai_name, msg["content"], "system", chat_id)
             elif msg["role"] == "assistant":
                 await self.store.add_assistant_message(server_id, channel_id, ai_name, msg["content"], [], chat_id, short_id=None)
+        
+        if immediate:
+            return await self.store.save_immediate()
+        return True
     
     async def append_to_history(self, server_id: str, channel_id: str, ai_name: str, role: str, content: str, chat_id: str = "default") -> None:
         """Append a message to the conversation history."""
@@ -108,9 +127,24 @@ class ChatService:
         elif role == "assistant":
             await self.store.add_assistant_message(server_id, channel_id, ai_name, content, [], chat_id, short_id=None)
     
-    async def clear_ai_history(self, server_id: str, channel_id: str, ai_name: str, chat_id: Optional[str] = None, keep_greeting: bool = True) -> bool:
-        """Clear conversation history for a specific AI. If chat_id is None, clears all chats."""
-        success = await self.store.clear_history(server_id, channel_id, ai_name, chat_id, keep_greeting=False)
+    async def clear_ai_history(self, server_id: str, channel_id: str, ai_name: str, chat_id: Optional[str] = None, keep_greeting: bool = True, immediate: bool = False) -> bool:
+        """Clear conversation history for a specific AI. If chat_id is None, clears all chats.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            chat_id: Chat ID (None = clear all chats)
+            keep_greeting: Keep first assistant message
+            immediate: If True, save immediately to disk
+            
+        Returns:
+            True if successful
+        """
+        success = await self.store.clear_history(server_id, channel_id, ai_name, chat_id, keep_greeting=False, immediate=immediate)
+        
+        if not success:
+            return False
         
         if success and keep_greeting:
             # Regenerate greeting from character card
@@ -142,6 +176,9 @@ class ChatService:
                         await self.append_to_history(server_id, channel_id, ai_name, "assistant", greeting_text, target_chat_id)
                     else:
                         func.log.warning(f"No greeting text found for AI {ai_name}")
+            
+            if immediate:
+                return await self.store.save_immediate()
         
         return success
     

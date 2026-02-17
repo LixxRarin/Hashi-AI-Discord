@@ -345,8 +345,12 @@ class ConversationStore:
         
         self._save_task = asyncio.create_task(self._save_debounced())
     
-    async def save_immediate(self) -> None:
-        """Save conversations to file immediately."""
+    async def save_immediate(self) -> bool:
+        """Save conversations to file immediately.
+        
+        Returns:
+            True if save successful, False otherwise
+        """
         try:
             async with self._lock:
                 # Convert to serializable format
@@ -369,8 +373,11 @@ class ConversationStore:
                 
                 with open(self.file_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
+            
+            return True
         except Exception as e:
             log.error("Error saving conversations: %s", e)
+            return False
     
     def _should_consolidate(self, msg1: Message, msg2: Message) -> bool:
         """
@@ -670,7 +677,8 @@ class ConversationStore:
         channel_id: str,
         ai_name: str,
         chat_id: Optional[str] = None,
-        keep_greeting: bool = True
+        keep_greeting: bool = True,
+        immediate: bool = False
     ) -> bool:
         """
         Clear conversation history.
@@ -681,6 +689,7 @@ class ConversationStore:
             ai_name: AI name
             chat_id: Chat ID (None = clear all chats)
             keep_greeting: Keep first assistant message
+            immediate: If True, save immediately to disk instead of scheduling
             
         Returns:
             True if cleared successfully
@@ -732,12 +741,21 @@ class ConversationStore:
                 manager = get_short_id_manager_sync()
                 await manager.clear_mappings(server_id, channel_id, ai_name)
                 
-                self.schedule_save()
-                return True
+                # Save immediately if requested, otherwise schedule
+                if immediate:
+                    # Release lock before calling save_immediate (it acquires its own lock)
+                    pass  # Lock will be released at end of async with block
                 
             except Exception as e:
                 log.error("Error clearing history: %s", e)
                 return False
+        
+        # Save outside the lock to avoid deadlock
+        if immediate:
+            return await self.save_immediate()
+        else:
+            self.schedule_save()
+            return True
     
     async def remove_last_exchange(
         self,

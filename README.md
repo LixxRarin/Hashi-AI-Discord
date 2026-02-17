@@ -307,6 +307,7 @@ You can also save configurations as presets and reuse them:
 - `/new_chat` - Create new chat session
 - `/switch_chat` - Switch to different chat session
 - `/clear_history` - Clear conversation history
+- `/delete_message` - Delete specific bot messages (cascade or single mode)
 - `/regenerate` - Regenerate last AI response
 
 **Moderation Commands:**

@@ -283,7 +283,6 @@ class AIConfigManager:
         # Check if preset already exists
         preset_file = self.presets_dir / f"{preset_name}.yml"
         if preset_file.exists():
-            func.log.debug(f"Builtin preset '{preset_name}' already exists, skipping")
             return True
         
         # Merge default config with overrides
@@ -315,11 +314,10 @@ class AIConfigManager:
                 func.log.error(f"Error creating defaults file: {e}")
         
         # Create builtin presets
-        func.log.info("Checking builtin presets...")
         for preset_key in BUILTIN_PRESETS.keys():
             try:
                 if self._create_builtin_preset(preset_key):
-                    func.log.info(f"✓ Builtin preset '{preset_key}' ready")
+                    pass
             except Exception as e:
                 func.log.error(f"Error creating builtin preset '{preset_key}': {e}")
     
