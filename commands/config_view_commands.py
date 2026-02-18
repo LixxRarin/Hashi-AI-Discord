@@ -415,7 +415,7 @@ class ConfigViewCommands(commands.Cog):
                     "1. LLM can save important information using memory tools\n"
                     "2. Saved memories are injected into the prompt automatically\n"
                     "3. Each chat has its own independent memory\n"
-                    "4. Memory files: `data/memory/{ai_name}_{chat_id}.json`"
+                    "4. Memory files: `data/memory/{server_id}_{channel_id}_{ai_name}_{chat_id}.json`"
                 ),
                 inline=False
             )

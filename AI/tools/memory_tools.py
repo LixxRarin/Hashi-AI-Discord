@@ -44,11 +44,13 @@ def _count_tokens(text: str) -> int:
         return len(text) // 4
 
 
-def _get_memory_path(ai_name: str, chat_id: str) -> Path:
+def _get_memory_path(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> Path:
     """
-    Get memory file path for AI and chat.
+    Get memory file path for server, channel, AI and chat.
     
     Args:
+        server_id: Discord server ID
+        channel_id: Discord channel ID
         ai_name: AI name
         chat_id: Chat ID
         
@@ -58,52 +60,91 @@ def _get_memory_path(ai_name: str, chat_id: str) -> Path:
     MEMORY_DIR.mkdir(parents=True, exist_ok=True)
     
     # Sanitize names to prevent path traversal
+    safe_server_id = "".join(c for c in server_id if c.isalnum() or c in "_-")
+    safe_channel_id = "".join(c for c in channel_id if c.isalnum() or c in "_-")
     safe_ai_name = "".join(c for c in ai_name if c.isalnum() or c in "_-")
     safe_chat_id = "".join(c for c in chat_id if c.isalnum() or c in "_-")
     
-    return MEMORY_DIR / f"{safe_ai_name}_{safe_chat_id}.json"
+    return MEMORY_DIR / f"{safe_server_id}_{safe_channel_id}_{safe_ai_name}_{safe_chat_id}.json"
 
 
-def _load_memory(ai_name: str, chat_id: str) -> List[Dict[str, Any]]:
+def _load_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> List[Dict[str, Any]]:
     """
-    Load memory entries from file.
+    Load memory entries from file with automatic migration from old format.
     
     Args:
+        server_id: Discord server ID
+        channel_id: Discord channel ID
         ai_name: AI name
         chat_id: Chat ID
         
     Returns:
         List of memory entries
     """
-    path = _get_memory_path(ai_name, chat_id)
+    # Try new format first
+    path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
     
     if not path.exists():
+        # Fallback to old format for migration
+        safe_ai_name = "".join(c for c in ai_name if c.isalnum() or c in "_-")
+        safe_chat_id = "".join(c for c in chat_id if c.isalnum() or c in "_-")
+        old_path = MEMORY_DIR / f"{safe_ai_name}_{safe_chat_id}.json"
+        
+        if old_path.exists():
+            log.info(f"Migrating old memory file: {old_path.name} -> {path.name}")
+            try:
+                with open(old_path, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                
+                # Validate structure
+                if not isinstance(data, list):
+                    log.error(f"Invalid memory file structure in old format for {ai_name}/{chat_id}")
+                    return []
+                
+                # Save to new format (migration)
+                _save_memory(server_id, channel_id, ai_name, chat_id, data)
+                log.info(f"Successfully migrated memory file to new format")
+                
+                # Keep old file as backup (don't delete automatically)
+                return data
+                
+            except json.JSONDecodeError as e:
+                log.error(f"Failed to parse old memory file for {ai_name}/{chat_id}: {e}")
+                return []
+            except Exception as e:
+                log.error(f"Failed to migrate old memory file for {ai_name}/{chat_id}: {e}")
+                return []
+        
+        # No file exists in either format
         return []
     
+    # Load from new format
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
             
         # Validate structure
         if not isinstance(data, list):
-            log.error(f"Invalid memory file structure for {ai_name}/{chat_id}")
+            log.error(f"Invalid memory file structure for {server_id}/{channel_id}/{ai_name}/{chat_id}")
             return []
         
         return data
         
     except json.JSONDecodeError as e:
-        log.error(f"Failed to parse memory file for {ai_name}/{chat_id}: {e}")
+        log.error(f"Failed to parse memory file for {server_id}/{channel_id}/{ai_name}/{chat_id}: {e}")
         return []
     except Exception as e:
-        log.error(f"Failed to load memory for {ai_name}/{chat_id}: {e}")
+        log.error(f"Failed to load memory for {server_id}/{channel_id}/{ai_name}/{chat_id}: {e}")
         return []
 
 
-def _save_memory(ai_name: str, chat_id: str, entries: List[Dict[str, Any]]) -> bool:
+def _save_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str, entries: List[Dict[str, Any]]) -> bool:
     """
     Save memory entries to file.
     
     Args:
+        server_id: Discord server ID
+        channel_id: Discord channel ID
         ai_name: AI name
         chat_id: Chat ID
         entries: List of memory entries
@@ -111,17 +152,17 @@ def _save_memory(ai_name: str, chat_id: str, entries: List[Dict[str, Any]]) -> b
     Returns:
         bool: True if successful
     """
-    path = _get_memory_path(ai_name, chat_id)
+    path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
     
     try:
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(entries, f, ensure_ascii=False, indent=2)
         
-        log.debug(f"Saved {len(entries)} memory entries for {ai_name}/{chat_id}")
+        log.debug(f"Saved {len(entries)} memory entries for {server_id}/{channel_id}/{ai_name}/{chat_id}")
         return True
         
     except Exception as e:
-        log.error(f"Failed to save memory for {ai_name}/{chat_id}: {e}")
+        log.error(f"Failed to save memory for {server_id}/{channel_id}/{ai_name}/{chat_id}: {e}")
         return False
 
 
@@ -171,15 +212,17 @@ async def list_memories(context: Dict[str, Any]) -> Dict[str, Any]:
     if context is None:
         return {"error": "No context provided"}
     
+    server_id = context.get("server_id")
+    channel_id = context.get("channel_id")
     ai_name = context.get("ai_name")
     chat_id = context.get("chat_id", "default")
     max_tokens = context.get("memory_max_tokens", 1000)
     
-    if not ai_name:
-        return {"error": "Missing ai_name in context"}
+    if not server_id or not channel_id or not ai_name:
+        return {"error": "Missing server_id, channel_id, or ai_name in context"}
     
     try:
-        entries = _load_memory(ai_name, chat_id)
+        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
         total_tokens = _calculate_total_tokens(entries)
         
         return {
@@ -214,15 +257,17 @@ async def add_memory(content: str, context: Dict[str, Any] = None) -> Dict[str, 
     if not content or not content.strip():
         return {"error": "Memory content cannot be empty"}
     
+    server_id = context.get("server_id")
+    channel_id = context.get("channel_id")
     ai_name = context.get("ai_name")
     chat_id = context.get("chat_id", "default")
     max_tokens = context.get("memory_max_tokens", 1000)
     
-    if not ai_name:
-        return {"error": "Missing ai_name in context"}
+    if not server_id or not channel_id or not ai_name:
+        return {"error": "Missing server_id, channel_id, or ai_name in context"}
     
     try:
-        entries = _load_memory(ai_name, chat_id)
+        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
         
         # Check token limit
         new_tokens = _count_tokens(content)
@@ -249,10 +294,10 @@ async def add_memory(content: str, context: Dict[str, Any] = None) -> Dict[str, 
         entries.append(new_entry)
         
         # Save
-        if not _save_memory(ai_name, chat_id, entries):
+        if not _save_memory(server_id, channel_id, ai_name, chat_id, entries):
             return {"error": "Failed to save memory"}
         
-        log.info(f"Added memory #{new_id} for {ai_name}/{chat_id} ({new_tokens} tokens)")
+        log.info(f"Added memory #{new_id} for {server_id}/{channel_id}/{ai_name}/{chat_id} ({new_tokens} tokens)")
         
         return {
             "success": True,
@@ -285,15 +330,17 @@ async def update_memory(memory_id: int, content: str, context: Dict[str, Any] = 
     if not content or not content.strip():
         return {"error": "Memory content cannot be empty"}
     
+    server_id = context.get("server_id")
+    channel_id = context.get("channel_id")
     ai_name = context.get("ai_name")
     chat_id = context.get("chat_id", "default")
     max_tokens = context.get("memory_max_tokens", 1000)
     
-    if not ai_name:
-        return {"error": "Missing ai_name in context"}
+    if not server_id or not channel_id or not ai_name:
+        return {"error": "Missing server_id, channel_id, or ai_name in context"}
     
     try:
-        entries = _load_memory(ai_name, chat_id)
+        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
         
         # Find entry
         entry_index = None
@@ -327,10 +374,10 @@ async def update_memory(memory_id: int, content: str, context: Dict[str, Any] = 
         entries[entry_index]["timestamp"] = datetime.now(timezone.utc).isoformat()
         
         # Save
-        if not _save_memory(ai_name, chat_id, entries):
+        if not _save_memory(server_id, channel_id, ai_name, chat_id, entries):
             return {"error": "Failed to save memory"}
         
-        log.info(f"Updated memory #{memory_id} for {ai_name}/{chat_id}")
+        log.info(f"Updated memory #{memory_id} for {server_id}/{channel_id}/{ai_name}/{chat_id}")
         
         return {
             "success": True,
@@ -359,14 +406,16 @@ async def remove_memory(memory_id: int, context: Dict[str, Any] = None) -> Dict[
     if context is None:
         return {"error": "No context provided"}
     
+    server_id = context.get("server_id")
+    channel_id = context.get("channel_id")
     ai_name = context.get("ai_name")
     chat_id = context.get("chat_id", "default")
     
-    if not ai_name:
-        return {"error": "Missing ai_name in context"}
+    if not server_id or not channel_id or not ai_name:
+        return {"error": "Missing server_id, channel_id, or ai_name in context"}
     
     try:
-        entries = _load_memory(ai_name, chat_id)
+        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
         
         # Find and remove entry
         entry_index = None
@@ -385,10 +434,10 @@ async def remove_memory(memory_id: int, context: Dict[str, Any] = None) -> Dict[
         removed_tokens = _count_tokens(removed_entry.get("content", ""))
         
         # Save
-        if not _save_memory(ai_name, chat_id, entries):
+        if not _save_memory(server_id, channel_id, ai_name, chat_id, entries):
             return {"error": "Failed to save memory"}
         
-        log.info(f"Removed memory #{memory_id} for {ai_name}/{chat_id}")
+        log.info(f"Removed memory #{memory_id} for {server_id}/{channel_id}/{ai_name}/{chat_id}")
         
         return {
             "success": True,
@@ -420,14 +469,16 @@ async def search_memories(query: str, context: Dict[str, Any] = None) -> Dict[st
     if not query or not query.strip():
         return {"error": "Search query cannot be empty"}
     
+    server_id = context.get("server_id")
+    channel_id = context.get("channel_id")
     ai_name = context.get("ai_name")
     chat_id = context.get("chat_id", "default")
     
-    if not ai_name:
-        return {"error": "Missing ai_name in context"}
+    if not server_id or not channel_id or not ai_name:
+        return {"error": "Missing server_id, channel_id, or ai_name in context"}
     
     try:
-        entries = _load_memory(ai_name, chat_id)
+        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
         
         # Search (case-insensitive)
         query_lower = query.lower()
@@ -452,13 +503,15 @@ async def search_memories(query: str, context: Dict[str, Any] = None) -> Dict[st
         }
 
 
-def read_memory_content(ai_name: str, chat_id: str) -> Optional[str]:
+def read_memory_content(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> Optional[str]:
     """
     Read memory content for injection into prompt.
     
     This function is used by chat_service to inject memories into the conversation.
     
     Args:
+        server_id: Discord server ID
+        channel_id: Discord channel ID
         ai_name: AI name
         chat_id: Chat ID
         
@@ -466,7 +519,7 @@ def read_memory_content(ai_name: str, chat_id: str) -> Optional[str]:
         Formatted memory content or None if no memories
     """
     try:
-        entries = _load_memory(ai_name, chat_id)
+        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
         
         if not entries:
             return None
@@ -480,17 +533,19 @@ def read_memory_content(ai_name: str, chat_id: str) -> Optional[str]:
         return "\n".join(lines)
         
     except Exception as e:
-        log.error(f"Error reading memory content for {ai_name}/{chat_id}: {e}")
+        log.error(f"Error reading memory content for {server_id}/{channel_id}/{ai_name}/{chat_id}: {e}")
         return None
 
 
-def delete_memory_file(ai_name: str, chat_id: str = None) -> bool:
+def delete_memory_file(server_id: str, channel_id: str, ai_name: str, chat_id: str = None) -> bool:
     """
-    Delete memory file(s) for an AI. Used during cleanup.
+    Delete memory file(s) for an AI in a specific server and channel. Used during cleanup.
     
     Args:
+        server_id: Discord server ID
+        channel_id: Discord channel ID
         ai_name: AI name
-        chat_id: Optional chat ID. If None, deletes all chats for this AI
+        chat_id: Optional chat ID. If None, deletes all chats for this AI in this channel
         
     Returns:
         bool: True if any files were deleted
@@ -498,16 +553,18 @@ def delete_memory_file(ai_name: str, chat_id: str = None) -> bool:
     try:
         if chat_id:
             # Delete specific chat memory
-            path = _get_memory_path(ai_name, chat_id)
+            path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
             if path.exists():
                 path.unlink()
                 log.info(f"Deleted memory file: {path.name}")
                 return True
             return False
         else:
-            # Delete all memory files for this AI
+            # Delete all memory files for this AI in this channel
+            safe_server_id = "".join(c for c in server_id if c.isalnum() or c in "_-")
+            safe_channel_id = "".join(c for c in channel_id if c.isalnum() or c in "_-")
             safe_ai_name = "".join(c for c in ai_name if c.isalnum() or c in "_-")
-            pattern = f"{safe_ai_name}_*.json"
+            pattern = f"{safe_server_id}_{safe_channel_id}_{safe_ai_name}_*.json"
             
             deleted_count = 0
             for path in MEMORY_DIR.glob(pattern):
@@ -518,5 +575,5 @@ def delete_memory_file(ai_name: str, chat_id: str = None) -> bool:
             return deleted_count > 0
             
     except Exception as e:
-        log.error(f"Error deleting memory files for {ai_name}: {e}")
+        log.error(f"Error deleting memory files for {server_id}/{channel_id}/{ai_name}: {e}")
         return False

@@ -690,9 +690,9 @@ class AILifecycle(commands.Cog):
         # Clear memory files
         try:
             from AI.tools.memory_tools import delete_memory_file
-            deleted = delete_memory_file(ai_name)  # Deletes all chats for this AI
+            deleted = delete_memory_file(server_id, found_channel_id, ai_name)  # Deletes all chats for this AI in this channel
             if deleted:
-                func.log.info(f"Deleted memory files for AI '{ai_name}'")
+                func.log.info(f"Deleted memory files for AI '{ai_name}' in channel {found_channel_id}")
         except Exception as e:
             func.log.warning(f"Failed to delete memory files for AI '{ai_name}': {e}")
         

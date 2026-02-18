@@ -287,8 +287,8 @@ class ChatService:
         if config.get("enable_memory_system", False):
             from AI.tools.memory_tools import read_memory_content, _load_memory
             
-            memory_content = read_memory_content(ai_name, chat_id)
-            memory_data = _load_memory(ai_name, chat_id)
+            memory_content = read_memory_content(server_id, channel_id, ai_name, chat_id)
+            memory_data = _load_memory(server_id, channel_id, ai_name, chat_id)
             memory_count = len(memory_data)
             
             # Always inject memory prompt when system is enabled, even if no memories yet

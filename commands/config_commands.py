@@ -831,7 +831,7 @@ class ConfigCommands(commands.Cog):
             response += "\n• `update_memory` - Modify existing memory"
             response += "\n• `remove_memory` - Delete specific memory"
             response += "\n• `search_memories` - Search by keyword"
-            response += "\n\n📁 Memory files: `data/memory/{ai_name}_{{chat_id}}.json`"
+            response += "\n\n📁 Memory files: `data/memory/{{server_id}}_{{channel_id}}_{ai_name}_{{chat_id}}.json`"
         
         await interaction.response.send_message(response, ephemeral=True)
     
