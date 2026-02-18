@@ -255,6 +255,428 @@ class ChatSessions(commands.Cog):
         result_msg += f"\n💡 The AI is now using this new chat session."
         
         await interaction.followup.send(result_msg, ephemeral=True)
+    
+    @app_commands.command(name="list_chats", description="List all chat sessions for an AI")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(ai_name="Name of the AI to list chats for")
+    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
+    async def list_chats(self, interaction: discord.Interaction, ai_name: str):
+        """List all chat sessions for an AI with summary information."""
+        await interaction.response.defer(ephemeral=True)
+        server_id = str(interaction.guild.id)
+        
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        if not found_ai_data:
+            await interaction.followup.send(
+                f"❌ AI '{ai_name}' not found in this server.",
+                ephemeral=True
+            )
+            return
+        
+        found_channel_id, session = found_ai_data
+        
+        # Get all chat IDs
+        service = get_service()
+        chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+        
+        if not chat_ids:
+            await interaction.followup.send(
+                f"❌ No chat sessions found for AI '{ai_name}'.",
+                ephemeral=True
+            )
+            return
+        
+        # Get active chat
+        active_chat_id = session.get("chat_id", "default")
+        
+        # Build embed
+        embed = discord.Embed(
+            title=f"💬 Chat Sessions - {ai_name}",
+            description=f"**Total chats:** {len(chat_ids)}\n**Active chat:** `{active_chat_id}`",
+            color=discord.Color.blue()
+        )
+        
+        # Add info for each chat (limit to 10 most recent)
+        for i, chat_id in enumerate(chat_ids[:10]):
+            info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+            
+            # Format timestamps
+            import datetime
+            created = datetime.datetime.fromtimestamp(info["created_at"]).strftime("%Y-%m-%d %H:%M")
+            updated = datetime.datetime.fromtimestamp(info["updated_at"]).strftime("%Y-%m-%d %H:%M")
+            
+            # Active indicator
+            indicator = "🟢 " if chat_id == active_chat_id else ""
+            
+            # Truncate chat_id if too long
+            display_id = chat_id[:30] + "..." if len(chat_id) > 30 else chat_id
+            
+            field_value = f"{indicator}**Messages:** {info['message_count']}\n"
+            field_value += f"**Created:** {created}\n"
+            field_value += f"**Updated:** {updated}"
+            
+            embed.add_field(
+                name=f"📝 {display_id}",
+                value=field_value,
+                inline=True
+            )
+        
+        if len(chat_ids) > 10:
+            embed.set_footer(text=f"Showing 10 of {len(chat_ids)} chats. Use /chat_info to see specific chats.")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
+    
+    @app_commands.command(name="delete_chat", description="Delete a specific chat session")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(
+        ai_name="Name of the AI",
+        chat_id="Chat ID to delete (use autocomplete)"
+    )
+    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete, chat_id=chat_id_autocomplete)
+    async def delete_chat(self, interaction: discord.Interaction, ai_name: str, chat_id: str):
+        """Delete a specific chat session with confirmation."""
+        await interaction.response.defer(ephemeral=True)
+        server_id = str(interaction.guild.id)
+        
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        if not found_ai_data:
+            await interaction.followup.send(
+                f"❌ AI '{ai_name}' not found in this server.",
+                ephemeral=True
+            )
+            return
+        
+        found_channel_id, session = found_ai_data
+        
+        # Get chat info
+        service = get_service()
+        available_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+        
+        if chat_id not in available_chats:
+            await interaction.followup.send(
+                f"❌ Chat '{chat_id}' not found for AI '{ai_name}'.",
+                ephemeral=True
+            )
+            return
+        
+        # Check if it's the active chat
+        active_chat_id = session.get("chat_id", "default")
+        if chat_id == active_chat_id:
+            await interaction.followup.send(
+                f"❌ **Cannot delete active chat!**\n\n"
+                f"Chat '{chat_id}' is currently active.\n"
+                f"Please switch to another chat first using `/switch_chat`.",
+                ephemeral=True
+            )
+            return
+        
+        # Get chat info for confirmation
+        info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+        
+        # Send confirmation message
+        import datetime
+        created = datetime.datetime.fromtimestamp(info["created_at"]).strftime("%Y-%m-%d %H:%M")
+        
+        confirm_msg = await interaction.channel.send(
+            f"⚠️ **WARNING: Delete Chat Confirmation** (requested by {interaction.user.mention})\n\n"
+            f"**AI:** {ai_name}\n"
+            f"**Chat ID:** `{chat_id}`\n"
+            f"**Messages:** {info['message_count']}\n"
+            f"**Created:** {created}\n\n"
+            f"⚠️ **This will PERMANENTLY DELETE this chat session!**\n"
+            f"All conversation history will be lost.\n\n"
+            f"**React with ✅ to confirm or ❌ to cancel.**"
+        )
+        
+        # Send ephemeral acknowledgment
+        await interaction.followup.send(
+            "✅ Confirmation message sent. Please react to confirm or cancel.",
+            ephemeral=True
+        )
+        
+        # Add reactions
+        await confirm_msg.add_reaction("✅")
+        await confirm_msg.add_reaction("❌")
+        
+        # Wait for reaction
+        def check(reaction, user):
+            return (
+                user == interaction.user
+                and reaction.message.id == confirm_msg.id
+                and str(reaction.emoji) in ["✅", "❌"]
+            )
+        
+        try:
+            reaction, user = await self.bot.wait_for("reaction_add", timeout=60.0, check=check)
+            
+            if str(reaction.emoji) == "✅":
+                # Delete the chat
+                try:
+                    success = await service.history_manager.delete_chat(
+                        server_id, found_channel_id, ai_name, chat_id
+                    )
+                    
+                    if success:
+                        try:
+                            await confirm_msg.edit(
+                                content=f"✅ **Chat Deleted Successfully**\n\n"
+                                f"**AI:** {ai_name}\n"
+                                f"**Chat ID:** `{chat_id}`\n"
+                                f"**Deleted by:** {interaction.user.mention}\n\n"
+                                f"The chat session has been permanently deleted."
+                            )
+                            await confirm_msg.clear_reactions()
+                        except discord.NotFound:
+                            pass
+                        func.log.info(f"Deleted chat '{chat_id}' for AI '{ai_name}' in server {server_id}")
+                    else:
+                        await interaction.followup.send(
+                            f"❌ Failed to delete chat. Check logs for details.",
+                            ephemeral=True
+                        )
+                except ValueError as e:
+                    await interaction.followup.send(
+                        f"❌ Error: {str(e)}",
+                        ephemeral=True
+                    )
+            else:
+                try:
+                    await confirm_msg.edit(
+                        content=f"❌ **Delete Chat Cancelled**\n\n"
+                        f"No changes were made."
+                    )
+                    await confirm_msg.clear_reactions()
+                except discord.NotFound:
+                    pass
+                
+        except TimeoutError:
+            try:
+                await confirm_msg.edit(
+                    content=f"⏱️ **Delete Chat Timed Out**\n\n"
+                    f"No reaction received within 60 seconds. No changes were made."
+                )
+                await confirm_msg.clear_reactions()
+            except discord.NotFound:
+                pass
+    
+    @app_commands.command(name="rename_chat", description="Rename a chat session")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(
+        ai_name="Name of the AI",
+        old_name="Current chat ID (use autocomplete)",
+        new_name="New name for the chat"
+    )
+    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete, old_name=chat_id_autocomplete)
+    async def rename_chat(
+        self,
+        interaction: discord.Interaction,
+        ai_name: str,
+        old_name: str,
+        new_name: str
+    ):
+        """Rename a chat session."""
+        await interaction.response.defer(ephemeral=True)
+        server_id = str(interaction.guild.id)
+        
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        if not found_ai_data:
+            await interaction.followup.send(
+                f"❌ AI '{ai_name}' not found in this server.",
+                ephemeral=True
+            )
+            return
+        
+        found_channel_id, session = found_ai_data
+        channel_data = func.get_session_data(server_id, found_channel_id)
+        
+        # Validate new name length
+        if len(new_name) > 100:
+            await interaction.followup.send(
+                f"❌ New name is too long. Maximum 100 characters.",
+                ephemeral=True
+            )
+            return
+        
+        # Rename the chat
+        service = get_service()
+        try:
+            success = await service.history_manager.rename_chat(
+                server_id, found_channel_id, ai_name, old_name, new_name
+            )
+            
+            if success:
+                # Update session data if this is the active chat
+                active_chat_id = session.get("chat_id", "default")
+                if old_name == active_chat_id:
+                    session["chat_id"] = new_name
+                    channel_data[ai_name] = session
+                    await func.update_session_data(server_id, found_channel_id, channel_data)
+                
+                result_msg = f"✅ **Chat Renamed Successfully!**\n\n"
+                result_msg += f"**AI:** {ai_name}\n"
+                result_msg += f"**Old name:** `{old_name}`\n"
+                result_msg += f"**New name:** `{new_name}`\n"
+                
+                if old_name == active_chat_id:
+                    result_msg += f"\n💡 This was the active chat. Session updated."
+                
+                await interaction.followup.send(result_msg, ephemeral=True)
+                func.log.info(f"Renamed chat '{old_name}' to '{new_name}' for AI '{ai_name}' in server {server_id}")
+            else:
+                await interaction.followup.send(
+                    f"❌ Failed to rename chat. Check logs for details.",
+                    ephemeral=True
+                )
+        except ValueError as e:
+            await interaction.followup.send(
+                f"❌ Error: {str(e)}",
+                ephemeral=True
+            )
+    
+    @app_commands.command(name="chat_info", description="View detailed information about chat sessions")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(
+        ai_name="Name of the AI",
+        chat_id="Specific chat ID (optional - shows general info if not provided)"
+    )
+    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete, chat_id=chat_id_autocomplete)
+    async def chat_info(
+        self,
+        interaction: discord.Interaction,
+        ai_name: str,
+        chat_id: str = None
+    ):
+        """View detailed information about chat sessions."""
+        await interaction.response.defer(ephemeral=True)
+        server_id = str(interaction.guild.id)
+        
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        if not found_ai_data:
+            await interaction.followup.send(
+                f"❌ AI '{ai_name}' not found in this server.",
+                ephemeral=True
+            )
+            return
+        
+        found_channel_id, session = found_ai_data
+        service = get_service()
+        
+        if chat_id:
+            # Show detailed info for specific chat
+            available_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+            
+            if chat_id not in available_chats:
+                await interaction.followup.send(
+                    f"❌ Chat '{chat_id}' not found for AI '{ai_name}'.",
+                    ephemeral=True
+                )
+                return
+            
+            info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+            active_chat_id = session.get("chat_id", "default")
+            
+            # Format timestamps
+            import datetime
+            created = datetime.datetime.fromtimestamp(info["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
+            updated = datetime.datetime.fromtimestamp(info["updated_at"]).strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Build embed
+            embed = discord.Embed(
+                title=f"📊 Chat Information - {ai_name}",
+                description=f"**Chat ID:** `{chat_id}`",
+                color=discord.Color.green() if chat_id == active_chat_id else discord.Color.blue()
+            )
+            
+            # Status
+            status = "🟢 Active" if chat_id == active_chat_id else "⚪ Inactive"
+            embed.add_field(name="Status", value=status, inline=True)
+            embed.add_field(name="Messages", value=str(info["message_count"]), inline=True)
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
+            
+            # Timestamps
+            embed.add_field(name="Created", value=created, inline=True)
+            embed.add_field(name="Last Updated", value=updated, inline=True)
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
+            
+            # Greeting
+            if info["greeting"]:
+                embed.add_field(
+                    name="Greeting Message",
+                    value=f"```{info['greeting']}```",
+                    inline=False
+                )
+            
+            # Recent messages
+            if info["last_messages"]:
+                recent_text = ""
+                for msg in info["last_messages"]:
+                    recent_text += f"{msg['preview']}\n\n"
+                
+                # Wrap all messages in a single code block
+                embed.add_field(
+                    name="Recent Messages",
+                    value=f"```{recent_text[:1018]}```",  # 1024 - 6 for ``` markers
+                    inline=False
+                )
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        else:
+            # Show general info for all chats
+            chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+            
+            if not chat_ids:
+                await interaction.followup.send(
+                    f"❌ No chat sessions found for AI '{ai_name}'.",
+                    ephemeral=True
+                )
+                return
+            
+            active_chat_id = session.get("chat_id", "default")
+            
+            # Calculate total messages
+            total_messages = 0
+            for cid in chat_ids:
+                info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, cid)
+                total_messages += info["message_count"]
+            
+            # Build embed
+            embed = discord.Embed(
+                title=f"📊 Chat Overview - {ai_name}",
+                description=f"**Channel:** <#{found_channel_id}>",
+                color=discord.Color.purple()
+            )
+            
+            embed.add_field(name="Total Chats", value=str(len(chat_ids)), inline=True)
+            embed.add_field(name="Total Messages", value=str(total_messages), inline=True)
+            embed.add_field(name="\u200b", value="\u200b", inline=True)
+            
+            embed.add_field(
+                name="Active Chat",
+                value=f"`{active_chat_id[:50]}{'...' if len(active_chat_id) > 50 else ''}`",
+                inline=False
+            )
+            
+            # List chats (limit to 5)
+            chat_list = ""
+            for i, cid in enumerate(chat_ids[:5]):
+                info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, cid)
+                indicator = "🟢" if cid == active_chat_id else "⚪"
+                display_id = cid[:25] + "..." if len(cid) > 25 else cid
+                chat_list += f"{indicator} `{display_id}` - {info['message_count']} msgs\n"
+            
+            if len(chat_ids) > 5:
+                chat_list += f"\n*...and {len(chat_ids) - 5} more*"
+            
+            embed.add_field(
+                name="Chat Sessions",
+                value=chat_list,
+                inline=False
+            )
+            
+            embed.set_footer(text="💡 Use /chat_info <ai_name> <chat_id> for detailed information about a specific chat")
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot):

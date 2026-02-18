@@ -872,6 +872,244 @@ class ConversationStore:
         )
         return msg.content if msg else None
     
+    def list_chat_ids(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str
+    ) -> List[str]:
+        """
+        List all chat IDs for a specific AI.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            
+        Returns:
+            List of chat IDs sorted by update time (most recent first)
+        """
+        try:
+            ai_data = self._data.get(server_id, {}).get(channel_id, {}).get(ai_name, {})
+            chats = ai_data.get("chats", {})
+            
+            if not chats:
+                return []
+            
+            # Sort by updated_at timestamp (most recent first)
+            chat_items = []
+            for chat_id, chat in chats.items():
+                if isinstance(chat, Chat):
+                    updated_at = chat.metadata.updated_at
+                elif isinstance(chat, dict):
+                    updated_at = chat.get("metadata", {}).get("updated_at", 0)
+                else:
+                    updated_at = 0
+                chat_items.append((chat_id, updated_at))
+            
+            chat_items.sort(key=lambda x: x[1], reverse=True)
+            return [chat_id for chat_id, _ in chat_items]
+            
+        except Exception as e:
+            log.error(f"Error listing chat IDs: {e}")
+            return []
+    
+    def get_chat_info(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        chat_id: str
+    ) -> Dict[str, Any]:
+        """
+        Get detailed information about a specific chat.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            chat_id: Chat ID
+            
+        Returns:
+            Dictionary with chat information:
+            - chat_id: Chat ID
+            - message_count: Number of messages
+            - created_at: Creation timestamp
+            - updated_at: Last update timestamp
+            - greeting: First assistant message (if exists)
+            - last_messages: Last 3 messages (role and preview)
+        """
+        try:
+            chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
+            
+            # Get greeting (first assistant message)
+            greeting = None
+            for msg in chat.messages:
+                if msg.role == "assistant":
+                    greeting = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
+                    break
+            
+            # Get last 3 messages
+            last_messages = []
+            for msg in chat.messages[-3:]:
+                preview = msg.content[:80] + "..." if len(msg.content) > 80 else msg.content
+                last_messages.append({
+                    "role": msg.role,
+                    "preview": preview,
+                    "timestamp": msg.timestamp
+                })
+            
+            return {
+                "chat_id": chat_id,
+                "message_count": chat.metadata.message_count,
+                "created_at": chat.metadata.created_at,
+                "updated_at": chat.metadata.updated_at,
+                "greeting": greeting,
+                "last_messages": last_messages
+            }
+            
+        except Exception as e:
+            log.error(f"Error getting chat info: {e}")
+            return {
+                "chat_id": chat_id,
+                "message_count": 0,
+                "created_at": 0,
+                "updated_at": 0,
+                "greeting": None,
+                "last_messages": []
+            }
+    
+    def get_active_chat_id(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str
+    ) -> str:
+        """
+        Get the currently active chat ID for an AI.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            
+        Returns:
+            Active chat ID (from session data) or "default"
+        """
+        try:
+            import utils.func as func
+            channel_data = func.get_session_data(server_id, channel_id)
+            if channel_data and ai_name in channel_data:
+                return channel_data[ai_name].get("chat_id", "default")
+            return "default"
+        except Exception as e:
+            log.error(f"Error getting active chat ID: {e}")
+            return "default"
+    
+    async def delete_chat(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        chat_id: str
+    ) -> bool:
+        """
+        Delete a specific chat.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            chat_id: Chat ID to delete
+            
+        Returns:
+            True if deleted successfully
+            
+        Raises:
+            ValueError: If trying to delete active chat or chat doesn't exist
+        """
+        async with self._lock:
+            try:
+                # Check if chat exists
+                ai_data = self._ensure_path(server_id, channel_id, ai_name)
+                if chat_id not in ai_data["chats"]:
+                    raise ValueError(f"Chat '{chat_id}' does not exist")
+                
+                # Check if it's the active chat
+                active_chat = self.get_active_chat_id(server_id, channel_id, ai_name)
+                if chat_id == active_chat:
+                    raise ValueError(f"Cannot delete active chat '{chat_id}'. Switch to another chat first.")
+                
+                # Delete the chat
+                del ai_data["chats"][chat_id]
+                
+                # Clean up short ID mappings for this chat
+                from messaging.short_id_manager import get_short_id_manager_sync
+                manager = get_short_id_manager_sync()
+                await manager.clear_mappings(server_id, channel_id, ai_name)
+                
+                log.info(f"Deleted chat '{chat_id}' for AI '{ai_name}' in server {server_id}")
+                
+            except Exception as e:
+                log.error(f"Error deleting chat: {e}")
+                return False
+        
+        # Save outside lock
+        return await self.save_immediate()
+    
+    async def rename_chat(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        old_chat_id: str,
+        new_chat_id: str
+    ) -> bool:
+        """
+        Rename a chat.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            old_chat_id: Current chat ID
+            new_chat_id: New chat ID
+            
+        Returns:
+            True if renamed successfully
+            
+        Raises:
+            ValueError: If new ID already exists or old chat doesn't exist
+        """
+        async with self._lock:
+            try:
+                ai_data = self._ensure_path(server_id, channel_id, ai_name)
+                
+                # Check if old chat exists
+                if old_chat_id not in ai_data["chats"]:
+                    raise ValueError(f"Chat '{old_chat_id}' does not exist")
+                
+                # Check if new ID already exists
+                if new_chat_id in ai_data["chats"]:
+                    raise ValueError(f"Chat '{new_chat_id}' already exists")
+                
+                # Rename the chat
+                ai_data["chats"][new_chat_id] = ai_data["chats"][old_chat_id]
+                del ai_data["chats"][old_chat_id]
+                
+                # Update active_chat if this was the active one
+                if ai_data.get("active_chat") == old_chat_id:
+                    ai_data["active_chat"] = new_chat_id
+                
+                log.info(f"Renamed chat '{old_chat_id}' to '{new_chat_id}' for AI '{ai_name}' in server {server_id}")
+                
+            except Exception as e:
+                log.error(f"Error renaming chat: {e}")
+                return False
+        
+        # Save outside lock
+        return await self.save_immediate()
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get conversation statistics."""
         total_messages = 0

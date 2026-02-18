@@ -30,6 +30,16 @@ class ChatService:
         self.store = get_store()
         self.registry = get_registry()
     
+    @property
+    def history_manager(self):
+        """
+        Expose store as history_manager.
+        
+        Existing code calls service.history_manager.list_chat_ids() etc,
+        so this property makes those calls work.
+        """
+        return self.store
+    
     def get_ai_history(self, server_id: str, channel_id: str, ai_name: str, chat_id: str = "default") -> List[Dict[str, str]]:
         """Get conversation history for a specific AI and chat."""
         try:
