@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.3"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.4"
 # DEFAULT AI CONFIGURATION
 # This file contains all default configuration values for AI behavior.
 # Edit these values to change the default behavior for all new AIs.
@@ -172,6 +172,22 @@ ignore_prompt: |
 # Sleep Mode, AI stops responding after too many refusals
 sleep_mode_enabled: false
 sleep_mode_threshold: 5
+
+# Sleep Mode Wake-up Patterns
+# Define patterns that will wake the AI from sleep mode
+# Special placeholders (case-insensitive):
+#   {ai_mention} - Wake when AI is mentioned (@BotName)
+#   {reply}      - Wake when someone replies to AI's message
+#   {ai_name}    - Wake when AI's name appears in message
+# Regular expressions:
+#   Use standard regex patterns to match message content
+#   Examples: \bbot\b (word "bot"), \bai\b (word "ai"), \bhey\b (word "hey")
+sleep_wakeup_patterns:
+  - "{ai_mention}"    # Wake on direct mention
+  - "{reply}"         # Wake on reply to AI
+  - "{ai_name}"       # Wake when AI name is mentioned
+  - '\b(?i:bot)\b'    # Wake on word "bot" (case-insensitive)
+
 
 # Tool Calling, LLM function calling for enhanced capabilities
 # Allows the AI to call tools like get_message_info, get_emoji_info, get_user_info, and memory tools

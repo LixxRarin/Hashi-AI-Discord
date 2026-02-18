@@ -433,7 +433,44 @@ class ConfigViewCommands(commands.Cog):
                 value=f"`{config.get('sleep_mode_threshold', 5)}` refusals\nConsecutive refusals before sleep",
                 inline=False
             )
-            embed.set_footer(text="Use /config_sleep to modify these settings")
+            
+            # Wake-up patterns
+            wakeup_patterns = config.get('sleep_wakeup_patterns', ['{ai_mention}', '{reply}'])
+            if wakeup_patterns:
+                patterns_display = []
+                for pattern in wakeup_patterns[:5]:  # Show first 5
+                    if pattern == "{ai_mention}":
+                        patterns_display.append("• `{ai_mention}` - Wake on direct mention")
+                    elif pattern == "{reply}":
+                        patterns_display.append("• `{reply}` - Wake on reply to AI")
+                    elif pattern == "{ai_name}":
+                        patterns_display.append("• `{ai_name}` - Wake when AI name appears")
+                    else:
+                        # Regex pattern
+                        patterns_display.append(f"• `{pattern}` - Custom regex")
+                
+                if len(wakeup_patterns) > 5:
+                    patterns_display.append(f"... and {len(wakeup_patterns) - 5} more")
+                
+                embed.add_field(
+                    name="Wake-up Patterns",
+                    value="\n".join(patterns_display) if patterns_display else "None configured",
+                    inline=False
+                )
+            
+            embed.add_field(
+                name="💡 Pattern Types",
+                value=(
+                    "**Placeholders:**\n"
+                    "• `{ai_mention}` - Direct @mention\n"
+                    "• `{reply}` - Reply to AI message\n"
+                    "• `{ai_name}` - AI name in text\n\n"
+                    "**Regex:** Custom patterns like `\\b(?i:bot)\\b`"
+                ),
+                inline=False
+            )
+            
+            embed.set_footer(text="Use /config_sleep to modify these settings • Edit config/defaults.yml for wake-up patterns")
         
         elif category == "ignore":
             embed.add_field(

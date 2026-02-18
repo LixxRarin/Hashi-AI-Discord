@@ -7,6 +7,7 @@ into a unified pipeline for processing Discord messages and generating AI respon
 
 import asyncio
 import logging
+import re
 from typing import Dict, Any, Optional, List, Callable, Awaitable, Tuple
 import discord
 
@@ -46,6 +47,54 @@ class MessagePipeline:
     async def initialize(self) -> None:
         """Initialize the pipeline and load data."""
         await self.store.load()
+    
+    def _check_wakeup_patterns(
+        self,
+        message_content: str,
+        ai_name: str,
+        is_mentioned: bool,
+        is_reply_to_bot: bool,
+        patterns: List[str]
+    ) -> bool:
+        """
+        Check if message matches any wake-up pattern.
+        
+        Args:
+            message_content: The message content to check
+            ai_name: Name of the AI
+            is_mentioned: Whether AI was mentioned
+            is_reply_to_bot: Whether message is a reply to bot
+            patterns: List of wake-up patterns (placeholders or regex)
+            
+        Returns:
+            True if any pattern matches
+        """
+        if not patterns:
+            # Default behavior: wake on mention or reply
+            return is_mentioned or is_reply_to_bot
+        
+        for pattern in patterns:
+            # Handle special placeholders
+            if pattern == "{ai_mention}":
+                if is_mentioned:
+                    return True
+            elif pattern == "{reply}":
+                if is_reply_to_bot:
+                    return True
+            elif pattern == "{ai_name}":
+                # Check if AI name appears in message (case-insensitive)
+                if re.search(re.escape(ai_name), message_content, re.IGNORECASE):
+                    return True
+            else:
+                # Treat as regex pattern
+                try:
+                    if re.search(pattern, message_content, re.IGNORECASE):
+                        return True
+                except re.error as e:
+                    log.warning(f"Invalid wake-up regex pattern '{pattern}': {e}")
+                    continue
+        
+        return False
     
     async def process_message(
         self,
@@ -228,6 +277,62 @@ class MessagePipeline:
         processing_message_ids = [msg.message_id for msg in pending]
         
         config = session_with_context.get("config", {})
+        
+        # Check if AI is in sleep mode
+        if config.get("enable_ignore_system", False) and config.get("sleep_mode_enabled", False):
+            import time
+            
+            response_filter = get_response_filter()
+            state_key = (server_id, channel_id, ai_name)
+            
+            if state_key in response_filter.sleep_state:
+                state = response_filter.sleep_state[state_key]
+                
+                if state.get("in_sleep_mode", False):
+                    # AI is in sleep mode, check if should wake up
+                    wakeup_patterns = config.get("sleep_wakeup_patterns", ["{ai_mention}", "{reply}"])
+                    
+                    # Check mentions and replies
+                    is_mentioned = False
+                    is_reply_to_bot = False
+                    message_content = ""
+                    
+                    if bot_user_id:
+                        for msg in pending:
+                            message_content += msg.content + " "
+                            if msg.raw_message:
+                                # Check if bot is mentioned
+                                if hasattr(msg.raw_message, 'mentions'):
+                                    is_mentioned = is_mentioned or any(
+                                        m.id == bot_user_id for m in msg.raw_message.mentions
+                                    )
+                                
+                                # Check if message is a reply to bot
+                                if hasattr(msg.raw_message, 'reference') and msg.raw_message.reference:
+                                    is_reply_to_bot = True
+                    
+                    # Check if any wake-up pattern matches
+                    should_wake = self._check_wakeup_patterns(
+                        message_content,
+                        ai_name,
+                        is_mentioned,
+                        is_reply_to_bot,
+                        wakeup_patterns
+                    )
+                    
+                    if should_wake:
+                        log.info(f"AI {ai_name} waking up from ignore-based sleep mode")
+                        state["in_sleep_mode"] = False
+                        state["consecutive_refusals"] = 0
+                        state["last_activity"] = time.time()
+                        response_filter._save_sleep_state(server_id, channel_id, ai_name)
+                    else:
+                        # Stay in sleep mode
+                        log.debug(f"AI {ai_name} staying in ignore-based sleep mode (no wake-up pattern matched)")
+                        await self.buffer.clear_specific_messages(
+                            server_id, channel_id, ai_name, processing_message_ids
+                        )
+                        return None
         
         if config.get("enable_ignore_system", False) and config.get("use_response_filter", False):
             log.warning(
@@ -450,9 +555,9 @@ class MessagePipeline:
             await send_callback(display_response, discord_ids)
             
             # Reset ignore counter when AI responds normally (not <IGNORE>)
-            if config.get("sleep_mode_enabled", False):
+            # This should happen whenever ignore system is enabled, not just when sleep mode is enabled
+            if config.get("enable_ignore_system", False):
                 import time
-                import utils.func as func
                 
                 response_filter = get_response_filter()
                 state_key = (server_id, channel_id, ai_name)
