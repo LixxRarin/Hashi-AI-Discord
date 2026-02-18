@@ -19,7 +19,7 @@ init(autoreset=True)
 # Ensure version.txt exists
 if not os.path.exists("version.txt"):
     with open("version.txt", "w", encoding="utf-8") as file:
-        file.write("1.2.2\n")
+        file.write("1.2.3\n")
 
 
 def update_session_file(file_path: Optional[str] = None) -> None:
