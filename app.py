@@ -158,56 +158,74 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
             func.log.error("Channel %s not found", channel_id)
             return
         
-        # Show typing indicator while generating response
-        async with channel.typing():
-            # Capture old message IDs BEFORE generating new response
-            old_message_ids = bot.message_pipeline.response_manager.get_previous_discord_ids(
-                server_id, channel_id, ai_name
+        # Check if should show typing indicator (respects sleep mode)
+        should_show = await bot.message_pipeline.should_show_typing(
+            server_id, channel_id, ai_name, session, bot.user.id
+        )
+        
+        # Capture old message IDs BEFORE generating new response
+        old_message_ids = bot.message_pipeline.response_manager.get_previous_discord_ids(
+            server_id, channel_id, ai_name
+        )
+        
+        # Callback to send response to Discord using centralized MessageSender
+        async def send_callback(response_text, ids_list):
+            """Send response to Discord and populate ids_list."""
+            from utils.message_sender import get_message_sender
+            sender = get_message_sender()
+            
+            # Ensure session has server_id and ai_name for short ID conversion
+            session_with_context = session.copy()
+            session_with_context["server_id"] = server_id
+            session_with_context["ai_name"] = ai_name
+            
+            discord_ids = await sender.send(
+                response_text=response_text,
+                channel=channel,
+                session=session_with_context,
+                split_message_fn=AI._split_message
             )
-            
-            # Callback to send response to Discord using centralized MessageSender
-            async def send_callback(response_text, ids_list):
-                """Send response to Discord and populate ids_list."""
-                from utils.message_sender import get_message_sender
-                sender = get_message_sender()
-                
-                # Ensure session has server_id and ai_name for short ID conversion
-                session_with_context = session.copy()
-                session_with_context["server_id"] = server_id
-                session_with_context["ai_name"] = ai_name
-                
-                discord_ids = await sender.send(
-                    response_text=response_text,
-                    channel=channel,
-                    session=session_with_context,
-                    split_message_fn=AI._split_message
+            ids_list.extend(discord_ids)
+        
+        # Generate response using pipeline (with or without typing indicator)
+        if should_show:
+            # Show typing indicator while generating response
+            async with channel.typing():
+                result = await bot.message_pipeline.generate_response(
+                    server_id,
+                    channel_id,
+                    ai_name,
+                    session,
+                    chat_service,
+                    send_callback,
+                    bot_user_id=bot.user.id
                 )
-                ids_list.extend(discord_ids)
-            
-            # Generate response using pipeline
+        else:
+            # Don't show typing indicator (AI in sleep mode without wake-up patterns)
             result = await bot.message_pipeline.generate_response(
                 server_id,
                 channel_id,
                 ai_name,
                 session,
                 chat_service,
-                send_callback
+                send_callback,
+                bot_user_id=bot.user.id
             )
-            
-            if result:
-                response, discord_ids = result
-                # Update reactions using ReactionManager
-                if session.get("config", {}).get("auto_add_generation_reactions", False):
-                    try:
-                        from utils.reaction_manager import get_reaction_manager
-                        reaction_mgr = get_reaction_manager()
-                        await reaction_mgr.update_reactions(
-                            channel=channel,
-                            old_message_ids=old_message_ids,
-                            new_message_ids=discord_ids
-                        )
-                    except Exception as e:
-                        func.log.error("Error managing reactions: %s", e)
+        
+        if result:
+            response, discord_ids = result
+            # Update reactions using ReactionManager
+            if session.get("config", {}).get("auto_add_generation_reactions", False):
+                try:
+                    from utils.reaction_manager import get_reaction_manager
+                    reaction_mgr = get_reaction_manager()
+                    await reaction_mgr.update_reactions(
+                        channel=channel,
+                        old_message_ids=old_message_ids,
+                        new_message_ids=discord_ids
+                    )
+                except Exception as e:
+                    func.log.error("Error managing reactions: %s", e)
         
     except Exception as e:
         func.log.error("Error in _generate_ai_response for AI %s: %s", ai_name, e)

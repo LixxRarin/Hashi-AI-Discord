@@ -669,6 +669,129 @@ class MessagePipeline:
                 f"Will only wake up when mentioned or replied to."
             )
     
+    async def _check_if_should_wake(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        session: Dict[str, Any],
+        bot_user_id: Optional[int] = None
+    ) -> bool:
+        """
+        Verifica se mensagens pendentes devem acordar a IA do sleep mode.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            session: AI session data
+            bot_user_id: Bot user ID para verificar menções
+            
+        Returns:
+            True se IA deve acordar (ou não está em sleep), False se deve continuar dormindo
+        """
+        config = session.get("config", {})
+        
+        # Se ignore system não está habilitado, sempre acordar
+        if not config.get("enable_ignore_system", False):
+            return True
+        
+        # Se sleep mode não está habilitado, sempre acordar
+        if not config.get("sleep_mode_enabled", False):
+            return True
+        
+        # Verificar se IA está em sleep mode
+        import time
+        from AI.response_filter import get_response_filter
+        
+        response_filter = get_response_filter()
+        state_key = (server_id, channel_id, ai_name)
+        
+        if state_key not in response_filter.sleep_state:
+            # Sem estado de sleep, IA está acordada
+            return True
+        
+        state = response_filter.sleep_state[state_key]
+        
+        if not state.get("in_sleep_mode", False):
+            # IA não está em sleep mode
+            return True
+        
+        # IA está em sleep mode, verificar se deve acordar
+        pending = await self.buffer.get_pending(server_id, channel_id, ai_name)
+        
+        if not pending:
+            # Sem mensagens pendentes
+            return False
+        
+        # Verificar wake-up patterns nas mensagens pendentes
+        wakeup_patterns = config.get("sleep_wakeup_patterns", ["{ai_mention}", "{reply}"])
+        
+        is_mentioned = False
+        is_reply_to_bot = False
+        message_content = ""
+        
+        if bot_user_id:
+            for msg in pending:
+                message_content += msg.content + " "
+                if msg.raw_message:
+                    # Verificar se bot foi mencionado
+                    if hasattr(msg.raw_message, 'mentions'):
+                        is_mentioned = is_mentioned or any(
+                            m.id == bot_user_id for m in msg.raw_message.mentions
+                        )
+                    
+                    # Verificar se mensagem é reply ao bot
+                    if hasattr(msg.raw_message, 'reference') and msg.raw_message.reference:
+                        is_reply_to_bot = True
+        
+        # Verificar se algum wake-up pattern corresponde
+        should_wake = self._check_wakeup_patterns(
+            message_content,
+            ai_name,
+            is_mentioned,
+            is_reply_to_bot,
+            wakeup_patterns
+        )
+        
+        return should_wake
+    
+    async def should_show_typing(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        session: Dict[str, Any],
+        bot_user_id: Optional[int] = None
+    ) -> bool:
+        """
+        Verifica se deve mostrar indicador de digitação.
+        
+        Retorna False se a IA está em sleep mode e as mensagens pendentes
+        não contêm wake-up patterns.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            session: AI session data
+            bot_user_id: Bot user ID para verificar menções
+            
+        Returns:
+            True se deve mostrar "digitando...", False caso contrário
+        """
+        # Verificar se há mensagens pendentes
+        pending = await self.buffer.get_pending(server_id, channel_id, ai_name)
+        if not pending:
+            return False
+        
+        # Verificar se IA deve acordar (ou já está acordada)
+        should_wake = await self._check_if_should_wake(
+            server_id, channel_id, ai_name, session, bot_user_id
+        )
+        
+        return should_wake
+    
     async def handle_typing(
         self,
         server_id: str,
