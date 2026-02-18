@@ -65,29 +65,63 @@ class MessageProcessor:
             server_id, channel_id, ai_name, message.message_id
         )
         
-        # Build message content with attachments/stickers
-        message_content = message.content
+        # Get config for templates
+        config = session.get("config", {})
         
-        # Add attachment information
+        # Format attachments using template
+        attachments_formatted = ""
         if hasattr(message, 'attachments') and message.attachments:
+            attachment_template = config.get("attachment_format", "[Attachment: {filename}]({url})")
+            attachment_parts = []
+            
             for att in message.attachments:
-                filename = att.get('filename', 'file')
-                url = att.get('url', '')
-                message_content += f"\n[Anexo: {filename}]({url})"
+                try:
+                    formatted_att = attachment_template.format(
+                        filename=att.get('filename', 'file'),
+                        url=att.get('url', ''),
+                        content_type=att.get('content_type', 'unknown'),
+                        size=att.get('size', 0)
+                    )
+                    attachment_parts.append(formatted_att)
+                except KeyError as e:
+                    log.warning(f"Attachment template formatting error: {e}")
+                    # Fallback to default format
+                    attachment_parts.append(f"[Attachment: {att.get('filename', 'file')}]({att.get('url', '')})")
+            
+            if attachment_parts:
+                attachments_formatted = "\n" + "\n".join(attachment_parts)
         
-        # Add sticker information
+        # Format stickers using template
+        stickers_formatted = ""
         if hasattr(message, 'stickers') and message.stickers:
+            sticker_template = config.get("sticker_format", "[Sticker: {name}]({url})")
+            sticker_parts = []
+            
             for sticker in message.stickers:
-                name = sticker.get('name', 'sticker')
-                url = sticker.get('url', '')
-                message_content += f"\n[{name}]({url})"
+                try:
+                    formatted_sticker = sticker_template.format(
+                        name=sticker.get('name', 'sticker'),
+                        url=sticker.get('url', ''),
+                        id=sticker.get('id', ''),
+                        format=sticker.get('format', 'unknown')
+                    )
+                    sticker_parts.append(formatted_sticker)
+                except KeyError as e:
+                    log.warning(f"Sticker template formatting error: {e}")
+                    # Fallback to default format
+                    sticker_parts.append(f"[Sticker: {sticker.get('name', 'sticker')}]({sticker.get('url', '')})")
+            
+            if sticker_parts:
+                stickers_formatted = "\n" + "\n".join(sticker_parts)
         
         # Prepare template variables
         syntax = {
             "time": datetime.datetime.fromtimestamp(message.timestamp).strftime("%H:%M"),
             "username": message.author_name,  # @lixxrarin (for mentions)
             "name": message.author_display_name,  # Rarin (display name)
-            "message": message_content,
+            "message": message.content,  # Text content only
+            "attachments": attachments_formatted,  # Formatted attachments
+            "stickers": stickers_formatted,  # Formatted stickers
             "message_id": message.message_id,  # Full Discord ID (17-20 digits)
             "short_id": short_id  # Short ID (sequential integer)
         }
@@ -187,34 +221,9 @@ class MessageProcessor:
         if not hasattr(message, 'attachments') or not message.attachments:
             return []
         
-        # Get vision configuration from API connection or fallback to session config
-        vision_config = {
-            'vision_enabled': False,
-            'vision_detail': 'auto',
-            'max_image_size': 20
-        }
-        
-        # Try to get from API connection first
-        if server_id:
-            connection_name = session.get("api_connection")
-            if connection_name:
-                import utils.func as func
-                connection = func.get_api_connection(server_id, connection_name)
-                if connection:
-                    vision_config = {
-                        'vision_enabled': connection.get('vision_enabled', False),
-                        'vision_detail': connection.get('vision_detail', 'auto'),
-                        'max_image_size': connection.get('max_image_size', 20)
-                    }
-        
-        # Fallback to session config if no API connection
-        if not vision_config.get('vision_enabled'):
-            config = session.get("config", {})
-            vision_config = {
-                'vision_enabled': config.get('vision_enabled', False),
-                'vision_detail': config.get('vision_detail', 'auto'),
-                'max_image_size': config.get('max_image_size', 20)
-            }
+        # Get vision configuration
+        from utils.ai_config_manager import get_vision_config
+        vision_config = get_vision_config(session, server_id)
         
         # Process attachments
         result = await self.media_processor.process_attachments(

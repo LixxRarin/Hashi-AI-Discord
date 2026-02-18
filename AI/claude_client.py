@@ -167,7 +167,26 @@ class ClaudeClient(BaseAIClient):
         images: Optional[List[Dict[str, Any]]] = None,
         **kwargs
     ) -> str:
-        """Generate a response from Claude API with optional tool calling and vision support."""
+        """
+        Generate a response from Claude API with optional tool calling and vision support.
+        
+        Args:
+            messages: List of message dictionaries with 'role' and 'content'
+            session: Session data containing model configuration
+            server_id: Server ID for connection resolution
+            tools: Optional list of tool definitions for function calling
+            tool_context: Optional context for tool execution
+            images: Optional list of processed image dicts (max 20 images per Claude API limit)
+            **kwargs: Additional parameters
+            
+        Returns:
+            str: Generated response text or error message
+            
+        Note:
+            - Images are automatically injected into the last user message
+            - Claude supports up to 20 images per request (excess images are truncated)
+            - Images must be pre-processed with base64 encoding via MediaProcessor
+        """
         model = self.resolve_model(session, server_id, "claude-sonnet-4-5")
         llm_params = self.get_llm_params(session, server_id)
         
@@ -182,22 +201,6 @@ class ClaudeClient(BaseAIClient):
         try:
             # Extract system message (Claude requires it separate)
             system_message, user_messages = self._extract_system_message(messages)
-            
-            # Process images if vision is enabled and images are provided
-            if images and self.supports_vision() and llm_params.get('vision_enabled', False):
-                # Modify the last user message to include images
-                if user_messages and user_messages[-1].get('role') == 'user':
-                    last_message = user_messages[-1]
-                    text_content = last_message.get('content', '')
-                    
-                    # Prepare multimodal content
-                    multimodal_content = self.prepare_multimodal_content(text_content, images)
-                    
-                    # Replace the last message with multimodal version
-                    user_messages[-1] = {
-                        'role': 'user',
-                        'content': multimodal_content
-                    }
             
             # Build API parameters
             api_params = {
@@ -570,60 +573,21 @@ class ClaudeClient(BaseAIClient):
         server_id: Optional[str] = None
     ) -> Optional[Dict[str, Any]]:
         """
-        Retrieves the model information.
+        Retrieves the model information from configuration.
         
         Note: Anthropic doesn't have a models list endpoint, so we return
-        hardcoded information based on the model name.
+        basic information based on the configured model name.
         """
         model = self.resolve_model(session, server_id, default_model="claude-sonnet-4-5")
         if not model:
             func.log.error("No model provided to get_bot_info")
             return None
 
-        # Model information (includes both Claude 3 and Claude 4 models)
-        model_info = {
-            # Claude 4 models (with thinking support)
-            "claude-opus-4-6": {
-                "description": "Most capable Claude 4 model with adaptive thinking",
-                "context_window": "200K tokens"
-            },
-            "claude-sonnet-4-5": {
-                "description": "Best balance of intelligence and speed with thinking",
-                "context_window": "200K tokens"
-            },
-            "claude-haiku-4-5": {
-                "description": "Fast and efficient with thinking support",
-                "context_window": "200K tokens"
-            },
-            # Claude 3 models (no thinking support)
-            "claude-3-opus-20240229": {
-                "description": "Most capable Claude 3 model",
-                "context_window": "200K tokens"
-            },
-            "claude-3-5-sonnet-20241022": {
-                "description": "Claude 3.5 Sonnet (no thinking support)",
-                "context_window": "200K tokens"
-            },
-            "claude-3-sonnet-20240229": {
-                "description": "Balanced Claude 3 model",
-                "context_window": "200K tokens"
-            },
-            "claude-3-haiku-20240307": {
-                "description": "Fastest Claude 3 model",
-                "context_window": "200K tokens"
-            }
-        }
-        
-        info = model_info.get(model, {
-            "description": f"Claude model: {model}",
-            "context_window": "200K tokens"
-        })
-        
         return {
             "name": model,
             "avatar_url": None,
             "title": model,
-            "description": f"Anthropic Claude - {info['description']} ({info['context_window']})",
+            "description": f"Anthropic Claude: {model}",
             "visibility": "public",
             "num_interactions": None,
             "author_username": "Anthropic"

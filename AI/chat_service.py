@@ -359,7 +359,8 @@ class ChatService:
         model: str,
         client,
         message_author=None,
-        chat_id: str = "default"
+        chat_id: str = "default",
+        images: Optional[List[Dict[str, Any]]] = None
     ) -> List[Dict[str, str]]:
         """Prepare messages for the API call including system prompts, history, and current message."""
         config = session.get("config", {})
@@ -441,11 +442,13 @@ class ChatService:
         )
         
         # Check if we should add current message (avoid duplicates)
+        # Always add if there are images, since images make it unique
         should_add_current = True
-        if truncated_history and truncated_history[-1]["role"] == "user":
+        if truncated_history and truncated_history[-1]["role"] == "user" and not images:
             last_history_content = truncated_history[-1]["content"]
             if user_content_processed in last_history_content or last_history_content in user_content_processed:
                 should_add_current = False
+                func.log.debug("Skipping duplicate user message (no images)")
         
         # Insert history and user message at their configured positions
         # If positions weren't specified, add them at the end
@@ -459,14 +462,43 @@ class ChatService:
             conv_messages.extend(truncated_history)
         
         if should_add_current:
+            # Create user message
+            user_message = {"role": "user", "content": user_content_processed}
+            
+            # If images are provided AND vision is supported, create multimodal content
+            if images and client.supports_vision():
+                from utils.ai_config_manager import get_vision_config
+                vision_config = get_vision_config(session, server_id)
+                
+                if vision_config.get('vision_enabled', False):
+                    provider = session.get("provider", "openai")
+                    
+                    # Ollama uses a different format (separate 'images' field)
+                    if provider == "ollama":
+                        text_content, images_array = client.prepare_multimodal_content(
+                            user_content_processed, images
+                        )
+                        user_message["content"] = text_content
+                        user_message["images"] = images_array
+                        func.log.info(f"Attached {len(images_array)} images to Ollama message")
+                    else:
+                        # Claude/OpenAI use multimodal content arrays
+                        user_message["content"] = client.prepare_multimodal_content(
+                            user_content_processed, images
+                        )
+                        func.log.info(f"Attached {len(images)} images to message")
+                else:
+                    func.log.debug("Images provided but vision_enabled=False, skipping")
+            
+            # Insert message at appropriate position
             if user_message_position is not None:
                 # Insert at specified position (adjust for history if needed)
                 if history_position is not None and user_message_position > history_position:
                     user_message_position += len(truncated_history)
-                conv_messages.insert(user_message_position, {"role": "user", "content": user_content_processed})
+                conv_messages.insert(user_message_position, user_message)
             else:
                 # Add at end if not specified
-                conv_messages.append({"role": "user", "content": user_content_processed})
+                conv_messages.append(user_message)
         
         func.log.debug(f"Prepared {len(conv_messages)} messages for {ai_name} (context order: {len(context_order)} components)")
         
@@ -639,9 +671,21 @@ class ChatService:
         create_new: bool,
         session: Dict[str, Any],
         server_id: str,
-        channel_id_str: str
+        channel_id_str: str,
+        desired_chat_id: str = "default"
     ) -> Tuple[Optional[str], Optional[Any]]:
-        """Creates a new chat session if required."""
+        """Creates a new chat session if required.
+        
+        Args:
+            create_new: If True, creates a new UUID chat. If False, uses desired_chat_id.
+            session: AI session data
+            server_id: Server ID
+            channel_id_str: Channel ID
+            desired_chat_id: Chat ID to use when create_new=False (default: "default")
+            
+        Returns:
+            Tuple of (chat_id, greeting_obj)
+        """
         provider = session.get("provider", "openai")
         
         if self.registry.is_registered(provider):
@@ -654,8 +698,13 @@ class ChatService:
                 return existing_chat_id, None
             
             try:
-                new_id = str(uuid.uuid4())
-                func.log.info("New Chat ID created for channel %s: %s", channel_id_str, new_id)
+                # If create_new=True, generate UUID. Otherwise, use desired_chat_id
+                if create_new:
+                    new_id = str(uuid.uuid4())
+                    func.log.info("New Chat ID created for channel %s: %s", channel_id_str, new_id)
+                else:
+                    new_id = desired_chat_id
+                    func.log.info("Using desired chat_id for channel %s: %s", channel_id_str, new_id)
                 
                 session["chat_id"] = new_id
                 session["setup_has_already"] = False
@@ -670,7 +719,8 @@ class ChatService:
                 greeting_obj = None
                 if session.get("config", {}).get("send_the_greeting_message"):
                     ai_name = await self._get_ai_name_from_session(server_id, channel_id_str, session)
-                    greeting_obj = await self._generate_greeting(session, server_id, channel_id_str, ai_name)
+                    # Pass the new_id to _generate_greeting so greeting is saved to correct chat
+                    greeting_obj = await self._generate_greeting(session, server_id, channel_id_str, ai_name, new_id)
                 
                 return new_id, greeting_obj
                 
@@ -765,7 +815,10 @@ class ChatService:
         create_new_chat = session.get("config", {}).get("new_chat_on_reset", False)
         ai_name = await self._get_ai_name_from_session(server_id, channel_id, session)
         
-        new_chat_id, greeting_obj = await self.new_chat_id(create_new_chat, session, server_id, channel_id)
+        # Pass desired_chat_id to ensure greeting is saved to the correct chat
+        new_chat_id, greeting_obj = await self.new_chat_id(
+            create_new_chat, session, server_id, channel_id, desired_chat_id=chat_id
+        )
         
         if new_chat_id is None:
             func.log.critical("No valid chat ID available for channel %s", channel_id)
@@ -824,9 +877,9 @@ class ChatService:
             processed_images = await processor.process_message_images(temp_message, session, server_id)
             
             if processed_images:
-                func.log.info(f"✅ Processed {len(processed_images)} images for vision analysis")
+                func.log.info(f"Processed {len(processed_images)} images for vision analysis")
             else:
-                func.log.warning(f"⚠️ No images processed from {len(message.attachments)} attachment(s) - vision may be disabled or no valid images found")
+                func.log.warning(f"No images processed from {len(message.attachments)} attachment(s) - vision may be disabled or no valid images found")
 
         
         # Get message content
@@ -841,11 +894,28 @@ class ChatService:
             default_model = "deepseek-chat" if provider == "deepseek" else "gpt-3.5-turbo"
             model = client.resolve_model(session, server_id, default_model)
             
+            # Log images being passed to _prepare_messages
+            if processed_images:
+                func.log.debug(f"Passing {len(processed_images)} images to _prepare_messages()")
+            
             prepared_messages = self._prepare_messages(
                 formatted_data, server_id, channel_id, ai_name, session, model, client,
                 message_author=message.author if hasattr(message, 'author') else None,
-                chat_id=chat_id
+                chat_id=chat_id,
+                images=processed_images if processed_images else None
             )
+            
+            # Log final message structure
+            if processed_images:
+                last_msg = prepared_messages[-1] if prepared_messages else None
+                if last_msg and last_msg.get('role') == 'user':
+                    content = last_msg.get('content')
+                    if isinstance(content, list):
+                        func.log.debug(f"Final user message has multimodal content with {len(content)} blocks")
+                    elif isinstance(content, str):
+                        func.log.warning(f"Final user message is TEXT ONLY (images not attached!)")
+                    else:
+                        func.log.error(f"Unexpected content type: {type(content)}")
             
             tools = None
             tool_context = None
@@ -868,9 +938,11 @@ class ChatService:
                     message=message
                 )
             
+            # Images are already included in prepared_messages via _prepare_messages()
             raw_response = await client.generate_response(
-                prepared_messages, session, server_id, tools=tools, tool_context=tool_context,
-                images=processed_images if processed_images else None
+                prepared_messages, session, server_id,
+                tools=tools,
+                tool_context=tool_context
             )
             
             # Check if response is a structured error before post-processing

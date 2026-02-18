@@ -89,29 +89,6 @@ class OllamaClient(BaseAIClient):
         client = self.create_client(session, server_id)
         
         try:
-            # Process images if vision is enabled and images are provided
-            if images and self.supports_vision() and llm_params.get('vision_enabled', False):
-                # Modify the last user message to include images
-                if messages and messages[-1].get('role') == 'user':
-                    last_message = messages[-1]
-                    text_content = last_message.get('content', '')
-                    
-                    # Prepare multimodal content (Ollama format)
-                    _, images_array = self.prepare_multimodal_content(text_content, images)
-                    
-                    # Add images array to the last message
-                    messages[-1] = {
-                        'role': 'user',
-                        'content': text_content,
-                        'images': images_array
-                    }
-                    
-                    func.log.info(
-                        f"Added {len(images_array)} images to Ollama request for model {model} "
-                        f"(format: {type(images_array[0]).__name__ if images_array else 'none'}, "
-                        f"size: {len(images_array[0]) if images_array else 0} bytes)"
-                    )
-            
             api_params = {
                 "model": model,
                 "messages": messages,

@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.2"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.3"
 # DEFAULT AI CONFIGURATION
 # This file contains all default configuration values for AI behavior.
 # Edit these values to change the default behavior for all new AIs.
@@ -56,26 +56,48 @@ remove_ai_emoji: false
 
 # Optimized message format - clear, concise, and LLM-friendly
 # Shows display name with username and short ID: [11:09] Rarin (@lixxrarin) #1: message
-user_format_syntax: "[{time}] {name} (@{username}) #{short_id}: {message}"
+# {attachments} and {stickers} are automatically appended if present
+user_format_syntax: "[{time}] {name} (@{username}) #{short_id}: {message}{attachments}{stickers}"
 
 # Optimized reply format, includes quote of original message for LLM context
 # Format: > Author: original message
 #         [11:09] User (@user) #2 → #1: message
-user_reply_format_syntax: "{quote}[{time}] {name} (@{username}) #{short_id} → #{reply_short_id}: {message}"
+user_reply_format_syntax: "{quote}[{time}] {name} (@{username}) #{short_id} → #{reply_short_id}: {message}{attachments}{stickers}"
+
+# Attachment and Sticker Format Templates
+# These control how attachments and stickers are displayed in the message context
+# Note: When vision is enabled, images are sent as actual image data to the API
+# These templates only affect the TEXT representation in the context
+attachment_format: "[Attachment: {filename}]"  # Format for each attachment
+sticker_format: "[Sticker: {name}]"  # Format for each sticker
 
 # Available variables for customization:
 # - {time}: Message time (HH:MM format)
 # - {username}: Discord username (use for mentions)
 # - {name}: Display name
-# - {message}: Message content
+# - {message}: User message content
 # - {message_id}: Full Discord message ID (17-20 digits)
 # - {short_id}: Short message ID (1-16 digits), use for replies (save tokens)
+# - {attachments}: Formatted list of attachments (uses attachment_format template)
+# - {stickers}: Formatted list of stickers (uses sticker_format template)
 # - {quote}: Quote of original message in replies (format: "> Author Name: content\n")
 # - {reply_username}: Reply target username
 # - {reply_name}: Reply target display name
 # - {reply_message}: Original message being replied to
 # - {reply_message_id}: Original message ID (17-20 digits)
 # - {reply_short_id}: Reply target short ID (1-16 digits)
+
+# Attachment format variables:
+# - {filename}: Name of the file
+# - {url}: Direct URL to the file
+# - {content_type}: MIME type (e.g., "image/png")
+# - {size}: File size in bytes
+#
+# Sticker format variables:
+# - {name}: Sticker name
+# - {url}: Sticker URL
+# - {id}: Sticker ID
+# - {format}: Sticker format (e.g., "PNG", "APNG", "LOTTIE")
 
 # Character Card Settings
 greeting_index: 0
@@ -612,6 +634,58 @@ class AIConfigManager:
         except Exception as e:
             func.log.error(f"Error deleting preset '{preset_name}': {e}")
             return False
+
+
+def get_vision_config(
+    session: Dict[str, Any],
+    server_id: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    Resolve vision configuration from API connection or session config.
+    
+    This centralizes vision config resolution to avoid duplication and inconsistency.
+    
+    Priority:
+    1. API connection settings (if available)
+    2. Session config settings
+    3. Default values
+    
+    Args:
+        session: AI session data
+        server_id: Server ID for API connection resolution
+        
+    Returns:
+        Dict with vision_enabled, vision_detail, max_image_size
+    """
+    # Default values
+    vision_config = {
+        'vision_enabled': False,
+        'vision_detail': 'auto',
+        'max_image_size': 20
+    }
+    
+    # Try API connection first (highest priority)
+    if server_id:
+        connection_name = session.get("api_connection")
+        if connection_name:
+            connection = func.get_api_connection(server_id, connection_name)
+            if connection:
+                vision_config.update({
+                    'vision_enabled': connection.get('vision_enabled', False),
+                    'vision_detail': connection.get('vision_detail', 'auto'),
+                    'max_image_size': connection.get('max_image_size', 20)
+                })
+                return vision_config
+    
+    # Fallback to session config
+    config = session.get("config", {})
+    vision_config.update({
+        'vision_enabled': config.get('vision_enabled', False),
+        'vision_detail': config.get('vision_detail', 'auto'),
+        'max_image_size': config.get('max_image_size', 20)
+    })
+    
+    return vision_config
 
 
 # Global instance

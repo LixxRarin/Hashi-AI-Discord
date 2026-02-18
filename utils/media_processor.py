@@ -171,7 +171,7 @@ class ImageProcessor:
         # Encode to base64
         base64_data = self.encode_base64(image_data)
         
-        logger.info(f"Processed image: {filename} ({size / 1024:.1f}KB)")
+        logger.info(f"Processed image: {filename} ({size / 1024:.1f}KB, {content_type})")
         
         return {
             'url': url,
@@ -242,7 +242,9 @@ class MediaProcessor:
                     logger.error(error_msg)
                     errors.append(error_msg)
         
-        logger.info(f"Processed {len(images)} images")
+        logger.debug(f"Vision summary: {len(images)}/{len(attachments)} images processed successfully")
+        if errors:
+            logger.warning(f"{len(errors)} errors during image processing")
         
         return {
             'images': images,

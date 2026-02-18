@@ -99,22 +99,6 @@ class OpenAIClient(BaseAIClient):
         client = self.create_client(session, server_id)
         
         try:
-            # Process images if vision is enabled and images are provided
-            if images and self.supports_vision() and llm_params.get('vision_enabled', False):
-                # Modify the last user message to include images
-                if messages and messages[-1].get('role') == 'user':
-                    last_message = messages[-1]
-                    text_content = last_message.get('content', '')
-                    
-                    # Prepare multimodal content
-                    multimodal_content = self.prepare_multimodal_content(text_content, images)
-                    
-                    # Replace the last message with multimodal version
-                    messages[-1] = {
-                        'role': 'user',
-                        'content': multimodal_content
-                    }
-            
             api_params = self._build_api_params(model, messages, llm_params)
             
             if tools:
