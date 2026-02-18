@@ -449,6 +449,23 @@ class MessagePipeline:
             discord_ids = []
             await send_callback(display_response, discord_ids)
             
+            # Reset ignore counter when AI responds normally (not <IGNORE>)
+            if config.get("sleep_mode_enabled", False):
+                import time
+                import utils.func as func
+                
+                response_filter = get_response_filter()
+                state_key = (server_id, channel_id, ai_name)
+                
+                if state_key in response_filter.sleep_state:
+                    state = response_filter.sleep_state[state_key]
+                    if state["consecutive_refusals"] > 0:
+                        log.debug(f"Resetting ignore counter for AI {ai_name} (was {state['consecutive_refusals']})")
+                    state["consecutive_refusals"] = 0
+                    state["in_sleep_mode"] = False
+                    state["last_activity"] = time.time()
+                    response_filter._save_sleep_state(server_id, channel_id, ai_name)
+            
             
             formatted_user_content = await self.buffer.get_formatted_content(
                 server_id, channel_id, ai_name

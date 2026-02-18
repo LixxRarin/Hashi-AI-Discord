@@ -217,7 +217,7 @@ tool_calling_prompt: |
   • Preferences: "I prefer X", "I like Y" → add_memory
   • Personal facts: "I'm a developer", "My name is X" → add_memory
   • Important context: "I'm working on X", "We have 50 members" → add_memory
-  
+
   ALWAYS update CHANGED information:
   • Status updates: "We reached 100 members" (if you had ~100 saved) → update_memory
   • Corrections: "Actually I prefer Y" (if you had X saved) → update_memory
