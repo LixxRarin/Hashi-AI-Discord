@@ -802,12 +802,14 @@ class APIConnections(commands.Cog):
         think_switch = connection.get('think_switch', True)
         think_depth = connection.get('think_depth', 3)
         hide_thinking = connection.get('hide_thinking_tags', True)
+        save_thinking = connection.get('save_thinking_in_history', True)
         thinking_patterns = connection.get('thinking_tag_patterns', [])
         
         thinking_params = f"• Thinking: `{'Enabled' if think_switch else 'Disabled'}`"
         if think_switch:
             thinking_params += f" (Depth: {think_depth})"
         thinking_params += f"\n• Hide Thinking Tags: `{'Yes' if hide_thinking else 'No'}`"
+        thinking_params += f"\n• Save in History: `{'Yes' if save_thinking else 'No'}`"
         if thinking_patterns:
             thinking_params += f"\n• Tag Patterns: `{len(thinking_patterns)} pattern(s)`"
             # Show first 2 patterns as examples
@@ -817,6 +819,43 @@ class APIConnections(commands.Cog):
                 thinking_params += f"\n  └ ... and {len(thinking_patterns) - 2} more"
         
         embed.add_field(name="🧠 Thinking Configuration", value=thinking_params, inline=False)
+        
+        # Tool Calling section
+        max_tool_rounds = connection.get('max_tool_rounds', 5)
+        tool_calling_info = f"• Max Tool Rounds: `{max_tool_rounds}`\n"
+        tool_calling_info += f"• Allows AI to call functions up to {max_tool_rounds} times per response"
+        
+        embed.add_field(name="🔧 Tool Calling", value=tool_calling_info, inline=False)
+        
+        # Multimodal (Vision) section
+        vision_enabled = connection.get('vision_enabled', False)
+        vision_detail = connection.get('vision_detail', 'auto')
+        max_image_size = connection.get('max_image_size', 20)
+        
+        vision_info = f"• Vision: `{'Enabled' if vision_enabled else 'Disabled'}`"
+        if vision_enabled:
+            vision_info += f"\n• Detail Level: `{vision_detail}`"
+            vision_info += f"\n• Max Image Size: `{max_image_size} MB`"
+        else:
+            vision_info += f"\n• Enable vision to analyze images in conversations"
+        
+        embed.add_field(name="🖼️ Multimodal (Vision)", value=vision_info, inline=False)
+        
+        # Advanced Settings section (only if custom_extra_body exists)
+        custom_extra_body = connection.get('custom_extra_body')
+        if custom_extra_body:
+            import json
+            extra_body_str = json.dumps(custom_extra_body, indent=2)
+            
+            # Limitar tamanho para não estourar o embed
+            if len(extra_body_str) > 200:
+                extra_body_preview = extra_body_str[:200] + "..."
+            else:
+                extra_body_preview = extra_body_str
+            
+            advanced_info = f"**Custom Extra Body:**\n```json\n{extra_body_preview}\n```"
+            
+            embed.add_field(name="🔬 Advanced Settings", value=advanced_info, inline=False)
         
         # Get AIs using this connection
         ais_using = func.get_ais_using_connection(server_id, connection_name)
