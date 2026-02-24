@@ -177,8 +177,8 @@ class CardApplication(commands.Cog):
         channel_data[ai_name]["config"]["greeting_index"] = greeting_index
         
         # Clear conversation history and add new greeting
-        service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id, keep_greeting=False)
-        service.append_to_history(server_id, found_channel_id, ai_name, "assistant", greeting_text, current_chat_id)
+        await service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id, keep_greeting=False)
+        await service.append_to_history(server_id, found_channel_id, ai_name, "assistant", greeting_text, current_chat_id)
         
         # Save updated session
         await func.update_session_data(server_id, found_channel_id, channel_data)
@@ -469,8 +469,8 @@ class CardApplication(commands.Cog):
             user_name = "{{user}}"
             greeting_text = process_cbs(greeting_text, char_name, user_name, session)
             
-            service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id, keep_greeting=False)
-            service.append_to_history(server_id, found_channel_id, ai_name, "assistant", greeting_text, current_chat_id)
+            await service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id, keep_greeting=False)
+            await service.append_to_history(server_id, found_channel_id, ai_name, "assistant", greeting_text, current_chat_id)
         
         # Save updated session
         await func.update_session_data(server_id, found_channel_id, channel_data)

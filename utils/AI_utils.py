@@ -32,7 +32,7 @@ class discord_AI_bot:
         Args:
             client: The Discord client
         """
-        func.log.info("Synchronizing webhook configurations (no API calls)")
+        func.log.info("Synchronizing webhook configurations")
         
         for server_id, server_info in func.session_cache.items():
             for channel_id, channel_data in server_info.get("channels", {}).items():
@@ -309,9 +309,9 @@ class discord_AI_bot:
             
             # Truncate history at the found message
             if message_index > 0:
-                # Keep messages before the user message that triggered this response
-                # (message_index - 1 is the user message, so we keep everything before it)
-                messages_to_keep = history[:message_index - 1] if message_index > 0 else []
+                # Keep messages up to (but not including) the assistant response we're regenerating
+                # This preserves the user message that triggered the response
+                messages_to_keep = history[:message_index] if message_index > 0 else []
                 
                 await store.clear_history(server_id, channel_id, ai_name, chat_id, keep_greeting=False)
                 
@@ -351,7 +351,7 @@ class discord_AI_bot:
             
             # Trigger regeneration using the user message from ResponseManager state
             if state.user_message:
-                func.log.info(f"Triggering regeneration for AI {ai_name} with user message: {state.user_message[:50]}...")
+                func.log.info(f"Triggering regeneration for AI...")
                 
                 # Get the message pipeline from the bot
                 if hasattr(client, 'message_pipeline'):

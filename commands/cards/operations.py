@@ -191,11 +191,11 @@ class AIOperations(commands.Cog):
             if source_history:
                 # Copy history to new AI
                 new_history = copy.deepcopy(source_history)
-                service.set_ai_history(server_id, target_channel_id, new_ai_name, new_history, new_chat_id)
+                await service.set_ai_history(server_id, target_channel_id, new_ai_name, new_history, new_chat_id)
                 func.log.info(f"Copied {len(source_history)} messages to new AI '{new_ai_name}'")
         else:
             # Clear history for new AI
-            service.clear_ai_history(server_id, target_channel_id, new_ai_name, new_chat_id, keep_greeting=False)
+            await service.clear_ai_history(server_id, target_channel_id, new_ai_name, new_chat_id, keep_greeting=False)
         
         # Save new session
         target_channel_data[new_ai_name] = new_session

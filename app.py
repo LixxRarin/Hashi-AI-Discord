@@ -143,7 +143,6 @@ AI = AI_utils.discord_AI_bot()
 # Initialize bot instance
 bot = BridgeBot()
 
-
 async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, session):
     """
     This function bridge the new pipeline with existing Discord sending logic.
@@ -331,6 +330,17 @@ async def on_raw_reaction_add(payload):
             await AI.handle_generation_navigation(bot, payload, emoji, bot.message_pipeline.response_manager)
     except Exception as e:
         func.log.error("Reaction processing error: %s", e)
+
+
+@bot.event
+async def on_command_error(ctx, error):
+    """Handle command errors"""
+    # Silently ignore CommandNotFound errors
+    if isinstance(error, commands.CommandNotFound):
+        return
+    
+    # Log other errors normally
+    func.log.error("Command error in %s: %s", ctx.command, error)
 
 
 # Start the bot

@@ -284,8 +284,20 @@ class HistoryManager(commands.Cog):
                 break
         
         if target_index is None:
-            func.log.warning(f"Target message {target_message_id} not found in history, deleting all")
-            target_index = 0
+            func.log.warning(f"Target message {target_message_id} not found in history")
+            return 0, 0, [target_message_id]
+        
+        # 2.5. Protect greeting message (index 0)
+        if target_index == 0:
+            func.log.warning(f"Cannot delete greeting message (index 0) in cascade mode")
+            # Start from index 1 instead to preserve greeting
+            if len(full_history) > 1:
+                target_index = 1
+                func.log.info(f"Adjusted target_index to 1 to preserve greeting")
+            else:
+                # Only greeting exists, nothing to delete
+                func.log.info(f"Only greeting exists, nothing to delete")
+                return 0, 0, []
         
         # 3. Collect discord IDs to delete (target + newer messages)
         discord_ids_to_delete = []
@@ -374,6 +386,11 @@ class HistoryManager(commands.Cog):
         if target_index is None or target_msg is None:
             func.log.warning(f"Target message {target_message_id} not found in history")
             return 0, 0, [target_message_id]
+        
+        # 2.5. Protect greeting message (index 0)
+        if target_index == 0 and target_msg.role == "assistant":
+            func.log.warning(f"Cannot delete greeting message (index 0)")
+            return 0, 0, []
         
         # 3. Delete only the target message (not its pair)
         indices_to_remove = [target_index]
