@@ -12,7 +12,7 @@ yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
 # Default configuration content
-DEFAULT_CONFIG_CONTENT = r"""version: "1.4.0" # Don't touch here
+DEFAULT_CONFIG_CONTENT = r"""version: "1.4.1" # Don't touch here
 
 # Discord Bot Configuration
 Discord:
@@ -62,6 +62,98 @@ Options:
   # Enable debug mode for troubleshooting.
   # When true, the bot will log detailed information about its processes in the console.
   # This mode should be off in production to avoid excessive logging.
+
+# Discord Rich Presence Configuration
+# This feature displays custom status on YOUR Discord profile (the user running the bot)
+# Uses discord-rpc library for full feature support including clickable URLs
+# To use this feature, you need to create a Discord Application at:
+# https://discord.com/developers/applications
+RichPresence:
+  
+  enabled: false
+  # Enable or disable Rich Presence.
+  # If disabled, no RPC will be shown on your profile.
+  
+  application_id: ""
+  # Your Discord Application ID (Client ID) from the Developer Portal.
+  # Create an application at: https://discord.com/developers/applications
+  
+  # Activity Configuration
+  activity_type: "playing"
+  # Type of activity shown in Rich Presence.
+  # Options: "playing", "watching", "listening", "competing"
+  # Examples:
+  #   "playing" -> "Playing {details}"
+  #   "watching" -> "Watching {details}"
+  #   "listening" -> "Listening to {details}"
+  #   "competing" -> "Competing in {details}"
+  
+  status_display_type: "name"
+  # Controls which field is displayed in the user's status bar.
+  # Options: "name", "state", "details"
+  # - "name": Shows the application name from Developer Portal (default)
+  # - "state": Shows the state field
+  # - "details": Shows the details field
+  
+  # Customizable text fields (supports dynamic variables)
+  # Available variables: {server_count}, {ai_count}, {channel_count}, {version}, {uptime}
+  details: "Running Hashi AI Bot"
+  # First line of text shown in your Rich Presence.
+  
+  details_url: ""
+  # Make the details text clickable (optional).
+  # When users click the details text, this URL will open in their browser.
+  # Example: "https://github.com/LixxRarin/Hashi-AI-Discord"
+  
+  state: "Serving {server_count} servers | {ai_count} AIs active"
+  # Second line of text shown in your Rich Presence.
+  # This example shows dynamic server and AI counts.
+  
+  state_url: ""
+  # Make the state text clickable (optional).
+  # When users click the state text, this URL will open in their browser.
+  # Example: "https://discord.gg/YOUR_INVITE"
+  
+  show_timer: true
+  # Show elapsed time counter (e.g., "02:34:15 elapsed").
+  # This displays how long the bot has been running.
+  
+  # Buttons (maximum 2 allowed by Discord)
+  # Each button needs a label and a valid HTTPS URL
+  # Important: You cannot click or see your own buttons, only other users can see and click them!
+  buttons:
+    - label: "GitHub Repository"
+      url: "https://github.com/LixxRarin/Hashi-AI-Discord"
+    # - label: "Join Discord"
+    #   url: "https://discord.gg/YOUR_INVITE"
+  
+  # Images (optional - must be uploaded to Discord Developer Portal first)
+  # Go to your application > Rich Presence > Art Assets to upload images
+  large_image: ""
+  # Name of the large image asset (leave empty to disable).
+  
+  large_text: "Hashi AI Discord Bot v{version}"
+  # Hover text for the large image (supports variables).
+  
+  large_url: ""
+  # Make the large image clickable (optional).
+  # When users click the image, this URL will open in their browser.
+  # Example: "https://github.com/LixxRarin/Hashi-AI-Discord"
+  
+  small_image: ""
+  # Name of the small image asset (leave empty to disable).
+  
+  small_text: ""
+  # Hover text for the small image (supports variables).
+  
+  small_url: ""
+  # Make the small image clickable (optional).
+  # When users click the image, this URL will open in their browser.
+  
+  update_interval: 60
+  # How often to update the Rich Presence (in seconds).
+  # Updates dynamic variables like server count and AI count.
+  # Minimum recommended: 15 seconds to avoid rate limits.
 """
 
 

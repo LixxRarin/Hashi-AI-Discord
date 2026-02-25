@@ -9,6 +9,7 @@ from discord.ext import commands
 import utils.updater as updater
 import utils.AI_utils as AI_utils
 import utils.func as func
+from utils.rich_presence import RichPresenceManager, set_rpc_manager
 
 # Initialize colorama for colored logs
 init(autoreset=True)
@@ -86,6 +87,15 @@ class BridgeBot(commands.Bot):
 
     async def close(self):
         """Cleanup when bot is shutting down"""
+        # Shutdown Rich Presence
+        try:
+            from utils.rich_presence import get_rpc_manager
+            rpc_manager = get_rpc_manager()
+            if rpc_manager:
+                await rpc_manager.stop()
+        except Exception as e:
+            func.log.debug(f"Error stopping Rich Presence: {e}")
+        
         # Shutdown message pipeline gracefully
         if hasattr(self, 'message_pipeline'):
             await self.message_pipeline.shutdown()
@@ -102,6 +112,15 @@ class BridgeBot(commands.Bot):
 
             # Initialize all webhooks with their respective character configurations
             await self._initialize_all_webhooks()
+            
+            # Initialize Rich Presence (if enabled)
+            try:
+                rpc_manager = RichPresenceManager(self)
+                set_rpc_manager(rpc_manager)
+                await rpc_manager.connect()
+            except Exception as e:
+                func.log.warning(f"Failed to initialize Rich Presence: {e}")
+                func.log.debug("Bot will continue running without Rich Presence")
 
     async def _initialize_all_webhooks(self):
         """Initialize all webhooks with their respective character configurations"""

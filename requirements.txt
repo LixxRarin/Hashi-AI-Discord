@@ -12,3 +12,4 @@ tiktoken
 psutil
 ollama
 anthropic
+discord-rpc
