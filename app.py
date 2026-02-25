@@ -314,6 +314,204 @@ async def on_message(message):
 
 
 @bot.event
+async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
+    """
+    Handle message deletions and update conversation histories.
+    
+    When a user deletes a message, this removes it from:
+    - MessageBuffer (if not yet processed)
+    - ConversationStore (all AIs in the channel)
+    """
+    try:
+        # Ignore if no guild (DM)
+        if not payload.guild_id:
+            return
+        
+        server_id = str(payload.guild_id)
+        channel_id = str(payload.channel_id)
+        message_id = str(payload.message_id)
+        
+        # Get session data for the channel
+        session_data = func.get_session_data(server_id, channel_id)
+        
+        if not session_data:
+            # No AIs configured in this channel
+            return
+        
+        # Track how many histories were updated
+        removed_from_buffer = 0
+        removed_from_history = 0
+        
+        # Process for each AI in the channel
+        for ai_name, session in session_data.items():
+            chat_id = session.get("chat_id", "default")
+            
+            # Try to remove from buffer (if message not yet processed)
+            if await bot.message_pipeline.buffer.remove_message_by_discord_id(
+                server_id, channel_id, ai_name, message_id
+            ):
+                removed_from_buffer += 1
+                func.log.debug(
+                    f"Removed message {message_id} from buffer for AI {ai_name}"
+                )
+            
+            # Try to remove from conversation history
+            from messaging.store import get_store
+            store = get_store()
+            
+            if await store.delete_message_by_discord_id(
+                server_id, channel_id, ai_name, message_id, chat_id
+            ):
+                removed_from_history += 1
+                func.log.debug(
+                    f"Removed message {message_id} from history for AI {ai_name}"
+                )
+        
+        # Log summary if any updates were made
+        if removed_from_buffer > 0 or removed_from_history > 0:
+            func.log.info(
+                f"Message {message_id} deleted - removed from {removed_from_buffer} buffer(s) "
+                f"and {removed_from_history} history(ies)"
+            )
+        
+    except Exception as e:
+        func.log.error(f"Error processing message deletion: {e}")
+
+
+@bot.event
+async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
+    """
+    Handle message edits and update conversation histories.
+    
+    When a user edits a message, this updates the content in:
+    - ConversationStore (all AIs in the channel)
+    
+    Note: Messages in buffer are not updated (they'll be processed with old content)
+    """
+    try:
+        # Ignore if no guild (DM)
+        if not payload.guild_id:
+            return
+        
+        server_id = str(payload.guild_id)
+        channel_id = str(payload.channel_id)
+        message_id = str(payload.message_id)
+        
+        # Get the channel object
+        channel = bot.get_channel(int(channel_id))
+        if not channel:
+            func.log.warning(f"Channel {channel_id} not found for message edit")
+            return
+        
+        # Fetch the updated message
+        try:
+            message = await channel.fetch_message(int(message_id))
+        except discord.NotFound:
+            func.log.debug(f"Message {message_id} not found (may have been deleted)")
+            return
+        except discord.Forbidden:
+            func.log.warning(f"No permission to fetch message {message_id}")
+            return
+        except Exception as e:
+            func.log.warning(f"Failed to fetch edited message {message_id}: {e}")
+            return
+        
+        # Ignore bot's own messages
+        if message.author.id == bot.user.id:
+            return
+        
+        # Get session data for the channel
+        session_data = func.get_session_data(server_id, channel_id)
+        
+        if not session_data:
+            # No AIs configured in this channel
+            return
+        
+        # Track how many histories were updated
+        updated_count = 0
+        
+        # Process for each AI in the channel
+        for ai_name, session in session_data.items():
+            chat_id = session.get("chat_id", "default")
+            
+            # Ensure session has context for MessageProcessor
+            session_with_context = session.copy()
+            session_with_context["server_id"] = server_id
+            session_with_context["channel_id"] = channel_id
+            session_with_context["ai_name"] = ai_name
+            
+            # Re-format the message using MessageProcessor
+            from messaging.buffer import PendingMessage
+            from messaging.intake import get_intake
+            
+            # Process message to get metadata
+            intake = get_intake()
+            metadata = await intake.process(message, bot.user.id, session_data)
+            
+            if not metadata:
+                continue
+            
+            # Create pending message for formatting
+            msg_to_format = PendingMessage(
+                content=metadata.content,
+                author_id=metadata.author_id,
+                author_name=metadata.author_name,
+                author_display_name=metadata.author_display_name,
+                timestamp=metadata.timestamp,
+                message_id=metadata.message_id,
+                reply_to=metadata.reply_to_id,
+                attachments=metadata.attachments,
+                stickers=metadata.stickers,
+                raw_message=metadata.raw_message
+            )
+            
+            # Handle reply if present
+            reply_msg = None
+            if metadata.reply_to_id and metadata.reply_to_content:
+                reply_author_name = ai_name if metadata.reply_to_is_bot else (metadata.reply_to_author_name or "Unknown")
+                
+                reply_msg = PendingMessage(
+                    content=metadata.reply_to_content,
+                    author_id="",
+                    author_name=reply_author_name,
+                    author_display_name=reply_author_name,
+                    timestamp=metadata.timestamp,
+                    message_id=metadata.reply_to_id,
+                    reply_to=None,
+                    raw_message=None
+                )
+            
+            # Format the message
+            formatted_content = await bot.message_pipeline.processor.format_single_message(
+                msg_to_format,
+                session_with_context,
+                reply_msg
+            )
+            
+            # Update in conversation history
+            from messaging.store import get_store
+            store = get_store()
+            
+            if await store.update_message_by_discord_id(
+                server_id, channel_id, ai_name, message_id, formatted_content, chat_id
+            ):
+                updated_count += 1
+                func.log.debug(
+                    f"Updated message {message_id} in history for AI {ai_name} "
+                    f"(new length: {len(formatted_content)})"
+                )
+        
+        # Log summary if any updates were made
+        if updated_count > 0:
+            func.log.info(
+                f"Message {message_id} edited - updated in {updated_count} history(ies)"
+            )
+        
+    except Exception as e:
+        func.log.error(f"Error processing message edit: {e}")
+
+
+@bot.event
 async def on_raw_reaction_add(payload):
     """Handle reaction additions for regeneration and navigation"""
     try:

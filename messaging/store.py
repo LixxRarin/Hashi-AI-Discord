@@ -1110,6 +1110,181 @@ class ConversationStore:
         # Save outside lock
         return await self.save_immediate()
     
+    def _find_message_index_by_discord_id(
+        self,
+        messages: List[Message],
+        discord_id: str
+    ) -> Optional[int]:
+        """
+        Find the index of a message by discord_id.
+        
+        Searches in:
+        - msg.discord_id (user messages)
+        - msg.discord_ids (bot messages - list)
+        
+        Args:
+            messages: List of messages to search
+            discord_id: Discord message ID to find
+            
+        Returns:
+            Index of the message or None if not found
+        """
+        for i, msg in enumerate(messages):
+            # Check user messages (single discord_id)
+            if msg.role == "user" and msg.discord_id == discord_id:
+                return i
+            # Check bot messages (list of discord_ids)
+            elif msg.role == "assistant" and msg.discord_ids and discord_id in msg.discord_ids:
+                return i
+        
+        return None
+    
+    async def update_message_by_discord_id(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        discord_id: str,
+        new_content: str,
+        chat_id: str = "default"
+    ) -> bool:
+        """
+        Update the content of a message by discord_id.
+        
+        Behavior:
+        - Searches in user messages (discord_id) and bot messages (discord_ids)
+        - Updates ONLY the 'content' field
+        - Preserves: timestamp, author, short_id, attachments, etc.
+        - Updates metadata.updated_at
+        - Schedules automatic save
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            discord_id: Discord message ID to update
+            new_content: New formatted content
+            chat_id: Chat ID (default: "default")
+            
+        Returns:
+            True if found and updated, False otherwise
+            
+        Edge Cases:
+            - Message doesn't exist: returns False
+            - Consolidated message: updates only the specific message
+            - Multiple AIs: each maintains its own history
+        """
+        async with self._lock:
+            try:
+                chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
+                
+                # Find message index
+                msg_index = self._find_message_index_by_discord_id(chat.messages, discord_id)
+                
+                if msg_index is None:
+                    log.debug(
+                        f"Message {discord_id} not found in history for AI {ai_name} "
+                        f"(server: {server_id}, channel: {channel_id}, chat: {chat_id})"
+                    )
+                    return False
+                
+                # Update only the content
+                old_content = chat.messages[msg_index].content
+                chat.messages[msg_index].content = new_content
+                
+                # Update metadata
+                chat.metadata.updated_at = time.time()
+                
+                # Schedule save
+                self.schedule_save()
+                
+                log.debug(
+                    f"Updated message {discord_id} for AI {ai_name} "
+                    f"(index: {msg_index}, old length: {len(old_content)}, new length: {len(new_content)})"
+                )
+                
+                return True
+                
+            except Exception as e:
+                log.error(f"Error updating message {discord_id}: {e}")
+                return False
+    
+    async def delete_message_by_discord_id(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        discord_id: str,
+        chat_id: str = "default"
+    ) -> bool:
+        """
+        Remove a message from history by discord_id.
+        
+        Behavior:
+        - Removes from chat.messages list
+        - Updates metadata.message_count and updated_at
+        - Does NOT remove short_id mapping (for historical references)
+        - Schedules automatic save
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            discord_id: Discord message ID to delete
+            chat_id: Chat ID (default: "default")
+            
+        Returns:
+            True if found and deleted, False otherwise
+            
+        Edge Cases:
+            - Message doesn't exist: returns False
+            - Message is greeting (index 0): returns False (protected)
+            - Message has replies: replies keep reply_to_id (orphaned)
+        """
+        async with self._lock:
+            try:
+                chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
+                
+                # Find message index
+                msg_index = self._find_message_index_by_discord_id(chat.messages, discord_id)
+                
+                if msg_index is None:
+                    log.debug(
+                        f"Message {discord_id} not found in history for AI {ai_name} "
+                        f"(server: {server_id}, channel: {channel_id}, chat: {chat_id})"
+                    )
+                    return False
+                
+                # Protect greeting message (index 0, assistant role)
+                if msg_index == 0 and chat.messages[msg_index].role == "assistant":
+                    log.warning(
+                        f"Cannot delete greeting message (index 0) for AI {ai_name} "
+                        f"(server: {server_id}, channel: {channel_id}, chat: {chat_id})"
+                    )
+                    return False
+                
+                # Remove the message
+                removed_msg = chat.messages.pop(msg_index)
+                
+                # Update metadata
+                chat.metadata.updated_at = time.time()
+                chat.metadata.message_count = len(chat.messages)
+                
+                # Schedule save
+                self.schedule_save()
+                
+                log.debug(
+                    f"Deleted message {discord_id} for AI {ai_name} "
+                    f"(index: {msg_index}, role: {removed_msg.role}, "
+                    f"remaining messages: {len(chat.messages)})"
+                )
+                
+                return True
+                
+            except Exception as e:
+                log.error(f"Error deleting message {discord_id}: {e}")
+                return False
+    
     def get_stats(self) -> Dict[str, Any]:
         """Get conversation statistics."""
         total_messages = 0

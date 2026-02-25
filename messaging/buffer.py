@@ -300,6 +300,48 @@ class MessageBuffer:
                 cleared_count, ai_name, preserved_count
             )
     
+    async def remove_message_by_discord_id(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        discord_id: str
+    ) -> bool:
+        """
+        Remove a specific pending message from the buffer by discord_id.
+        
+        Useful when a message is deleted before the AI processes it.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            discord_id: Discord message ID to remove
+            
+        Returns:
+            True if found and removed, False otherwise
+        """
+        async with self._lock:
+            state = self._ensure_path(server_id, channel_id, ai_name)
+            
+            # Find message with matching discord_id
+            original_count = state.get_count()
+            state.pending_messages = [
+                msg for msg in state.pending_messages
+                if msg.message_id != discord_id
+            ]
+            new_count = state.get_count()
+            
+            removed = original_count > new_count
+            
+            if removed:
+                log.debug(
+                    f"Removed message {discord_id} from buffer for AI {ai_name} "
+                    f"(remaining: {new_count})"
+                )
+            
+            return removed
+    
     async def set_processing(
         self,
         server_id: str,
