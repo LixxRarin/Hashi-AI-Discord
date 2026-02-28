@@ -3,6 +3,7 @@ import platform
 import os
 
 import discord
+from discord import app_commands
 from colorama import init
 from discord.ext import commands
 
@@ -316,13 +317,15 @@ async def on_message(message):
                     callback = await create_callback(server_id, channel_id, ai_name, session, message)
                     
                     # Start monitoring - TimingController prevents duplicate tasks
+                    # Pass bot.user.id for sleep mode wake-up detection
                     await bot.message_pipeline.timing.start_monitoring(
                         server_id,
                         channel_id,
                         ai_name,
                         session,
                         bot.message_pipeline.buffer,
-                        callback
+                        callback,
+                        bot_user_id=bot.user.id
                     )
 
         # Process traditional commands

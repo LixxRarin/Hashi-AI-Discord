@@ -59,6 +59,8 @@ class MessagePipeline:
         """
         Check if message matches any wake-up pattern.
         
+        This is a wrapper around the utility function for backward compatibility.
+        
         Args:
             message_content: The message content to check
             ai_name: Name of the AI
@@ -69,32 +71,15 @@ class MessagePipeline:
         Returns:
             True if any pattern matches
         """
-        if not patterns:
-            # Default behavior: wake on mention or reply
-            return is_mentioned or is_reply_to_bot
+        from utils.sleep_mode_utils import check_wakeup_patterns
         
-        for pattern in patterns:
-            # Handle special placeholders
-            if pattern == "{ai_mention}":
-                if is_mentioned:
-                    return True
-            elif pattern == "{reply}":
-                if is_reply_to_bot:
-                    return True
-            elif pattern == "{ai_name}":
-                # Check if AI name appears in message (case-insensitive)
-                if re.search(re.escape(ai_name), message_content, re.IGNORECASE):
-                    return True
-            else:
-                # Treat as regex pattern
-                try:
-                    if re.search(pattern, message_content, re.IGNORECASE):
-                        return True
-                except re.error as e:
-                    log.warning(f"Invalid wake-up regex pattern '{pattern}': {e}")
-                    continue
-        
-        return False
+        return check_wakeup_patterns(
+            message_content,
+            ai_name,
+            is_mentioned,
+            is_reply_to_bot,
+            patterns
+        )
     
     async def process_message(
         self,

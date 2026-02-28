@@ -76,6 +76,7 @@ class TimingController:
         self._last_check: Dict[str, float] = {}
         self._last_response_time: Dict[str, float] = {}  # Track when responses were sent
         self._response_lock = asyncio.Lock()  # Thread safety for response time tracking
+        self._bot_user_ids: Dict[str, int] = {}  # Store bot_user_id per monitoring task
 
     def _get_task_key(self, server_id: str, channel_id: str, ai_name: str) -> str:
         """Generate unique key for monitoring task."""
@@ -111,12 +112,14 @@ class TimingController:
         ai_name: str,
         session: Dict[str, Any],
         buffer,  # MessageBuffer instance
-        force: bool = False
+        force: bool = False,
+        bot_user_id: Optional[int] = None
     ) -> bool:
         """
         Centralized decision: should the AI respond now?
         
         This considers:
+        - Sleep mode state (checked FIRST to avoid unnecessary processing)
         - Time since last message
         - Number of pending messages
         - User typing status
@@ -130,6 +133,7 @@ class TimingController:
             session: AI session data
             buffer: MessageBuffer instance
             force: Force response regardless of timing
+            bot_user_id: Bot user ID for checking mentions (needed for sleep mode wake-up)
             
         Returns:
             True if AI should respond now
@@ -145,6 +149,32 @@ class TimingController:
         # Check if last response was an error (prevent retry loops)
         if session.get("last_response_was_error", False):
             return False
+        
+        # SLEEP MODE CHECK - Do this BEFORE timing checks to avoid unnecessary processing
+        # This prevents the "AI responding" log spam when in sleep mode
+        pending = await buffer.get_pending(server_id, channel_id, ai_name)
+        if pending:
+            from utils.sleep_mode_utils import should_wake_from_sleep
+            
+            in_sleep, should_wake = should_wake_from_sleep(
+                server_id,
+                channel_id,
+                ai_name,
+                session,
+                pending,
+                bot_user_id
+            )
+            
+            if in_sleep and not should_wake:
+                # AI is in sleep mode and no wake-up pattern found
+                # Return False to prevent triggering response
+                # Monitoring continues (to detect future wake-up patterns)
+                return False
+            
+            if in_sleep and should_wake:
+                # AI is in sleep mode but wake-up pattern detected
+                # Log the wake-up and proceed with normal response logic
+                log.info(f"AI {ai_name} waking up from sleep mode (wake-up pattern detected)")
         
         # Get timing configuration
         config = TimingConfig.from_session(session)
@@ -275,7 +305,8 @@ class TimingController:
         ai_name: str,
         session: Dict[str, Any],
         buffer,  # MessageBuffer instance
-        response_callback: Callable[[], Awaitable[None]]
+        response_callback: Callable[[], Awaitable[None]],
+        bot_user_id: Optional[int] = None
     ) -> None:
         """
         Start monitoring for auto-response triggers.
@@ -290,8 +321,13 @@ class TimingController:
             session: AI session data
             buffer: MessageBuffer instance
             response_callback: Async function to call when should respond
+            bot_user_id: Bot user ID for checking mentions (needed for sleep mode wake-up)
         """
         task_key = self._get_task_key(server_id, channel_id, ai_name)
+        
+        # Store bot_user_id for this monitoring task
+        if bot_user_id is not None:
+            self._bot_user_ids[task_key] = bot_user_id
         
         # Check if there's already a monitoring task running
         if task_key in self._monitoring_tasks:
@@ -307,9 +343,13 @@ class TimingController:
                 while True:
                     await asyncio.sleep(MONITOR_CHECK_INTERVAL)
                     
-                    # Check if should respond
+                    # Get bot_user_id for this task (if available)
+                    task_bot_id = self._bot_user_ids.get(task_key)
+                    
+                    # Check if should respond (with sleep mode awareness)
                     should_respond = await self.should_respond(
-                        server_id, channel_id, ai_name, session, buffer
+                        server_id, channel_id, ai_name, session, buffer,
+                        bot_user_id=task_bot_id
                     )
                     
                     if should_respond:
@@ -367,6 +407,10 @@ class TimingController:
             async with self._response_lock:
                 if task_key in self._last_response_time:
                     del self._last_response_time[task_key]
+            
+            # Cleanup bot_user_id to prevent memory leak
+            if task_key in self._bot_user_ids:
+                del self._bot_user_ids[task_key]
     
     async def stop_all_monitoring(self) -> None:
         """
@@ -383,6 +427,9 @@ class TimingController:
         # Cleanup all cooldown markers
         async with self._response_lock:
             self._last_response_time.clear()
+        
+        # Cleanup all bot_user_ids
+        self._bot_user_ids.clear()
         
         log.debug("Stopped all monitoring tasks")
     
