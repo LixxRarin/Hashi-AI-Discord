@@ -403,7 +403,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 @bot.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     """
-    Handle message edits and update conversation histories.
+    Handle message edits and update conversation histories. 
     
     When a user edits a message, this updates the content in:
     - ConversationStore (all AIs in the channel)

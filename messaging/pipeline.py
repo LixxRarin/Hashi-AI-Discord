@@ -263,68 +263,51 @@ class MessagePipeline:
         
         config = session_with_context.get("config", {})
         
-        # Check if AI is in sleep mode
-        if config.get("enable_ignore_system", False) and config.get("sleep_mode_enabled", False):
-            import time
-            
-            response_filter = get_response_filter()
-            state_key = (server_id, channel_id, ai_name)
-            
-            if state_key in response_filter.sleep_state:
-                state = response_filter.sleep_state[state_key]
-                
-                if state.get("in_sleep_mode", False):
-                    # AI is in sleep mode, check if should wake up
-                    wakeup_patterns = config.get("sleep_wakeup_patterns", ["{ai_mention}", "{reply}"])
-                    
-                    # Check mentions and replies
-                    is_mentioned = False
-                    is_reply_to_bot = False
-                    message_content = ""
-                    
-                    if bot_user_id:
-                        for msg in pending:
-                            message_content += msg.content + " "
-                            if msg.raw_message:
-                                # Check if bot is mentioned
-                                if hasattr(msg.raw_message, 'mentions'):
-                                    is_mentioned = is_mentioned or any(
-                                        m.id == bot_user_id for m in msg.raw_message.mentions
-                                    )
-                                
-                                # Check if message is a reply to bot
-                                if hasattr(msg.raw_message, 'reference') and msg.raw_message.reference:
-                                    is_reply_to_bot = True
-                    
-                    # Check if any wake-up pattern matches
-                    should_wake = self._check_wakeup_patterns(
-                        message_content,
-                        ai_name,
-                        is_mentioned,
-                        is_reply_to_bot,
-                        wakeup_patterns
-                    )
-                    
-                    if should_wake:
-                        log.info(f"AI {ai_name} waking up from ignore-based sleep mode")
-                        state["in_sleep_mode"] = False
-                        state["consecutive_refusals"] = 0
-                        state["last_activity"] = time.time()
-                        response_filter._save_sleep_state(server_id, channel_id, ai_name)
-                    else:
-                        # Stay in sleep mode
-                        log.debug(f"AI {ai_name} staying in ignore-based sleep mode (no wake-up pattern matched)")
-                        await self.buffer.clear_specific_messages(
-                            server_id, channel_id, ai_name, processing_message_ids
-                        )
-                        return None
-        
+        # Ensure only one sleep mode system is active at a time
+        # Priority: ignore system > response filter
         if config.get("enable_ignore_system", False) and config.get("use_response_filter", False):
             log.warning(
                 f"Both ignore system and response filter are enabled for AI {ai_name}! "
                 f"Disabling response filter (ignore system takes precedence)."
             )
             config["use_response_filter"] = False
+        
+        # IGNORE SYSTEM SLEEP MODE CHECK
+        # This handles sleep mode when using <IGNORE> tags
+        if config.get("enable_ignore_system", False) and config.get("sleep_mode_enabled", False):
+            from utils.sleep_mode_utils import should_wake_from_sleep
+            
+            in_sleep, should_wake = should_wake_from_sleep(
+                server_id,
+                channel_id,
+                ai_name,
+                session_with_context,
+                pending,
+                bot_user_id
+            )
+            
+            if in_sleep and not should_wake:
+                # AI is in sleep mode and no wake-up pattern found
+                log.debug(f"AI {ai_name} staying in ignore-based sleep mode (no wake-up pattern matched)")
+                await self.buffer.clear_specific_messages(
+                    server_id, channel_id, ai_name, processing_message_ids
+                )
+                return None
+            
+            if in_sleep and should_wake:
+                # AI is waking up from sleep mode
+                log.info(f"AI {ai_name} waking up from ignore-based sleep mode (wake-up pattern detected)")
+                # The should_wake_from_sleep function doesn't modify state, so we need to do it here
+                import time
+                response_filter = get_response_filter()
+                state_key = (server_id, channel_id, ai_name)
+                
+                if state_key in response_filter.sleep_state:
+                    state = response_filter.sleep_state[state_key]
+                    state["in_sleep_mode"] = False
+                    state["consecutive_refusals"] = 0
+                    state["last_activity"] = time.time()
+                    response_filter._save_sleep_state(server_id, channel_id, ai_name)
         
         if config.get("use_response_filter", False):
             is_mentioned = False

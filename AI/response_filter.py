@@ -182,11 +182,24 @@ class ResponseFilter:
         
         # Check if in sleep mode
         if sleep_mode_enabled and state["in_sleep_mode"]:
-            # Wake up if mentioned or replied to
-            if is_mentioned or is_reply_to_bot:
+            # Get wake-up patterns from config
+            wakeup_patterns = config.get("sleep_wakeup_patterns", ["{ai_mention}", "{reply}"])
+            
+            # Check if should wake up using the utility function
+            from utils.sleep_mode_utils import check_wakeup_patterns
+            
+            should_wake = check_wakeup_patterns(
+                cached_messages,  # Use cached messages as content to check
+                ai_name,
+                is_mentioned,
+                is_reply_to_bot,
+                wakeup_patterns
+            )
+            
+            if should_wake:
                 func.log.info(
-                    f"[SLEEP MODE] AI {ai_name} waking up - "
-                    f"{'mentioned' if is_mentioned else 'replied to'}"
+                    f"AI {ai_name} waking up from response filter sleep mode - "
+                    f"wake-up pattern detected"
                 )
                 state["in_sleep_mode"] = False
                 state["consecutive_refusals"] = 0
@@ -196,18 +209,18 @@ class ResponseFilter:
                 return True, {
                     "should_respond": True,
                     "confidence": 1.0,
-                    "reasoning": f"AI woke up from sleep mode ({'mentioned' if is_mentioned else 'replied to'})",
+                    "reasoning": f"AI woke up from sleep mode (wake-up pattern detected)",
                     "conversation_type": "direct_question"
                 }
             else:
                 # Stay asleep
                 func.log.debug(
-                    f"[SLEEP MODE] AI {ai_name} staying asleep - not mentioned or replied to"
+                    f"[SLEEP MODE] AI {ai_name} staying asleep - no wake-up pattern matched"
                 )
                 return False, {
                     "should_respond": False,
                     "confidence": 1.0,
-                    "reasoning": "AI is in sleep mode (not mentioned or replied to)",
+                    "reasoning": "AI is in sleep mode (no wake-up pattern matched)",
                     "conversation_type": "sleep_mode"
                 }
         
