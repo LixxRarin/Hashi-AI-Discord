@@ -10,10 +10,12 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 import utils.func as func
 from commands.shared.autocomplete import AutocompleteHelpers
+from utils.pagination import PaginatedView
+from utils.thumbnail_helper import upload_thumbnail_to_discord
 
 
 class CardRegistry(commands.Cog):
@@ -476,7 +478,7 @@ class CardRegistry(commands.Cog):
     @app_commands.command(name="list_cards", description="List all registered character cards in this server")
     @app_commands.default_permissions(administrator=True)
     async def list_cards(self, interaction: discord.Interaction):
-        """List all character cards registered in the server with improved visualization."""
+        """List all character cards registered in the server, separated by usage status with pagination."""
         await interaction.response.defer(ephemeral=True)
         
         server_id = str(interaction.guild.id)
@@ -495,28 +497,58 @@ class CardRegistry(commands.Cog):
             return
         
         # Collect card information with usage data
-        card_list = []
+        cards_in_use = []
+        cards_available = []
+        
         for card_name, card_info in cards.items():
             ais_using = func.get_ais_using_card(server_id, card_name)
-            card_list.append({
+            card_data = {
                 "card_name": card_name,
                 "card_info": card_info,
                 "usage_count": len(ais_using),
                 "ais_using": ais_using
-            })
+            }
+            
+            if len(ais_using) > 0:
+                cards_in_use.append(card_data)
+            else:
+                cards_available.append(card_data)
         
-        # Sort: most used first, then alphabetically
-        card_list.sort(key=lambda x: (-x["usage_count"], x["card_name"].lower()))
+        # Sort each category alphabetically
+        cards_in_use.sort(key=lambda x: x["card_name"].lower())
+        cards_available.sort(key=lambda x: x["card_name"].lower())
         
-        # Create embed with better colors
-        embed = discord.Embed(
-            title=f"🎭 Character Cards - {interaction.guild.name}",
-            description=f"**Total Cards:** {len(cards)} registered",
-            color=discord.Color.purple()
-        )
+        # Upload thumbnails to Discord CDN before creating embeds
+        # Since we show 1 card per page, upload thumbnail for EACH card
+        thumbnail_urls = {}  # card_name -> thumbnail_url
         
-        # Add card fields with improved formatting
-        for idx, card_data in enumerate(card_list, 1):
+        # Upload thumbnail for each card in use
+        for card_data in cards_in_use:
+            card_name = card_data["card_name"]
+            cache_path = card_data["card_info"].get("cache_path")
+            if cache_path and Path(cache_path).suffix.lower() == '.png' and Path(cache_path).exists():
+                thumbnail_url = await upload_thumbnail_to_discord(interaction.channel, cache_path, server_id=server_id)
+                if thumbnail_url:
+                    thumbnail_urls[card_name] = thumbnail_url
+        
+        # Upload thumbnail for each available card
+        for card_data in cards_available:
+            card_name = card_data["card_name"]
+            cache_path = card_data["card_info"].get("cache_path")
+            if cache_path and Path(cache_path).suffix.lower() == '.png' and Path(cache_path).exists():
+                thumbnail_url = await upload_thumbnail_to_discord(interaction.channel, cache_path, server_id=server_id)
+                if thumbnail_url:
+                    thumbnail_urls[card_name] = thumbnail_url
+        
+        # Create embeds list
+        embeds = []
+        
+        # Combine all cards for unified pagination
+        all_cards = cards_in_use + cards_available
+        total_cards = len(all_cards)
+        
+        # Create one embed per card
+        for idx, card_data in enumerate(all_cards):
             card_name = card_data["card_name"]
             card_info = card_data["card_info"]
             usage_count = card_data["usage_count"]
@@ -525,47 +557,82 @@ class CardRegistry(commands.Cog):
             char_name = card_info.get("name", card_name)
             creator = card_info.get("creator", "Unknown")
             
-            # Determine emoji based on usage
+            # Determine status and color
             if usage_count > 0:
-                emoji = "🟢"
-                status = f"**In use by {usage_count} AI{'s' if usage_count != 1 else ''}**"
+                status_emoji = "🟢"
+                status_text = f"In Use • {usage_count} AI{'s' if usage_count != 1 else ''} using this card"
+                color = discord.Color.green()
             else:
-                emoji = "⚪"
-                status = "Not in use"
+                status_emoji = "⚪"
+                status_text = "Available • Ready to use"
+                color = discord.Color.greyple()
             
-            # Build field name
-            field_name = f"{emoji} **{card_name}**"
+            # Create embed with character name as title
+            embed = discord.Embed(
+                title=f"{char_name}",
+                description=f"{status_emoji} {status_text}",
+                color=color
+            )
             
-            # Build field value
-            field_value = f"**Character:** {char_name}\n"
-            field_value += f"**Creator:** {creator}\n"
-            field_value += f"**Status:** {status}\n"
-            
-            # Add AI list if in use (max 3)
-            if ais_using:
-                ai_names = []
-                for channel_id, ai_name in ais_using[:3]:
-                    channel_obj = interaction.guild.get_channel(int(channel_id))
-                    channel_name = channel_obj.name if channel_obj else f"ch-{channel_id[:4]}"
-                    ai_names.append(f"`{ai_name}` (#{channel_name})")
-                
-                field_value += f"**Used by:** {', '.join(ai_names)}"
-                if len(ais_using) > 3:
-                    field_value += f" +{len(ais_using) - 3} more"
-                field_value += "\n"
+            # Add main information field
+            info_value = f"• **Character:** {char_name}\n"
+            info_value += f"• **Creator:** {creator}\n"
+            info_value += f"• **Card ID:** `{card_name}`"
             
             embed.add_field(
-                name=field_name,
-                value=field_value,
+                name="📊 Information",
+                value=info_value,
                 inline=False
             )
+            
+            # Add usage information if card is in use
+            if usage_count > 0:
+                # Build channel list
+                channel_list = []
+                for channel_id, ai_name in ais_using[:3]:
+                    channel_obj = interaction.guild.get_channel(int(channel_id))
+                    if channel_obj:
+                        channel_list.append(f"<#{channel_id}>")
+                
+                usage_value = f"• **AIs:** {', '.join([f'`{ai}`' for _, ai in ais_using[:3]])}\n"
+                usage_value += f"• **Channels:** {', '.join(channel_list)}"
+                
+                if len(ais_using) > 3:
+                    usage_value += f"\n• **+{len(ais_using) - 3} more**"
+                
+                embed.add_field(
+                    name="🤖 Current Usage",
+                    value=usage_value,
+                    inline=False
+                )
+            
+            # Add thumbnail if available
+            if card_name in thumbnail_urls:
+                embed.set_thumbnail(url=thumbnail_urls[card_name])
+            
+            # Footer with position and helpful tip
+            embed.set_footer(text=f"Card {idx + 1}/{total_cards} • Use /set_card to apply • /character_info for details")
+            
+            embeds.append(embed)
         
-        # Add helpful footer
-        embed.set_footer(
-            text=f"💡 Use /import_card to add • /set_card to apply • /export_card to download"
-        )
-        
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        # Send with pagination if multiple embeds
+        if len(embeds) == 0:
+            await interaction.followup.send(
+                "❌ No character cards registered in this server.",
+                ephemeral=True
+            )
+        elif len(embeds) == 1:
+            # Single embed, send directly
+            await interaction.followup.send(embed=embeds[0], ephemeral=True)
+        else:
+            # Multiple embeds, use pagination (thumbnails work via CDN URLs)
+            view = PaginatedView(embeds, user_id=interaction.user.id)
+            message = await interaction.followup.send(
+                embed=view.get_current_embed(),
+                view=view,
+                ephemeral=True
+            )
+            view.message = message
 
 
 async def setup(bot):

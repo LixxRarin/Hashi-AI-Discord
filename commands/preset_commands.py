@@ -169,11 +169,13 @@ class PresetCommands(commands.Cog):
     
     @app_commands.command(name="preset_list", description="List all available configuration presets")
     async def preset_list(self, interaction: discord.Interaction):
-        """List all available presets."""
+        """List all available presets with pagination - one preset per page."""
+        await interaction.response.defer(ephemeral=False)
+        
         presets = self.config_manager.list_presets()
         
         if not presets:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 "📦 **No presets available**\n\n"
                 "You haven't created any presets yet.\n\n"
                 "💡 Use `/preset_save` to save an AI's configuration as a preset.",
@@ -181,28 +183,76 @@ class PresetCommands(commands.Cog):
             )
             return
         
-        # Build embed with preset list
-        embed = discord.Embed(
-            title="📦 Available Configuration Presets",
-            description=f"Found {len(presets)} preset(s)",
-            color=discord.Color.blue()
-        )
+        from utils.pagination import PaginatedView
         
-        for preset in presets[:25]:  # Discord embed field limit
+        # Create embeds - one per preset
+        embeds = []
+        
+        for idx, preset in enumerate(presets):
             name = preset["name"]
             description = preset.get("description", "No description")
             author = preset.get("author", "unknown")
             
+            # Load full preset to get config preview
+            preset_config = self.config_manager.load_preset(name)
+            
+            # Create embed with preset name as title
+            embed = discord.Embed(
+                title=name,
+                description=f"📦 Configuration Preset • By: {author}",
+                color=discord.Color.blue()
+            )
+            
+            # Description field
             embed.add_field(
-                name=f"📦 {name}",
-                value=f"**Description:** {description}\n**Author:** {author}",
+                name="📝 Description",
+                value=description if description else "No description provided",
                 inline=False
             )
+            
+            # Main configurations preview
+            if preset_config:
+                config_lines = []
+                
+                # Display settings
+                if "use_card_ai_display_name" in preset_config:
+                    config_lines.append(f"• Display: Card Name {'✅' if preset_config['use_card_ai_display_name'] else '❌'}")
+                if "send_the_greeting_message" in preset_config:
+                    config_lines.append(f"• Greeting: {'✅' if preset_config['send_the_greeting_message'] else '❌'}")
+                
+                # Timing
+                if "delay_for_generation" in preset_config:
+                    config_lines.append(f"• Delay: {preset_config['delay_for_generation']}s")
+                
+                # Systems
+                if "enable_memory_system" in preset_config:
+                    config_lines.append(f"• Memory: {'✅' if preset_config['enable_memory_system'] else '❌'}")
+                if "sleep_mode_enabled" in preset_config:
+                    config_lines.append(f"• Sleep Mode: {'✅' if preset_config['sleep_mode_enabled'] else '❌'}")
+                
+                if config_lines:
+                    embed.add_field(
+                        name="⚙️ Main Settings",
+                        value="\n".join(config_lines[:10]),  # Limit to 10 lines
+                        inline=False
+                    )
+            
+            # Footer with position and helpful tip
+            embed.set_footer(text=f"Preset {idx + 1}/{len(presets)} • Use /preset_info for full details")
+            
+            embeds.append(embed)
         
-        if len(presets) > 25:
-            embed.set_footer(text=f"Showing first 25 of {len(presets)} presets")
-        
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+        # Send with pagination if multiple presets
+        if len(embeds) == 1:
+            await interaction.followup.send(embed=embeds[0], ephemeral=False)
+        else:
+            view = PaginatedView(embeds, user_id=interaction.user.id)
+            message = await interaction.followup.send(
+                embed=view.get_current_embed(),
+                view=view,
+                ephemeral=False
+            )
+            view.message = message
     
     @app_commands.command(name="preset_delete", description="Delete a configuration preset")
     @app_commands.default_permissions(administrator=True)
@@ -262,195 +312,127 @@ class PresetCommands(commands.Cog):
         
         preset_config = preset_data.get("config", {})
         
-        # Build comprehensive embed
-        embed = discord.Embed(
-            title=f"📦 {preset_data.get('name', preset_name)}",
-            description=preset_data.get("description", "No description available"),
-            color=discord.Color.blue()
-        )
-        
-        # Metadata - Count only modified settings (different from defaults)
+        # Count only modified settings (different from defaults)
         defaults = self.config_manager.get_defaults()
         modified_count = sum(1 for key, value in preset_config.items() if defaults.get(key) != value)
         
-        metadata_lines = [
-            f"**Author:** {preset_data.get('author', 'Unknown')}",
-            f"**Version:** {preset_data.get('version', '1.0.0')}",
-            f"**Modified Settings:** {modified_count} (from {len(preset_config)} total)"
-        ]
+        # Build description with metadata
+        description = f"📦 Preset • By: {preset_data.get('author', 'Unknown')}"
+        description += f" • v{preset_data.get('version', '1.0.0')}"
+        description += f" • {modified_count} modified settings"
+        
+        # Build comprehensive embed
+        embed = discord.Embed(
+            title=preset_data.get('name', preset_name),
+            description=description,
+            color=discord.Color.blue()
+        )
+        
+        # Description field
+        preset_description = preset_data.get("description", "No description available")
         embed.add_field(
-            name="ℹ️ Metadata",
-            value="\n".join(metadata_lines),
+            name="📝 Description",
+            value=preset_description,
             inline=False
         )
         
-        # Display Settings
-        display_settings = []
+        # Main Settings - compact inline format
+        main_settings = []
+        
+        # Display settings
+        display_parts = []
         if "use_card_ai_display_name" in preset_config:
-            display_settings.append(f"• Use Card Display Name: `{preset_config['use_card_ai_display_name']}`")
+            display_parts.append(f"Card Name {'✅' if preset_config['use_card_ai_display_name'] else '❌'}")
         if "send_the_greeting_message" in preset_config:
-            display_settings.append(f"• Send Greeting: `{preset_config['send_the_greeting_message']}`")
-        if "send_message_line_by_line" in preset_config:
-            display_settings.append(f"• Line by Line: `{preset_config['send_message_line_by_line']}`")
+            display_parts.append(f"Greeting {'✅' if preset_config['send_the_greeting_message'] else '❌'}")
+        if display_parts:
+            main_settings.append(f"• **Display:** {' • '.join(display_parts)}")
         
-        if display_settings:
-            embed.add_field(
-                name="🎨 Display",
-                value="\n".join(display_settings),
-                inline=True
-            )
-        
-        # Timing Settings
-        timing_settings = []
+        # Timing settings
+        timing_parts = []
         if "delay_for_generation" in preset_config:
-            timing_settings.append(f"• Generation Delay: `{preset_config['delay_for_generation']}s`")
+            timing_parts.append(f"Delay {preset_config['delay_for_generation']}s")
         if "engaged_delay" in preset_config:
-            timing_settings.append(f"• Engaged Delay: `{preset_config['engaged_delay']}s`")
-        if "cache_count_threshold" in preset_config:
-            timing_settings.append(f"• Cache Threshold: `{preset_config['cache_count_threshold']}`")
+            timing_parts.append(f"Engaged {preset_config['engaged_delay']}s")
+        if timing_parts:
+            main_settings.append(f"• **Timing:** {' • '.join(timing_parts)}")
         
-        if timing_settings:
-            embed.add_field(
-                name="⏱️ Timing",
-                value="\n".join(timing_settings),
-                inline=True
-            )
-        
-        # System Features
-        system_features = []
+        # System features
+        systems_parts = []
         if "enable_reply_system" in preset_config:
-            system_features.append(f"• Reply System: `{preset_config['enable_reply_system']}`")
-        if "enable_ignore_system" in preset_config:
-            system_features.append(f"• Ignore System: `{preset_config['enable_ignore_system']}`")
+            systems_parts.append(f"Reply {'✅' if preset_config['enable_reply_system'] else '❌'}")
+        if "enable_memory_system" in preset_config:
+            systems_parts.append(f"Memory {'✅' if preset_config['enable_memory_system'] else '❌'}")
         if "sleep_mode_enabled" in preset_config:
-            system_features.append(f"• Sleep Mode: `{preset_config['sleep_mode_enabled']}`")
-        if "use_response_filter" in preset_config:
-            system_features.append(f"• Response Filter: `{preset_config['use_response_filter']}`")
-        if "auto_add_generation_reactions" in preset_config:
-            system_features.append(f"• Auto Reactions: `{preset_config['auto_add_generation_reactions']}`")
+            systems_parts.append(f"Sleep {'✅' if preset_config['sleep_mode_enabled'] else '❌'}")
+        if systems_parts:
+            main_settings.append(f"• **Systems:** {' • '.join(systems_parts)}")
         
-        if system_features:
+        if main_settings:
             embed.add_field(
-                name="⚙️ Systems",
-                value="\n".join(system_features),
+                name="⭐ Main Settings",
+                value="\n".join(main_settings),
                 inline=False
             )
+        
+        # AI & Tools field
+        ai_tools = []
+        
+        # Thinking
+        if "thinking_budget" in preset_config or "thinking_enabled" in preset_config:
+            thinking_enabled = preset_config.get("thinking_enabled", True)
+            if thinking_enabled and "thinking_budget" in preset_config:
+                ai_tools.append(f"• **Thinking:** Enabled (Budget: {preset_config['thinking_budget']})")
+            else:
+                ai_tools.append(f"• **Thinking:** {'Enabled' if thinking_enabled else 'Disabled'}")
         
         # Tool Calling
         if "tool_calling" in preset_config:
             tool_config = preset_config["tool_calling"]
             if isinstance(tool_config, dict):
-                tool_info = [
-                    f"• Enabled: `{tool_config.get('enabled', False)}`",
-                    f"• Allowed Tools: `{', '.join(tool_config.get('allowed_tools', ['none']))}`"
-                ]
-                embed.add_field(
-                    name="🔧 Tool Calling",
-                    value="\n".join(tool_info),
-                    inline=True
-                )
+                enabled = tool_config.get('enabled', False)
+                ai_tools.append(f"• **Tool Calling:** {'Enabled' if enabled else 'Disabled'}")
         
-        # Memory System
-        memory_settings = []
+        # Memory
         if "enable_memory_system" in preset_config:
-            memory_settings.append(f"• Enabled: `{preset_config['enable_memory_system']}`")
-        if "memory_max_tokens" in preset_config:
-            memory_settings.append(f"• Max Tokens: `{preset_config['memory_max_tokens']}`")
+            memory_enabled = preset_config['enable_memory_system']
+            if memory_enabled and "memory_max_tokens" in preset_config:
+                ai_tools.append(f"• **Memory:** {preset_config['memory_max_tokens']} tokens")
+            else:
+                ai_tools.append(f"• **Memory:** {'Enabled' if memory_enabled else 'Disabled'}")
         
-        if memory_settings:
+        if ai_tools:
             embed.add_field(
-                name="🧠 Memory System",
-                value="\n".join(memory_settings),
-                inline=True
-            )
-        
-        # Character Card Settings
-        card_settings = []
-        if "user_syntax_replacement" in preset_config:
-            card_settings.append(f"• User Syntax: `{preset_config['user_syntax_replacement']}`")
-        if "use_lorebook" in preset_config:
-            card_settings.append(f"• Use Lorebook: `{preset_config['use_lorebook']}`")
-        if "greeting_index" in preset_config:
-            card_settings.append(f"• Greeting Index: `{preset_config['greeting_index']}`")
-        
-        if card_settings:
-            embed.add_field(
-                name="📇 Character Card",
-                value="\n".join(card_settings),
-                inline=True
-            )
-        
-        # Context & Prompts
-        context_prompts = []
-        
-        if "tool_calling_prompt" in preset_config:
-            prompt = preset_config["tool_calling_prompt"]
-            if prompt:
-                preview = prompt.strip()[:100] + "..." if len(prompt.strip()) > 100 else prompt.strip()
-                context_prompts.append(f"• Tool Calling Prompt: `{preview}`")
-        
-        if "memory_prompt" in preset_config:
-            prompt = preset_config["memory_prompt"]
-            if prompt:
-                preview = prompt.strip()[:100] + "..." if len(prompt.strip()) > 100 else prompt.strip()
-                context_prompts.append(f"• Memory Prompt: `{preview}`")
-        
-        if "context_order" in preset_config:
-            order = preset_config["context_order"]
-            if order and isinstance(order, list):
-                order_str = " → ".join(order[:5])
-                if len(order) > 5:
-                    order_str += f" (+{len(order)-5} more)"
-                context_prompts.append(f"• Context Order: `{order_str}`")
-        
-        if context_prompts:
-            embed.add_field(
-                name="📋 Context & Prompts",
-                value="\n".join(context_prompts),
+                name="🧠 AI & Tools",
+                value="\n".join(ai_tools),
                 inline=False
             )
         
-        # Text Processing & Error Handling
-        text_processing = []
+        # Processing field
+        processing = []
+        
         if "remove_ai_emoji" in preset_config:
-            text_processing.append(f"• Remove Emoji: `{preset_config['remove_ai_emoji']}`")
-        if "remove_ai_text_from" in preset_config:
-            patterns = preset_config['remove_ai_text_from']
-            if patterns:
-                text_processing.append(f"• Remove Patterns: `{len(patterns)} pattern(s)`")
-            else:
-                text_processing.append(f"• Remove Patterns: `None`")
+            processing.append(f"• **Remove Emoji:** {'Yes' if preset_config['remove_ai_emoji'] else 'No'}")
+        
+        if "use_response_filter" in preset_config:
+            processing.append(f"• **Response Filter:** {'Yes' if preset_config['use_response_filter'] else 'No'}")
+        
         if "error_handling_mode" in preset_config:
             error_mode_display = {
                 "friendly": "Friendly",
                 "detailed": "Detailed",
                 "silent": "Silent"
             }.get(preset_config['error_handling_mode'], preset_config['error_handling_mode'])
-            text_processing.append(f"• Error Mode: `{error_mode_display}`")
-        if "save_errors_in_history" in preset_config:
-            text_processing.append(f"• Save Errors in History: `{preset_config['save_errors_in_history']}`")
-        if "send_errors_to_chat" in preset_config:
-            text_processing.append(f"• Send Errors to Chat: `{preset_config['send_errors_to_chat']}`")
+            processing.append(f"• **Error Mode:** {error_mode_display}")
         
-        if text_processing:
+        if processing:
             embed.add_field(
-                name="✂️ Text & Error Handling",
-                value="\n".join(text_processing),
+                name="✂️ Processing",
+                value="\n".join(processing),
                 inline=False
             )
         
-        # System Message Preview
-        if "system_message" in preset_config:
-            sys_msg = preset_config["system_message"]
-            if sys_msg:
-                preview = sys_msg[:100] + "..." if len(sys_msg) > 100 else sys_msg
-                embed.add_field(
-                    name="💬 System Message",
-                    value=f"```{preview}```",
-                    inline=False
-                )
-        
-        embed.set_footer(text=f"Use /preset_apply {preset_name} <ai_name> to apply • /preset_export to share")
+        embed.set_footer(text=f"Use /preset_apply to apply • /preset_export to share")
         
         await interaction.response.send_message(embed=embed, ephemeral=False)
     

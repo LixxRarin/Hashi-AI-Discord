@@ -102,7 +102,7 @@ class RichPresenceManager:
             
         except Exception as e:
             func.log.warning(f"Failed to connect to Discord RPC: {e}")
-            func.log.debug(
+            func.log.warning(
                 "Make sure Discord is running and the application_id is correct. "
                 "The bot will continue running without Rich Presence."
             )

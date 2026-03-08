@@ -2,9 +2,11 @@ import time
 import discord
 from discord import app_commands
 from discord.ext import commands
+from typing import List
 
 import utils.func as func
 from commands.shared.autocomplete import AutocompleteHelpers
+from utils.pagination import PaginatedView
 
 # Import AI module to trigger provider registration
 import AI
@@ -263,14 +265,14 @@ class SlashCommands(commands.Cog):
         # Creator notes
         creator_notes = card_data.get("creator_notes", "")
         
-        # Build embed description (just character name and nickname)
-        embed_description = f"**{char_name}**"
-        if nickname:
-            embed_description += f" (Nickname: {nickname})"
+        # Build compact description with metadata
+        embed_description = f"🎭 Character Card V{spec_version}\n**By:** {creator}"
+        if character_version != "N/A":
+            embed_description += f"\n**Version:** {character_version}"
         
-        # Create embed
+        # Create embed with character name as title
         embed = discord.Embed(
-            title=f"🎭 Character Card: {display_name}",
+            title=display_name,
             description=embed_description,
             color=discord.Color.purple()
         )
@@ -329,46 +331,21 @@ class SlashCommands(commands.Cog):
             except Exception as e:
                 func.log.error(f"Error loading character image: {e}")
         
-        # Creator Notes (FIRST - if available, show as much as possible)
-        if creator_notes:
-            # Discord field value limit is 1024 characters
-            notes_display = creator_notes[:1020]
-            if len(creator_notes) > 1020:
-                notes_display += "..."
-            embed.add_field(
-                name="📝 Creator Notes",
-                value=notes_display,
-                inline=False
-            )
-        
-        # Description (in code block format, show as much as possible)
+        # About field - short description preview (200 chars)
         if description:
-            # Discord field value limit is 1024 characters
-            # Code block formatting uses ``` which takes some space
-            max_desc_length = 1010  # Leave room for code block markers
-            desc_display = description[:max_desc_length]
-            if len(description) > max_desc_length:
-                desc_display += "..."
+            desc_preview = description[:200]
+            if len(description) > 200:
+                desc_preview += "..."
             embed.add_field(
-                name="📄 Description",
-                value=f"```\n{desc_display}\n```",
+                name="📝 About",
+                value=desc_preview,
                 inline=False
             )
         
-        # Basic Information
-        embed.add_field(
-            name="📋 Basic Information",
-            value=f"**Creator:** {creator}\n"
-                  f"**Version:** {character_version}\n"
-                  f"**Spec:** Character Card V{spec_version}\n"
-                  f"**AI Name:** `{ai_name}`",
-            inline=False
-        )
-        
-        # Personality (if available)
+        # Personality field - short preview (150 chars)
         if personality:
-            personality_preview = personality[:1020]
-            if len(personality) > 1020:
+            personality_preview = personality[:150]
+            if len(personality) > 150:
                 personality_preview += "..."
             embed.add_field(
                 name="💭 Personality",
@@ -376,97 +353,52 @@ class SlashCommands(commands.Cog):
                 inline=False
             )
         
-        # Scenario (if available)
-        if scenario:
-            scenario_preview = scenario[:1020]
-            if len(scenario) > 1020:
-                scenario_preview += "..."
-            embed.add_field(
-                name="🌍 Scenario",
-                value=scenario_preview,
-                inline=False
-            )
+        # Configuration field - AI, channel, greetings, lorebook
+        config_lines = []
         
-        # Tags (if available)
-        if tags:
-            tags_str = ", ".join(tags[:10])
-            if len(tags) > 10:
-                tags_str += f" (+{len(tags) - 10} more)"
-            embed.add_field(
-                name="🏷️ Tags",
-                value=tags_str,
-                inline=False
-            )
-        
-        # Greeting Information
-        greeting_info = f"**Total:** {total_greetings} greeting(s)\n"
-        greeting_info += f"**Current:** #{current_greeting_index}"
-        if group_only_greetings:
-            greeting_info += f"\n**Group:** {len(group_only_greetings)} greeting(s)"
-        embed.add_field(
-            name="👋 Greetings",
-            value=greeting_info,
-            inline=True
-        )
-        
-        # Lorebook Information
-        if lorebook_entries > 0:
-            lorebook_name = character_book.get("name", "Lorebook")
-            embed.add_field(
-                name="📚 Lorebook",
-                value=f"**Name:** {lorebook_name}\n**Entries:** {lorebook_entries}",
-                inline=True
-            )
-        
-        # Channel Information (only if channel_id is provided)
+        # AI name and channel
         if channel_id:
             try:
                 channel_obj = self.bot.get_channel(int(channel_id))
                 channel_name = channel_obj.name if channel_obj else "Unknown"
+                config_lines.append(f"• **AI:** {ai_name}")
+                config_lines.append(f"• **Channel:** #{channel_name}")
             except Exception as e:
                 func.log.warning(f"Could not get channel name: {e}")
-                channel_name = "Unknown"
-            
-            mode = session.get("mode", "unknown").capitalize()
-            embed.add_field(
-                name="⚙️ Configuration",
-                value=f"**Channel:** #{channel_name}\n**Mode:** {mode}",
-                inline=True
-            )
+                config_lines.append(f"• **AI:** {ai_name}")
         else:
-            # Card is being viewed directly from registry, not from an AI
-            embed.add_field(
-                name="📦 Registry",
-                value=f"**Status:** Registered card\n**Not currently in use**",
-                inline=True
-            )
+            # Card is being viewed directly from registry
+            config_lines.append(f"• **Status:** Registered card (not in use)")
         
-        # Dates (if available)
+        # Greetings
+        config_lines.append(f"• **Greetings:** {total_greetings} available")
+        
+        # Lorebook
+        if lorebook_entries > 0:
+            config_lines.append(f"• **Lorebook:** {lorebook_entries} entries")
+        
+        embed.add_field(
+            name="⚙️ Configuration",
+            value="\n".join(config_lines),
+            inline=False
+        )
+        
+        # Dates field (inline)
         if creation_date or modification_date:
-            date_info = ""
+            date_lines = []
             if creation_date and creation_date > 0:
-                date_info += f"**Created:** <t:{creation_date}:D>\n"
+                date_lines.append(f"**Created:** <t:{creation_date}:D>")
             if modification_date and modification_date > 0:
-                date_info += f"**Modified:** <t:{modification_date}:D>"
-            if date_info:
+                date_lines.append(f"**Modified:** <t:{modification_date}:D>")
+            
+            if date_lines:
                 embed.add_field(
-                    name="📅 Dates",
-                    value=date_info,
+                    name="📊 Details",
+                    value="\n".join(date_lines),
                     inline=True
                 )
         
-        # Source (if available)
-        if source and len(source) > 0:
-            source_str = "\n".join([f"• {s[:50]}..." if len(s) > 50 else f"• {s}" for s in source[:3]])
-            if len(source) > 3:
-                source_str += f"\n• (+{len(source) - 3} more)"
-            embed.add_field(
-                name="🔗 Source",
-                value=source_str,
-                inline=False
-            )
-        
-        embed.set_footer(text=f"Character Card V3 • Use /select_greeting to change greeting")
+        embed.set_footer(text="Use /select_greeting to change greeting")
         
         return embed, file
 
@@ -679,12 +611,14 @@ class SlashCommands(commands.Cog):
     @app_commands.describe(ai_name="Name of the AI to list muted users for")
     @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
     async def list_muted(self, interaction: discord.Interaction, ai_name: str):
+        """List all muted users for an AI."""
+        await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
         found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
         
         if not found_ai_data:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ AI '{ai_name}' not found in this server.",
                 ephemeral=True
             )
@@ -694,7 +628,7 @@ class SlashCommands(commands.Cog):
         
         # Verify session data is valid
         if session is None:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"❌ AI '{ai_name}' session data is invalid or corrupted.",
                 ephemeral=True
             )
@@ -703,19 +637,65 @@ class SlashCommands(commands.Cog):
         muted_users = session.get("muted_users", [])
 
         if not muted_users:
-            await interaction.response.send_message(
+            await interaction.followup.send(
                 f"✅ No users are currently muted for AI '{ai_name}'.",
                 ephemeral=True
             )
             return
 
-        mentions = [f"<@{user_id}>" for user_id in muted_users]
-        muted_list = "\n".join(mentions)
-
-        await interaction.response.send_message(
-            f"🔇 **Muted users for AI '{ai_name}':**\n{muted_list}",
-            ephemeral=True
+        # Create embed with simplified layout
+        embed = discord.Embed(
+            title="Muted Users",
+            description=f"AI: {ai_name} • {len(muted_users)} muted users",
+            color=discord.Color.red()
         )
+        
+        # Add users inline (more compact) - group in chunks of 5 per line
+        user_lines = []
+        for i in range(0, len(muted_users), 5):
+            chunk = muted_users[i:i+5]
+            mentions = [f"<@{user_id}>" for user_id in chunk]
+            user_lines.append("• " + " ".join(mentions))
+        
+        # Join all lines, respecting Discord's 1024 char limit per field
+        users_text = "\n".join(user_lines)
+        
+        # If text is too long, split into multiple fields
+        if len(users_text) <= 1024:
+            embed.add_field(
+                name="👥 List",
+                value=users_text,
+                inline=False
+            )
+        else:
+            # Split into multiple fields if needed
+            current_text = ""
+            field_num = 1
+            for line in user_lines:
+                if len(current_text) + len(line) + 1 > 1024:
+                    embed.add_field(
+                        name=f"👥 List (part {field_num})",
+                        value=current_text,
+                        inline=False
+                    )
+                    current_text = line
+                    field_num += 1
+                else:
+                    if current_text:
+                        current_text += "\n"
+                    current_text += line
+            
+            # Add remaining text
+            if current_text:
+                embed.add_field(
+                    name=f"👥 List (part {field_num})",
+                    value=current_text,
+                    inline=False
+                )
+        
+        embed.set_footer(text="Use /unmute to unmute")
+        
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 
 async def setup(bot):

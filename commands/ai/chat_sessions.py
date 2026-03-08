@@ -4,6 +4,8 @@ AI chat session management commands.
 Provides commands to manage multiple chat sessions for AIs.
 """
 import uuid
+from pathlib import Path
+from typing import List
 
 import discord
 from discord import app_commands
@@ -13,6 +15,8 @@ import utils.func as func
 from AI.chat_service import get_service
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.webhook_utils import WebhookUtils
+from utils.pagination import PaginatedView
+from utils.thumbnail_helper import get_character_card_thumbnail_url
 
 
 class ChatSessions(commands.Cog):
@@ -261,7 +265,7 @@ class ChatSessions(commands.Cog):
     @app_commands.describe(ai_name="Name of the AI to list chats for")
     @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
     async def list_chats(self, interaction: discord.Interaction, ai_name: str):
-        """List all chat sessions for an AI with summary information."""
+        """List all chat sessions for an AI with detailed history preview - 1 chat per page."""
         await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
@@ -289,42 +293,125 @@ class ChatSessions(commands.Cog):
         # Get active chat
         active_chat_id = session.get("chat_id", "default")
         
-        # Build embed
-        embed = discord.Embed(
-            title=f"💬 Chat Sessions - {ai_name}",
-            description=f"**Total chats:** {len(chat_ids)}\n**Active chat:** `{active_chat_id}`",
-            color=discord.Color.blue()
-        )
-        
-        # Add info for each chat (limit to 10 most recent)
-        for i, chat_id in enumerate(chat_ids[:10]):
+        # Sort chats: active first, then by updated_at descending
+        sorted_chats = []
+        for chat_id in chat_ids:
             info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+            sorted_chats.append({
+                "chat_id": chat_id,
+                "info": info,
+                "is_active": (chat_id == active_chat_id)
+            })
+        
+        # Sort: active first, then by updated_at descending
+        sorted_chats.sort(key=lambda x: (not x["is_active"], -x["info"]["updated_at"]))
+        
+        # Upload thumbnail once
+        thumbnail_url = None
+        channel_obj = interaction.guild.get_channel(int(found_channel_id))
+        
+        if channel_obj:
+            thumbnail_url = await get_character_card_thumbnail_url(channel_obj, session, server_id=server_id)
+        
+        # Create embeds - ONE CHAT PER PAGE
+        embeds = []
+        
+        for idx, chat_data in enumerate(sorted_chats):
+            chat_id = chat_data["chat_id"]
+            info = chat_data["info"]
+            is_active = chat_data["is_active"]
             
             # Format timestamps
             import datetime
             created = datetime.datetime.fromtimestamp(info["created_at"]).strftime("%Y-%m-%d %H:%M")
             updated = datetime.datetime.fromtimestamp(info["updated_at"]).strftime("%Y-%m-%d %H:%M")
             
-            # Active indicator
-            indicator = "🟢 " if chat_id == active_chat_id else ""
+            # Determine color and status
+            if is_active:
+                color = discord.Color.green()
+                status_emoji = "🟢"
+                status_text = "Active"
+            else:
+                color = discord.Color.greyple()
+                status_emoji = "⚪"
+                status_text = "Inactive"
             
-            # Truncate chat_id if too long
-            display_id = chat_id[:30] + "..." if len(chat_id) > 30 else chat_id
+            # Create title - use chat name or shortened ID
+            if len(chat_id) > 30:
+                # Likely a UUID, show shortened version
+                title = f"{chat_id[:20]}...{chat_id[-8:]}"
+            else:
+                # Named chat, use full name
+                title = chat_id
             
-            field_value = f"{indicator}**Messages:** {info['message_count']}\n"
-            field_value += f"**Created:** {created}\n"
-            field_value += f"**Updated:** {updated}"
+            # Build description with status and key info
+            description = f"{status_emoji} {status_text} • {info['message_count']} messages • AI: {ai_name}"
             
-            embed.add_field(
-                name=f"📝 {display_id}",
-                value=field_value,
-                inline=True
+            # Create embed
+            embed = discord.Embed(
+                title=title,
+                description=description,
+                color=color
             )
+            
+            # Add thumbnail to first page only
+            if idx == 0 and thumbnail_url:
+                embed.set_thumbnail(url=thumbnail_url)
+            
+            # Dates field
+            embed.add_field(
+                name="📅 Dates",
+                value=f"• **Created:** {created}\n"
+                      f"• **Updated:** {updated}",
+                inline=False
+            )
+            
+            # Greeting (if available)
+            if info.get("greeting"):
+                greeting_preview = info["greeting"][:200]
+                if len(info["greeting"]) > 200:
+                    greeting_preview += "..."
+                
+                embed.add_field(
+                    name="👋 First Message",
+                    value=f"```{greeting_preview}```",
+                    inline=False
+                )
+            
+            # Recent messages history
+            if info.get("last_messages"):
+                history_text = ""
+                for msg in info["last_messages"][:5]:  # Show last 5 messages
+                    preview = msg["preview"]
+                    if len(preview) > 100:
+                        preview = preview[:100] + "..."
+                    history_text += f"{preview}\n"
+                
+                embed.add_field(
+                    name="💬 Recent Messages",
+                    value=f"```{history_text}```",
+                    inline=False
+                )
+            
+            # Footer with navigation info
+            embed.set_footer(
+                text=f"Chat {idx + 1}/{len(sorted_chats)} • "
+                     f"{'Currently active' if is_active else 'Use /switch_chat to activate'}"
+            )
+            
+            embeds.append(embed)
         
-        if len(chat_ids) > 10:
-            embed.set_footer(text=f"Showing 10 of {len(chat_ids)} chats. Use /chat_info to see specific chats.")
-        
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        # Send with pagination
+        if len(embeds) == 1:
+            await interaction.followup.send(embed=embeds[0], ephemeral=True)
+        else:
+            view = PaginatedView(embeds, user_id=interaction.user.id)
+            message = await interaction.followup.send(
+                embed=view.get_current_embed(),
+                view=view,
+                ephemeral=True
+            )
+            view.message = message
     
     @app_commands.command(name="delete_chat", description="Delete a specific chat session")
     @app_commands.default_permissions(administrator=True)
@@ -577,52 +664,85 @@ class ChatSessions(commands.Cog):
             
             # Format timestamps
             import datetime
-            created = datetime.datetime.fromtimestamp(info["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
-            updated = datetime.datetime.fromtimestamp(info["updated_at"]).strftime("%Y-%m-%d %H:%M:%S")
+            created = datetime.datetime.fromtimestamp(info["created_at"]).strftime("%Y-%m-%d %H:%M")
+            
+            # Calculate relative time for updated
+            now = datetime.datetime.now()
+            updated_dt = datetime.datetime.fromtimestamp(info["updated_at"])
+            time_diff = now - updated_dt
+            
+            if time_diff.days > 0:
+                updated_relative = f"{time_diff.days} days ago"
+            elif time_diff.seconds >= 3600:
+                hours = time_diff.seconds // 3600
+                updated_relative = f"{hours} hours ago"
+            elif time_diff.seconds >= 60:
+                minutes = time_diff.seconds // 60
+                updated_relative = f"{minutes} minutes ago"
+            else:
+                updated_relative = "just now"
+            
+            # Determine status and color
+            is_active = (chat_id == active_chat_id)
+            status_emoji = "🟢" if is_active else "⚪"
+            status_text = "Active" if is_active else "Inactive"
+            color = discord.Color.green() if is_active else discord.Color.greyple()
+            
+            # Create title - use chat name or shortened ID
+            if len(chat_id) > 30:
+                title = f"{chat_id[:20]}...{chat_id[-8:]}"
+            else:
+                title = chat_id
+            
+            # Build compact description
+            description = f"{status_emoji} {status_text} • {info['message_count']} messages • AI: {ai_name}"
             
             # Build embed
             embed = discord.Embed(
-                title=f"📊 Chat Information - {ai_name}",
-                description=f"**Chat ID:** `{chat_id}`",
-                color=discord.Color.green() if chat_id == active_chat_id else discord.Color.blue()
+                title=title,
+                description=description,
+                color=color
             )
             
-            # Status
-            status = "🟢 Active" if chat_id == active_chat_id else "⚪ Inactive"
-            embed.add_field(name="Status", value=status, inline=True)
-            embed.add_field(name="Messages", value=str(info["message_count"]), inline=True)
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
+            # Dates field
+            embed.add_field(
+                name="📅 Dates",
+                value=f"• **Created:** {created}\n• **Updated:** {updated_relative}",
+                inline=False
+            )
             
-            # Timestamps
-            embed.add_field(name="Created", value=created, inline=True)
-            embed.add_field(name="Last Updated", value=updated, inline=True)
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
-            
-            # Greeting
+            # First message (greeting)
             if info["greeting"]:
+                greeting_preview = info["greeting"][:200]
+                if len(info["greeting"]) > 200:
+                    greeting_preview += "..."
                 embed.add_field(
-                    name="Greeting Message",
-                    value=f"```{info['greeting']}```",
+                    name="👋 First Message",
+                    value=f"```{greeting_preview}```",
                     inline=False
                 )
             
             # Recent messages
             if info["last_messages"]:
                 recent_text = ""
-                for msg in info["last_messages"]:
-                    recent_text += f"{msg['preview']}\n\n"
+                for msg in info["last_messages"][:5]:
+                    preview = msg["preview"]
+                    if len(preview) > 100:
+                        preview = preview[:100] + "..."
+                    recent_text += f"{preview}\n"
                 
-                # Wrap all messages in a single code block
                 embed.add_field(
-                    name="Recent Messages",
-                    value=f"```{recent_text[:1018]}```",  # 1024 - 6 for ``` markers
+                    name="💬 Recent Messages",
+                    value=f"```{recent_text[:1018]}```",
                     inline=False
                 )
+            
+            embed.set_footer(text="Use /switch_chat to activate • /delete_chat to remove")
             
             await interaction.followup.send(embed=embed, ephemeral=True)
             
         else:
-            # Show general info for all chats
+            # Show general info for all chats (overview)
             chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
             
             if not chat_ids:
@@ -640,41 +760,53 @@ class ChatSessions(commands.Cog):
                 info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, cid)
                 total_messages += info["message_count"]
             
-            # Build embed
+            # Get active chat name
+            active_chat_display = active_chat_id
+            if len(active_chat_id) > 30:
+                active_chat_display = f"{active_chat_id[:20]}...{active_chat_id[-8:]}"
+            
+            # Build embed with simplified layout
             embed = discord.Embed(
-                title=f"📊 Chat Overview - {ai_name}",
-                description=f"**Channel:** <#{found_channel_id}>",
+                title="Chat Overview",
+                description=f"AI: {ai_name} • Channel: <#{found_channel_id}>",
                 color=discord.Color.purple()
             )
             
-            embed.add_field(name="Total Chats", value=str(len(chat_ids)), inline=True)
-            embed.add_field(name="Total Messages", value=str(total_messages), inline=True)
-            embed.add_field(name="\u200b", value="\u200b", inline=True)
+            # Statistics field
+            stats_value = f"• **Total Chats:** {len(chat_ids)}\n"
+            stats_value += f"• **Total Messages:** {total_messages}\n"
+            stats_value += f"• **Active Chat:** {active_chat_display}"
             
             embed.add_field(
-                name="Active Chat",
-                value=f"`{active_chat_id[:50]}{'...' if len(active_chat_id) > 50 else ''}`",
+                name="📊 Statistics",
+                value=stats_value,
                 inline=False
             )
             
-            # List chats (limit to 5)
-            chat_list = ""
+            # Sessions field - list chats with status
+            sessions_list = ""
             for i, cid in enumerate(chat_ids[:5]):
                 info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, cid)
                 indicator = "🟢" if cid == active_chat_id else "⚪"
-                display_id = cid[:25] + "..." if len(cid) > 25 else cid
-                chat_list += f"{indicator} `{display_id}` - {info['message_count']} msgs\n"
+                
+                # Format chat name
+                if len(cid) > 25:
+                    display_id = f"{cid[:20]}...{cid[-8:]}"
+                else:
+                    display_id = cid
+                
+                sessions_list += f"{indicator} {display_id} - {info['message_count']} msgs\n"
             
             if len(chat_ids) > 5:
-                chat_list += f"\n*...and {len(chat_ids) - 5} more*"
+                sessions_list += f"\n*...and {len(chat_ids) - 5} more*"
             
             embed.add_field(
-                name="Chat Sessions",
-                value=chat_list,
+                name="💬 Sessions",
+                value=sessions_list,
                 inline=False
             )
             
-            embed.set_footer(text="💡 Use /chat_info <ai_name> <chat_id> for detailed information about a specific chat")
+            embed.set_footer(text="Use /chat_info <chat_id> for details of a specific chat")
             
             await interaction.followup.send(embed=embed, ephemeral=True)
 

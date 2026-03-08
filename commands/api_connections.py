@@ -2,8 +2,10 @@ import re
 import discord
 from discord import app_commands
 from discord.ext import commands
+from typing import Dict, List
 
 import utils.func as func
+from utils.pagination import PaginatedView
 
 # Import AI module to trigger provider registration
 import AI
@@ -614,7 +616,7 @@ class APIConnections(commands.Cog):
     @app_commands.command(name="list_apis", description="List all API connections in this server")
     @app_commands.default_permissions(administrator=True)
     async def list_apis(self, interaction: discord.Interaction):
-        """List all API connections configured in the server."""
+        """List all API connections configured in the server, grouped by provider with pagination."""
         await interaction.response.defer(ephemeral=True)
         
         server_id = str(interaction.guild.id)
@@ -628,49 +630,105 @@ class APIConnections(commands.Cog):
             )
             return
         
-        embed = discord.Embed(
-            title=f"🔌 API Connections in {interaction.guild.name}",
-            description=f"Total: {len(connections)} connection(s)",
-            color=discord.Color.blue()
-        )
+        # Get registry for provider metadata
+        registry = get_registry()
         
-        for conn_name, conn_data in connections.items():
-            provider = conn_data.get("provider", "unknown").upper()
+        # Create embeds - one per connection
+        embeds = []
+        total_connections = len(connections)
+        
+        for idx, (conn_name, conn_data) in enumerate(sorted(connections.items())):
+            provider = conn_data.get("provider", "unknown").lower()
             model = conn_data.get("model", "Unknown")
+            
+            # Get provider metadata
+            try:
+                provider_meta = registry.get_metadata(provider)
+                provider_display = provider_meta.display_name
+                provider_icon = provider_meta.icon
+                provider_color = getattr(discord.Color, provider_meta.color, discord.Color.blue)()
+            except ValueError:
+                provider_display = provider.upper()
+                provider_icon = "🔵"
+                provider_color = discord.Color.blue()
+            
+            # Get AIs using this connection
+            ais_using = func.get_ais_using_connection(server_id, conn_name)
+            usage_count = len(ais_using)
+            
+            # Build description
+            if usage_count > 0:
+                description = f"{provider_icon} {provider_display} • `{model}` • {usage_count} AI{'s' if usage_count != 1 else ''} using"
+            else:
+                description = f"{provider_icon} {provider_display} • `{model}` • Available"
+            
+            # Create embed with connection name as title
+            embed = discord.Embed(
+                title=conn_name,
+                description=description,
+                color=provider_color
+            )
+            
+            # Credentials field
             api_key = conn_data.get("api_key", "")
             masked_key = self._mask_api_key(api_key)
             base_url = conn_data.get("base_url")
             
-            # Get AIs using this connection
-            ais_using = func.get_ais_using_connection(server_id, conn_name)
-            
-            field_value = f"**Provider:** {provider}\n"
-            field_value += f"**Model:** `{model}`\n"
-            field_value += f"**API Key:** `{masked_key}`\n"
+            cred_value = f"• **API Key:** `{masked_key}`"
             if base_url:
-                field_value += f"**Custom Endpoint:** ✅\n"
-            
-            # LLM parameters
-            field_value += f"\n**LLM Parameters:**\n"
-            field_value += f"• Temp: `{conn_data.get('temperature', 0.7)}`"
-            field_value += f" | Tokens: `{conn_data.get('max_tokens', 1000)}`\n"
-            field_value += f"• Context: `{conn_data.get('context_size', 4096)}`"
-            field_value += f" | Think: `{'✅' if conn_data.get('think_switch', True) else '❌'}`\n"
-            
-            # Usage info
-            if ais_using:
-                field_value += f"\n**Used by:** {len(ais_using)} AI(s)"
-            else:
-                field_value += f"\n**Used by:** None"
+                cred_value += f"\n• **Endpoint:** Custom ✅"
             
             embed.add_field(
-                name=f"🔌 {conn_name}",
-                value=field_value,
+                name="🔑 Credentials",
+                value=cred_value,
                 inline=False
             )
+            
+            # Parameters field
+            params_value = f"• **Temp:** `{conn_data.get('temperature', 0.7)}` • **Tokens:** `{conn_data.get('max_tokens', 1000)}`\n"
+            params_value += f"• **Context:** `{conn_data.get('context_size', 4096)}` • **Thinking:** `{'✅' if conn_data.get('think_switch', True) else '❌'}`"
+            
+            embed.add_field(
+                name="⚙️ Parameters",
+                value=params_value,
+                inline=False
+            )
+            
+            # Usage field (if in use)
+            if usage_count > 0:
+                usage_value = f"• **AIs:** {', '.join([f'`{ai}`' for _, ai in ais_using[:3]])}"
+                if usage_count > 3:
+                    usage_value += f" +{usage_count - 3} more"
+                
+                embed.add_field(
+                    name="🤖 Current Usage",
+                    value=usage_value,
+                    inline=False
+                )
+            
+            # Footer with position and helpful tip
+            embed.set_footer(text=f"Connection {idx + 1}/{total_connections} • Use /show_api for full details")
+            
+            embeds.append(embed)
         
-        embed.set_footer(text="Use /api_config to modify a connection")
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        # Send with pagination if multiple embeds
+        if len(embeds) == 0:
+            await interaction.followup.send(
+                "❌ No API connections configured in this server.",
+                ephemeral=True
+            )
+        elif len(embeds) == 1:
+            # Single embed, send directly
+            await interaction.followup.send(embed=embeds[0], ephemeral=True)
+        else:
+            # Multiple embeds, use pagination
+            view = PaginatedView(embeds, user_id=interaction.user.id)
+            message = await interaction.followup.send(
+                embed=view.get_current_embed(),
+                view=view,
+                ephemeral=True
+            )
+            view.message = message
 
     @app_commands.command(name="remove_api", description="Remove an API connection")
     @app_commands.default_permissions(administrator=True)

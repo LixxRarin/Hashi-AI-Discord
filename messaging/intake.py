@@ -271,7 +271,7 @@ class MessageIntake:
     
     def validate_for_ai(
         self,
-        metadata: MessageMetadata,
+        metadata: MessageMetadata,\
         ai_session: Dict[str, Any]
     ) -> bool:
         """
