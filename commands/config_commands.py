@@ -603,7 +603,7 @@ class ConfigCommands(commands.Cog):
         api_connection="API connection to use",
         system_message="System message (or 'default' for default)",
         new_chat_on_reset="Create new chat on reset",
-        auto_reactions="Auto-add navigation reactions"
+        action_buttons="Enable/disable message action buttons"
     )
     @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
     @app_commands.autocomplete(api_connection=connection_name_autocomplete)
@@ -614,7 +614,7 @@ class ConfigCommands(commands.Cog):
         api_connection: str = None,
         system_message: str = None,
         new_chat_on_reset: bool = None,
-        auto_reactions: bool = None
+        action_buttons: bool = None
     ):
         """Configure advanced settings."""
         server_id = str(interaction.guild.id)
@@ -661,9 +661,12 @@ class ConfigCommands(commands.Cog):
             config["new_chat_on_reset"] = new_chat_on_reset
             changes.append(f"• New Chat on Reset: `{new_chat_on_reset}`")
         
-        if auto_reactions is not None:
-            config["auto_add_generation_reactions"] = auto_reactions
-            changes.append(f"• Auto Reactions: `{auto_reactions}`")
+        if action_buttons is not None:
+            # Ensure message_action_buttons structure exists
+            if "message_action_buttons" not in config:
+                config["message_action_buttons"] = func.get_default_ai_config().get("message_action_buttons", {})
+            config["message_action_buttons"]["enabled"] = action_buttons
+            changes.append(f"• Action Buttons: `{action_buttons}`")
         
         if not changes:
             await interaction.response.send_message("❌ No changes specified.", ephemeral=True)

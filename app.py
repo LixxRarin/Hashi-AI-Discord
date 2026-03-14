@@ -187,6 +187,24 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
             server_id, channel_id, ai_name
         )
         
+        # Disable buttons from previous message before sending new one
+        if old_message_ids:
+            try:
+                # Get the last message ID (where buttons are attached)
+                last_old_msg_id = old_message_ids[-1]
+                try:
+                    old_msg = await channel.fetch_message(int(last_old_msg_id))
+                    # Remove buttons by setting view to None
+                    if old_msg.components:
+                        await old_msg.edit(view=None)
+                        func.log.debug(f"Removed buttons from previous message {last_old_msg_id}")
+                except discord.NotFound:
+                    func.log.debug(f"Previous message {last_old_msg_id} not found")
+                except Exception as e:
+                    func.log.warning(f"Could not remove buttons from {last_old_msg_id}: {e}")
+            except Exception as e:
+                func.log.error(f"Error removing buttons from previous messages: {e}")
+        
         # Callback to send response to Discord using centralized MessageSender
         async def send_callback(response_text, ids_list):
             """Send response to Discord and populate ids_list."""
@@ -198,11 +216,13 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
             session_with_context["server_id"] = server_id
             session_with_context["ai_name"] = ai_name
             
-            discord_ids = await sender.send(
+            discord_ids, view = await sender.send(
                 response_text=response_text,
                 channel=channel,
                 session=session_with_context,
-                split_message_fn=AI._split_message
+                split_message_fn=AI._split_message,
+                bot=bot,
+                attach_buttons=False
             )
             ids_list.extend(discord_ids)
         
@@ -233,18 +253,31 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
         
         if result:
             response, discord_ids = result
-            # Update reactions using ReactionManager
-            if session.get("config", {}).get("auto_add_generation_reactions", False):
+            
+            # NOW attach buttons AFTER ResponseManager has been updated
+            if discord_ids:
                 try:
-                    from utils.reaction_manager import get_reaction_manager
-                    reaction_mgr = get_reaction_manager()
-                    await reaction_mgr.update_reactions(
-                        channel=channel,
-                        old_message_ids=old_message_ids,
-                        new_message_ids=discord_ids
-                    )
+                    button_config = session.get("config", {}).get("message_action_buttons", {})
+                    if button_config.get("enabled", False):
+                        from utils.message_actions import MessageActionsView
+                        
+                        view = MessageActionsView(
+                            bot=bot,
+                            server_id=server_id,
+                            channel_id=channel_id,
+                            ai_name=ai_name,
+                            session=session,
+                            timeout=None
+                        )
+                        
+                        # Attach to last message
+                        last_msg_id = discord_ids[-1]
+                        last_msg = await channel.fetch_message(int(last_msg_id))
+                        await last_msg.edit(view=view)
+                        
+                        func.log.debug(f"Attached buttons after ResponseManager update for AI {ai_name}")
                 except Exception as e:
-                    func.log.error("Error managing reactions: %s", e)
+                    func.log.error(f"Error attaching buttons after generation: {e}")
         
     except Exception as e:
         func.log.error("Error in _generate_ai_response for AI %s: %s", ai_name, e)
@@ -531,25 +564,6 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         
     except Exception as e:
         func.log.error(f"Error processing message edit: {e}")
-
-
-@bot.event
-async def on_raw_reaction_add(payload):
-    """Handle reaction additions for regeneration and navigation"""
-    try:
-        # Ignore bot's own reactions
-        if payload.user_id == bot.user.id:
-            return
-        
-        emoji = str(payload.emoji)
-        
-        # Use ResponseManager-based handlers
-        if emoji == "🔄":
-            await AI.handle_regeneration_reaction(bot, payload, bot.message_pipeline.response_manager)
-        elif emoji in ["◀️", "▶️"]:
-            await AI.handle_generation_navigation(bot, payload, emoji, bot.message_pipeline.response_manager)
-    except Exception as e:
-        func.log.error("Reaction processing error: %s", e)
 
 
 @bot.event

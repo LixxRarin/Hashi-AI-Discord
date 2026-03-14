@@ -243,9 +243,25 @@ class MessagePipeline:
         session: Dict[str, Any],
         chat_service,
         send_callback: Callable[[str, List[str]], Awaitable[None]],
-        bot_user_id: Optional[int] = None
+        bot_user_id: Optional[int] = None,
+        is_regeneration: bool = False
     ) -> Optional[Tuple[str, List[str]]]:
-        """Generate AI response for pending messages and save to history."""
+        """
+        Generate AI response for pending messages and save to history.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            session: AI session data
+            chat_service: Chat service instance
+            send_callback: Callback to send response to Discord
+            bot_user_id: Bot user ID for mentions/replies
+            is_regeneration: If True, preserve existing generations in ResponseManager
+        
+        Returns:
+            Tuple of (response_text, discord_ids) or None
+        """
         session_with_context = session.copy()
         session_with_context["server_id"] = server_id
         session_with_context["channel_id"] = channel_id
@@ -451,6 +467,22 @@ class MessagePipeline:
                     if display_msg:
                         await send_callback(display_msg, discord_ids)
                         log.debug(f"Error sent to chat for AI {ai_name}")
+                        
+                        # Add error message to ResponseManager so buttons work correctly
+                        if discord_ids:
+                            formatted_user_content = await self.buffer.get_formatted_content(
+                                server_id, channel_id, ai_name
+                            )
+                            self.response_manager.add_response(
+                                server_id,
+                                channel_id,
+                                ai_name,
+                                formatted_user_content,
+                                display_msg,
+                                discord_ids,
+                                is_regeneration=is_regeneration
+                            )
+                            log.debug(f"Error message added to ResponseManager for AI {ai_name}")
                     
                     # Clear buffer
                     await self.buffer.clear_specific_messages(
@@ -571,7 +603,8 @@ class MessagePipeline:
                 ai_name,
                 formatted_user_content,
                 display_response,
-                discord_ids
+                discord_ids,
+                is_regeneration=is_regeneration
             )
             
             await self.buffer.clear_specific_messages(

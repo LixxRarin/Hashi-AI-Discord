@@ -198,11 +198,12 @@ class RegenerateCommands(commands.Cog):
                     from utils.message_sender import get_message_sender
                     sender = get_message_sender()
                     
-                    discord_ids = await sender.send(
+                    discord_ids, view = await sender.send(
                         response_text=response_text,
                         channel=channel,
                         session=session,
-                        split_message_fn=None  # Use default splitting
+                        split_message_fn=None,  # Use default splitting
+                        bot=self.bot
                     )
                     ids_list.extend(discord_ids)
                 
@@ -218,19 +219,6 @@ class RegenerateCommands(commands.Cog):
                 
                 if result:
                     response, discord_ids = result
-                    # Update reactions using ReactionManager
-                    # old messages already deleted, so pass empty list
-                    if session.get("config", {}).get("auto_add_generation_reactions", False):
-                        try:
-                            from utils.reaction_manager import get_reaction_manager
-                            reaction_mgr = get_reaction_manager()
-                            await reaction_mgr.update_reactions(
-                                channel=channel,
-                                old_message_ids=[],  # Already deleted above
-                                new_message_ids=discord_ids
-                            )
-                        except Exception as e:
-                            func.log.error("Error managing reactions: %s", e)
                 
                 func.log.info(f"Regeneration complete for AI {ai_name}")
             else:

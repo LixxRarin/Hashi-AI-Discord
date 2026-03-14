@@ -515,11 +515,25 @@ class ConfigViewCommands(commands.Cog):
                 value=f"`{config.get('new_chat_on_reset', False)}`\nCreate new chat when resetting",
                 inline=False
             )
-            embed.add_field(
-                name="Auto Reactions",
-                value=f"`{config.get('auto_add_generation_reactions', False)}`\nAdd ◀️▶️🔄 reactions automatically",
-                inline=False
-            )
+            
+            # Message Action Buttons
+            button_config = config.get('message_action_buttons', {})
+            buttons_enabled = button_config.get('enabled', False)
+            if buttons_enabled:
+                buttons_list = button_config.get('buttons', [])
+                enabled_buttons = [btn.get('type', 'unknown') for btn in buttons_list if btn.get('enabled', True)]
+                buttons_display = ", ".join(enabled_buttons) if enabled_buttons else "None"
+                embed.add_field(
+                    name="Message Action Buttons",
+                    value=f"`Enabled`\nButtons: {buttons_display}",
+                    inline=False
+                )
+            else:
+                embed.add_field(
+                    name="Message Action Buttons",
+                    value="`Disabled`\nDiscord UI buttons for message interactions",
+                    inline=False
+                )
             
             # Context Order
             context_order = config.get('context_order', [])

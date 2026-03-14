@@ -48,8 +48,10 @@ class MessageSender:
         response_text: str,
         channel: discord.TextChannel,
         session: dict,
-        split_message_fn: Optional[Callable[[str], List[str]]] = None
-    ) -> List[str]:
+        split_message_fn: Optional[Callable[[str], List[str]]] = None,
+        bot = None,
+        attach_buttons: bool = True
+    ) -> tuple[List[str], Optional[discord.ui.View]]:
         """
         Send a message to Discord using the appropriate method.
         
@@ -59,9 +61,11 @@ class MessageSender:
             session: AI session configuration
             split_message_fn: Optional function to split long messages
                             If None, uses simple 2000-char splitting
+            bot: Bot instance (required for action buttons)
+            attach_buttons: Whether to attach buttons immediately (default: True)
             
         Returns:
-            List of Discord message IDs that were sent
+            Tuple of (discord_ids, view) where view is the MessageActionsView or None
         """
         mode = session.get("mode", "webhook")
         is_line_by_line = session.get("config", {}).get("send_message_line_by_line", False)
@@ -101,11 +105,11 @@ class MessageSender:
                     ai_name=ai_name
                 )
             
-            # Send based on mode
+            # Send based on mode (without view for now)
             if mode == "bot":
                 ids = await self._send_as_bot(
                     segment_text, channel, reference_message,
-                    is_line_by_line, split_message_fn
+                    is_line_by_line, split_message_fn, view=None
                 )
                 discord_ids.extend(ids)
             else:
@@ -113,13 +117,44 @@ class MessageSender:
                 if webhook_url:
                     ids = await self._send_as_webhook(
                         segment_text, webhook_url, reference_message,
-                        is_line_by_line, split_message_fn
+                        is_line_by_line, split_message_fn, view=None
                     )
                     discord_ids.extend(ids)
                 else:
                     log.warning("Webhook mode selected but no webhook_url configured")
         
-        return discord_ids
+        # Create and attach view to the last message if buttons are enabled
+        view = None
+        if discord_ids and bot and attach_buttons:
+            button_config = session.get("config", {}).get("message_action_buttons", {})
+            if button_config.get("enabled", False):
+                try:
+                    from utils.message_actions import MessageActionsView
+                    
+                    view = MessageActionsView(
+                        bot=bot,
+                        server_id=server_id,
+                        channel_id=str(channel.id),
+                        ai_name=ai_name,
+                        session=session,
+                        timeout=None  # Persistent buttons
+                    )
+                    
+                    # Edit the last message to attach the view
+                    last_msg_id = discord_ids[-1]
+                    try:
+                        last_msg = await channel.fetch_message(int(last_msg_id))
+                        await last_msg.edit(view=view)
+                        log.debug(f"Attached action buttons to message {last_msg_id}")
+                    except Exception as e:
+                        log.error(f"Error attaching buttons to message: {e}")
+                        view = None
+                        
+                except Exception as e:
+                    log.error(f"Error creating MessageActionsView: {e}")
+                    view = None
+        
+        return discord_ids, view
     
     async def _send_as_bot(
         self,
@@ -127,9 +162,10 @@ class MessageSender:
         channel: discord.TextChannel,
         reference: Optional[discord.Message],
         line_by_line: bool,
-        split_fn: Optional[Callable[[str], List[str]]]
+        split_fn: Optional[Callable[[str], List[str]]],
+        view: Optional[discord.ui.View] = None
     ) -> List[str]:
-        """Send message as bot."""
+        """Send message as bot. View is attached to last message only."""
         ids = []
         
         if line_by_line:
@@ -175,9 +211,10 @@ class MessageSender:
         webhook_url: str,
         reference: Optional[discord.Message],
         line_by_line: bool,
-        split_fn: Optional[Callable[[str], List[str]]]
+        split_fn: Optional[Callable[[str], List[str]]],
+        view: Optional[discord.ui.View] = None
     ) -> List[str]:
-        """Send message as webhook (reuses single HTTP session)."""
+        """Send message as webhook (reuses single HTTP session). View is attached to last message only."""
         ids = []
         
         # Reuse single HTTP session for all messages

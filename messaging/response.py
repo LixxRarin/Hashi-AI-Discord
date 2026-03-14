@@ -245,7 +245,8 @@ class ResponseManager:
         user_message: str,
         response_text: str,
         discord_ids: List[str],
-        group_id: Optional[str] = None
+        group_id: Optional[str] = None,
+        is_regeneration: bool = False
     ) -> None:
         """
         Add a new response.
@@ -258,6 +259,7 @@ class ResponseManager:
             response_text: AI response text
             discord_ids: List of Discord message IDs
             group_id: Optional group ID for related messages
+            is_regeneration: If True, don't clear generations even if user_message differs
         """
         # Periodic cleanup of old states (prevents memory leaks)
         import asyncio
@@ -270,17 +272,37 @@ class ResponseManager:
         
         state = self._ensure_path(server_id, channel_id, ai_name)
         
-        # If user message changed, clear old generations
-        if state.user_message != user_message:
+        # Debug logging
+        log.debug(
+            f"add_response called for AI {ai_name}: "
+            f"user_message={user_message[:50] if user_message else 'None'}..., "
+            f"current_state.user_message={state.user_message[:50] if state.user_message else 'None'}..., "
+            f"current_generations={len(state.generations)}, "
+            f"is_regeneration={is_regeneration}"
+        )
+        
+        # If user message changed, clear old generations (unless it's a regeneration)
+        # Normalize messages for comparison (strip whitespace)
+        normalized_new = user_message.strip() if user_message else ""
+        normalized_old = state.user_message.strip() if state.user_message else ""
+        
+        if not is_regeneration and normalized_old != normalized_new:
+            log.debug(f"User message changed for AI {ai_name}, clearing {len(state.generations)} generations")
             state.user_message = user_message
             state.generations.clear()
             state.current_index = 0
+        else:
+            if is_regeneration:
+                log.debug(f"Regeneration mode for AI {ai_name}, keeping {len(state.generations)} generations")
+            else:
+                log.debug(f"User message same for AI {ai_name}, keeping {len(state.generations)} generations")
+            # Update user_message to keep it current (but don't clear generations)
+            state.user_message = user_message
         
         state.add_generation(response_text, discord_ids, group_id)
         
         log.debug(
-            "Added response for AI %s (total generations: %d)",
-            ai_name, len(state.generations)
+            f"After add_generation for AI {ai_name}: total={len(state.generations)}, current_index={state.current_index}"
         )
     
     def get_current(
@@ -363,6 +385,36 @@ class ResponseManager:
             ResponseState object
         """
         return self._ensure_path(server_id, channel_id, ai_name)
+    
+    def update_generation_text(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        new_text: str
+    ) -> bool:
+        """
+        Update the text of the current generation.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            new_text: New text content
+            
+        Returns:
+            True if updated successfully, False otherwise
+        """
+        state = self._ensure_path(server_id, channel_id, ai_name)
+        current = state.get_current()
+        
+        if current:
+            current.text = new_text
+            log.debug("Updated generation text for AI %s", ai_name)
+            return True
+        
+        log.warning("No current generation to update for AI %s", ai_name)
+        return False
     
     def clear(
         self,

@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.4"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.5"
 # DEFAULT AI CONFIGURATION
 # This file contains all default configuration values for AI behavior.
 # Edit these values to change the default behavior for all new AIs.
@@ -41,7 +41,36 @@ engaged_delay: 2.5
 engaged_message_threshold: 3
 
 new_chat_on_reset: false
-auto_add_generation_reactions: false # Automatically adds navigation reactions to the bot's most recent message. (◀️, ▶️, 🔄)
+
+# Message Action Buttons - Discord UI buttons for message interactions
+message_action_buttons:
+  enabled: false  # Enable/disable action buttons on AI messages
+  buttons:  # List of buttons to display (in order)
+    - type: "previous"
+      emoji: "◀️"
+      label: null
+      style: "primary"  # primary, secondary, success, danger
+      enabled: true
+    - type: "next"
+      emoji: "▶️"
+      label: null
+      style: "primary"
+      enabled: true
+    - type: "regenerate"
+      emoji: "🔄"
+      label: null
+      style: "secondary"
+      enabled: true
+    - type: "delete"
+      emoji: "🗑️"
+      label: null
+      style: "danger"
+      enabled: true
+    - type: "edit"
+      emoji: "✏️"
+      label: null
+      style: "secondary"
+      enabled: true
 
 # Error Handling, how LLM errors are processed and displayed
 error_handling_mode: "friendly"  # Options: friendly (user-friendly messages), detailed (show exception details), silent (don't send errors)
@@ -288,6 +317,7 @@ system_message: |
 
 # Roleplay Preset. Optimized for 1-on-1 roleplay scenarios
 ROLEPLAY_PRESET_OVERRIDES = {
+    "version": "1.0.1",
     "delay_for_generation": 0.0,
     "cache_count_threshold": 1,
     "engaged_delay": 0.0,
@@ -299,7 +329,9 @@ ROLEPLAY_PRESET_OVERRIDES = {
     "user_format_syntax": "{message}",
     "user_reply_format_syntax": "{message}",
     "remove_ai_text_from": [],
-    "auto_add_generation_reactions": True,
+    "message_action_buttons": {
+        "enabled": True
+    },
     "error_handling_mode": "detailed",
     "save_errors_in_history": False,
     "send_errors_to_chat": True,
@@ -311,6 +343,7 @@ ROLEPLAY_PRESET_OVERRIDES = {
 
 # Discord Chat Preset. Natural casual behavior like a real server member
 DISCORD_CHAT_PRESET_OVERRIDES = {
+    "version": "1.0.1",
     "enable_reply_system": True,
     "enable_ignore_system": True,
     "sleep_mode_enabled": True,
@@ -331,7 +364,7 @@ BUILTIN_PRESETS = {
         "name": "Default Preset",
         "description": "Default configuration. Original settings",
         "author": "LixxRarin",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "overrides": {}  # No overrides. Pure default configuration!
     },
     "roleplay": {
@@ -449,15 +482,33 @@ class AIConfigManager:
         """
         Merge default configuration with specific overrides.
         
+        Uses deep merge to preserve nested dictionaries like message_action_buttons.
+        
         Args:
             overrides: Dictionary with values that differ from defaults
             
         Returns:
             Complete merged configuration
         """
-        merged = dict(self.default_config)
+        import copy
+        
+        # Start with a deep copy of defaults
+        merged = copy.deepcopy(self.default_config)
         merged.pop("version", None)  # Remove version from config
-        merged.update(overrides)
+        
+        # Deep merge overrides
+        def deep_merge(base: dict, override: dict) -> dict:
+            """Recursively merge override into base."""
+            for key, value in override.items():
+                if key in base and isinstance(base[key], dict) and isinstance(value, dict):
+                    # Recursively merge nested dicts
+                    base[key] = deep_merge(base[key], value)
+                else:
+                    # Override value
+                    base[key] = value
+            return base
+        
+        merged = deep_merge(merged, overrides)
         return merged
     
     def _create_builtin_preset(self, preset_key: str) -> bool:
