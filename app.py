@@ -300,8 +300,8 @@ async def on_typing(channel, user, when):
             return
         
         # Update typing for all AIs in channel using new pipeline
-        for ai_name in session_data.keys():
-            await bot.message_pipeline.handle_typing(server_id, channel_id, ai_name)
+        for ai_name, session in session_data.items():
+            await bot.message_pipeline.handle_typing(server_id, channel_id, ai_name, session)
             
     except Exception as e:
         func.log.error("Typing event error: %s", e)

@@ -125,6 +125,8 @@ class ConfigViewCommands(commands.Cog):
         timing_settings.append(f"• Delay: `{config.get('delay_for_generation', 'N/A')}s`")
         timing_settings.append(f"• Cache: `{config.get('cache_count_threshold', 'N/A')}`")
         timing_settings.append(f"• Engaged: `{config.get('engaged_delay', 'N/A')}s`")
+        typing_enabled = config.get('typing_detection_enabled', True)
+        timing_settings.append(f"• Typing: `{'✅' if typing_enabled else '❌'}`")
         embed.add_field(name="⏱️ Timing", value="\n".join(timing_settings), inline=True)
         
         # Character Card
@@ -164,6 +166,12 @@ class ConfigViewCommands(commands.Cog):
         sleep_enabled = config.get('sleep_mode_enabled', False)
         sleep_status = "✅ Enabled" if sleep_enabled else "❌ Disabled"
         embed.add_field(name="😴 Sleep Mode", value=sleep_status, inline=True)
+        
+        # Message Action Buttons
+        button_config = config.get('message_action_buttons', {})
+        buttons_enabled = button_config.get('enabled', False)
+        button_status = "✅ Enabled" if buttons_enabled else "❌ Disabled"
+        embed.add_field(name="🔘 Action Buttons", value=button_status, inline=True)
         
         embed.set_footer(text="Use /show_config with category parameter for detailed view")
         
@@ -214,6 +222,16 @@ class ConfigViewCommands(commands.Cog):
             embed.add_field(
                 name="Engaged Threshold",
                 value=f"`{config.get('engaged_message_threshold', 2)}` messages\nMessages to activate engaged mode",
+                inline=False
+            )
+            embed.add_field(
+                name="Typing Detection",
+                value=f"`{config.get('typing_detection_enabled', True)}`\nWait for user to stop typing before responding",
+                inline=False
+            )
+            embed.add_field(
+                name="Typing Grace Period",
+                value=f"`{config.get('typing_grace_period', 2.0)}` seconds\nHow long to wait after user stops typing",
                 inline=False
             )
             embed.set_footer(text="Use /config_timing to modify these settings")

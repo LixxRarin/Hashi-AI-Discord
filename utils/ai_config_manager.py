@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.5"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.6"
 # DEFAULT AI CONFIGURATION
 # This file contains all default configuration values for AI behavior.
 # Edit these values to change the default behavior for all new AIs.
@@ -39,6 +39,8 @@ delay_for_generation: 4.0
 cache_count_threshold: 5
 engaged_delay: 2.5
 engaged_message_threshold: 3
+typing_detection_enabled: true
+typing_grace_period: 2.0
 
 new_chat_on_reset: false
 
@@ -317,10 +319,10 @@ system_message: |
 
 # Roleplay Preset. Optimized for 1-on-1 roleplay scenarios
 ROLEPLAY_PRESET_OVERRIDES = {
-    "version": "1.0.1",
     "delay_for_generation": 0.0,
     "cache_count_threshold": 1,
     "engaged_delay": 0.0,
+    "typing_detection_enabled": False,
     "enable_reply_system": False,
     "send_message_line_by_line": False,
     "user_syntax_replacement": "display_name",
@@ -343,7 +345,6 @@ ROLEPLAY_PRESET_OVERRIDES = {
 
 # Discord Chat Preset. Natural casual behavior like a real server member
 DISCORD_CHAT_PRESET_OVERRIDES = {
-    "version": "1.0.1",
     "enable_reply_system": True,
     "enable_ignore_system": True,
     "sleep_mode_enabled": True,
@@ -364,21 +365,21 @@ BUILTIN_PRESETS = {
         "name": "Default Preset",
         "description": "Default configuration. Original settings",
         "author": "LixxRarin",
-        "version": "1.0.1",
+        "version": "1.0.2",
         "overrides": {}  # No overrides. Pure default configuration!
     },
     "roleplay": {
         "name": "Roleplayer!",
         "description": "Optimized for 1-on-1 roleplay scenarios with immediate responses",
         "author": "LixxRarin",
-        "version": "1.0.0",
+        "version": "1.0.2",
         "overrides": ROLEPLAY_PRESET_OVERRIDES
     },
     "discord-chat": {
         "name": "Discord-Chat",
         "description": "Natural and casual Discord chat behavior, acts like a real server member (Works best with optimized character cards)",
         "author": "LixxRarin",
-        "version": "1.0.0",
+        "version": "1.0.2",
         "overrides": DISCORD_CHAT_PRESET_OVERRIDES
     }
 }

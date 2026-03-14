@@ -101,7 +101,9 @@ class ConfigCommands(commands.Cog):
         delay="Base delay in seconds before responding",
         cache_threshold="Number of messages before triggering response",
         engaged_delay="Delay when conversation is active",
-        engaged_threshold="Messages needed to activate engaged mode"
+        engaged_threshold="Messages needed to activate engaged mode",
+        typing_detection="Wait for user to stop typing before responding",
+        typing_grace_period="Seconds to wait after user stops typing"
     )
     @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
     async def config_timing(
@@ -111,7 +113,9 @@ class ConfigCommands(commands.Cog):
         delay: float = None,
         cache_threshold: int = None,
         engaged_delay: float = None,
-        engaged_threshold: int = None
+        engaged_threshold: int = None,
+        typing_detection: bool = None,
+        typing_grace_period: float = None
     ):
         """Configure timing settings."""
         server_id = str(interaction.guild.id)
@@ -156,6 +160,17 @@ class ConfigCommands(commands.Cog):
                 return
             config["engaged_message_threshold"] = engaged_threshold
             changes.append(f"• Engaged Threshold: `{engaged_threshold}`")
+        
+        if typing_detection is not None:
+            config["typing_detection_enabled"] = typing_detection
+            changes.append(f"• Typing Detection: `{'✅ Enabled' if typing_detection else '❌ Disabled'}`")
+        
+        if typing_grace_period is not None:
+            if typing_grace_period < 0 or typing_grace_period > 10:
+                await interaction.response.send_message("❌ Typing grace period must be between 0 and 10 seconds.", ephemeral=True)
+                return
+            config["typing_grace_period"] = typing_grace_period
+            changes.append(f"• Typing Grace Period: `{typing_grace_period}s`")
         
         if not changes:
             await interaction.response.send_message("❌ No changes specified.", ephemeral=True)

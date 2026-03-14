@@ -43,8 +43,8 @@ class TimingConfig:
             cache_count_threshold=config.get("cache_count_threshold", 5),
             engaged_message_threshold=config.get("engaged_message_threshold", 2),
             engaged_delay=config.get("engaged_delay", 2.5),
-            typing_detection_enabled=True,
-            typing_grace_period=2.0
+            typing_detection_enabled=config.get("typing_detection_enabled", True),
+            typing_grace_period=config.get("typing_grace_period", 2.0)
         )
 
 
@@ -439,7 +439,7 @@ class TimingController:
         channel_id: str,
         ai_name: str,
         buffer,  # MessageBuffer instance
-        typing_duration: float = 8
+        session: Dict[str, Any]
     ) -> None:
         """
         Update typing activity for an AI.
@@ -452,9 +452,10 @@ class TimingController:
             channel_id: Channel ID
             ai_name: AI name
             buffer: MessageBuffer instance
-            typing_duration: How long to consider user as typing (seconds)
+            session: AI session data (for config)
         """
-        typing_until = time.time() + typing_duration
+        config = TimingConfig.from_session(session)
+        typing_until = time.time() + config.typing_grace_period
         await buffer.update_typing(server_id, channel_id, ai_name, typing_until)
     
     def get_stats(self) -> Dict[str, Any]:

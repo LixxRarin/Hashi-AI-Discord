@@ -797,7 +797,8 @@ class MessagePipeline:
         self,
         server_id: str,
         channel_id: str,
-        ai_name: str
+        ai_name: str,
+        session: Dict[str, Any]
     ) -> None:
         """
         Handle user typing event.
@@ -806,9 +807,10 @@ class MessagePipeline:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
+            session: AI session data
         """
         await self.timing.update_typing_activity(
-            server_id, channel_id, ai_name, self.buffer
+            server_id, channel_id, ai_name, self.buffer, session
         )
     
     def get_stats(self) -> Dict[str, Any]:
