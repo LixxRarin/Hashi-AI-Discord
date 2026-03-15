@@ -677,9 +677,12 @@ class MessageActionsView(ui.View):
                         )
                         
                         # Attach view to last message
+                        from utils.message_cache import fetch_message_cached
+                        
                         last_msg_id = discord_ids[-1]
-                        last_msg = await channel.fetch_message(int(last_msg_id))
-                        await last_msg.edit(view=new_view)
+                        last_msg = await fetch_message_cached(channel, last_msg_id)
+                        if last_msg:
+                            await last_msg.edit(view=new_view)
                         
                         log.debug(f"Reattached buttons after regeneration with correct state: {final_info['current_number']}/{final_info['total_count']}")
                         
@@ -720,11 +723,17 @@ class MessageActionsView(ui.View):
             
             # Delete messages from Discord
             deleted_count = 0
+            from utils.message_cache import fetch_message_cached, get_message_cache
+            cache = get_message_cache()
+            
             for msg_id in current_gen.discord_ids:
                 try:
-                    msg = await channel.fetch_message(int(msg_id))
-                    await msg.delete()
-                    deleted_count += 1
+                    msg = await fetch_message_cached(channel, msg_id)
+                    if msg:
+                        await msg.delete()
+                        deleted_count += 1
+                        # Invalidate cache after deletion
+                        await cache.invalidate(self.channel_id, msg_id)
                 except discord.NotFound:
                     log.warning(f"Message {msg_id} not found, skipping")
                 except Exception as e:

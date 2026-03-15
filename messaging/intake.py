@@ -143,9 +143,16 @@ class MessageIntake:
             return None, None, None, False
         
         try:
-            ref_message = await message.channel.fetch_message(
-                message.reference.message_id
+            # Use cached fetch to reduce API calls
+            from utils.message_cache import fetch_message_cached
+            
+            ref_message = await fetch_message_cached(
+                message.channel,
+                str(message.reference.message_id)
             )
+            
+            if not ref_message:
+                return str(message.reference.message_id), None, None, False
             
             # Determine if reply is to a bot message
             is_bot = ref_message.author.bot or ref_message.author.id == bot_user_id

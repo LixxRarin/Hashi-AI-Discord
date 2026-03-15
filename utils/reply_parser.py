@@ -181,6 +181,8 @@ class ReplyParser:
         Returns:
             discord.Message object if found, None otherwise
         """
+        from utils.message_cache import fetch_message_cached
+        
         # Validate ID format first
         if not ReplyParser.validate_message_id(message_id):
             return None
@@ -205,24 +207,13 @@ class ReplyParser:
                     f"Short ID {message_id} not found in mapping for {server_id}/{channel.id}/{ai_name}"
                 )
                 return None
-            
         
+        # Use cached fetch to reduce API calls
         try:
-            # Try to fetch the message
-            message = await channel.fetch_message(int(discord_id))
+            message = await fetch_message_cached(channel, discord_id)
             return message
-            
-        except discord.NotFound:
-            func.log.warning(f"Message {discord_id} not found in channel {channel.id}")
-            return None
-        except discord.Forbidden:
-            func.log.error(f"No permission to fetch message {discord_id} in channel {channel.id}")
-            return None
-        except discord.HTTPException as e:
-            func.log.error(f"HTTP error fetching message {discord_id}: {e}")
-            return None
         except Exception as e:
-            func.log.error(f"Unexpected error fetching message {discord_id}: {e}")
+            func.log.error(f"Error fetching message {discord_id}: {e}")
             return None
     
     @staticmethod

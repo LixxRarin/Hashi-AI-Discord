@@ -169,6 +169,7 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
     """
     try:
         from AI.chat_service import get_service
+        from utils.message_cache import fetch_message_cached, get_message_cache
         
         chat_service = get_service()
         channel = bot.get_channel(int(channel_id))
@@ -193,9 +194,10 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
                 # Get the last message ID (where buttons are attached)
                 last_old_msg_id = old_message_ids[-1]
                 try:
-                    old_msg = await channel.fetch_message(int(last_old_msg_id))
+                    # Use cached fetch to reduce API calls
+                    old_msg = await fetch_message_cached(channel, last_old_msg_id)
                     # Remove buttons by setting view to None
-                    if old_msg.components:
+                    if old_msg and old_msg.components:
                         await old_msg.edit(view=None)
                         func.log.debug(f"Removed buttons from previous message {last_old_msg_id}")
                 except discord.NotFound:
@@ -260,6 +262,7 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
                     button_config = session.get("config", {}).get("message_action_buttons", {})
                     if button_config.get("enabled", False):
                         from utils.message_actions import MessageActionsView
+                        from utils.message_cache import fetch_message_cached, get_message_cache
                         
                         view = MessageActionsView(
                             bot=bot,
@@ -270,12 +273,12 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
                             timeout=None
                         )
                         
-                        # Attach to last message
+                        # Attach to last message - use cached fetch
                         last_msg_id = discord_ids[-1]
-                        last_msg = await channel.fetch_message(int(last_msg_id))
-                        await last_msg.edit(view=view)
-                        
-                        func.log.debug(f"Attached buttons after ResponseManager update for AI {ai_name}")
+                        last_msg = await fetch_message_cached(channel, last_msg_id)
+                        if last_msg:
+                            await last_msg.edit(view=view)
+                            func.log.debug(f"Attached buttons after ResponseManager update for AI {ai_name}")
                 except Exception as e:
                     func.log.error(f"Error attaching buttons after generation: {e}")
         
@@ -378,6 +381,8 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     - ConversationStore (all AIs in the channel)
     """
     try:
+        from utils.message_cache import get_message_cache
+        
         # Ignore if no guild (DM)
         if not payload.guild_id:
             return
@@ -385,6 +390,10 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         server_id = str(payload.guild_id)
         channel_id = str(payload.channel_id)
         message_id = str(payload.message_id)
+        
+        # Invalidate cache for deleted message
+        cache = get_message_cache()
+        await cache.invalidate(channel_id, message_id)
         
         # Get session data for the channel
         session_data = func.get_session_data(server_id, channel_id)
@@ -436,7 +445,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
 @bot.event
 async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     """
-    Handle message edits and update conversation histories. 
+    Handle message edits and update conversation histories.
     
     When a user edits a message, this updates the content in:
     - ConversationStore (all AIs in the channel)
@@ -444,6 +453,8 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
     Note: Messages in buffer are not updated (they'll be processed with old content)
     """
     try:
+        from utils.message_cache import fetch_message_cached, get_message_cache
+        
         # Ignore if no guild (DM)
         if not payload.guild_id:
             return
@@ -458,9 +469,9 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             func.log.warning(f"Channel {channel_id} not found for message edit")
             return
         
-        # Fetch the updated message
+        # Fetch the updated message using cache (reduces API calls for recent messages)
         try:
-            message = await channel.fetch_message(int(message_id))
+            message = await fetch_message_cached(channel, message_id)
         except discord.NotFound:
             func.log.debug(f"Message {message_id} not found (may have been deleted)")
             return
@@ -471,9 +482,16 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             func.log.warning(f"Failed to fetch edited message {message_id}: {e}")
             return
         
+        if not message:
+            return
+        
         # Ignore bot's own messages
         if message.author.id == bot.user.id:
             return
+        
+        # Invalidate cache for this message since it was edited
+        cache = get_message_cache()
+        await cache.invalidate(channel_id, message_id)
         
         # Get session data for the channel
         session_data = func.get_session_data(server_id, channel_id)

@@ -143,9 +143,13 @@ class MessageSender:
                     # Edit the last message to attach the view
                     last_msg_id = discord_ids[-1]
                     try:
-                        last_msg = await channel.fetch_message(int(last_msg_id))
-                        await last_msg.edit(view=view)
-                        log.debug(f"Attached action buttons to message {last_msg_id}")
+                        from utils.message_cache import fetch_message_cached
+                        last_msg = await fetch_message_cached(channel, last_msg_id)
+                        if last_msg:
+                            await last_msg.edit(view=view)
+                            log.debug(f"Attached action buttons to message {last_msg_id}")
+                        else:
+                            view = None
                     except Exception as e:
                         log.error(f"Error attaching buttons to message: {e}")
                         view = None
@@ -335,10 +339,13 @@ class MessageSender:
         
         # Edit first message to "Generating..."
         try:
+            from utils.message_cache import fetch_message_cached
+            
             if mode == "bot":
-                message = await channel.fetch_message(int(first_msg_id))
-                await message.edit(content="Generating...")
-                log.debug(f"Edited message {first_msg_id} to show 'Generating...'")
+                message = await fetch_message_cached(channel, first_msg_id)
+                if message:
+                    await message.edit(content="Generating...")
+                    log.debug(f"Edited message {first_msg_id} to show 'Generating...'")
             else:
                 # Webhook mode
                 if not webhook_url:
@@ -347,9 +354,10 @@ class MessageSender:
                 
                 async with aiohttp.ClientSession() as http_session:
                     webhook = discord.Webhook.from_url(webhook_url, session=http_session)
-                    message = await channel.fetch_message(int(first_msg_id))
-                    await webhook.edit_message(int(first_msg_id), content="Generating...")
-                    log.debug(f"Edited webhook message {first_msg_id} to show 'Generating...'")
+                    message = await fetch_message_cached(channel, first_msg_id)
+                    if message:
+                        await webhook.edit_message(int(first_msg_id), content="Generating...")
+                        log.debug(f"Edited webhook message {first_msg_id} to show 'Generating...'")
         
         except discord.NotFound:
             log.warning(f"Message {first_msg_id} not found, cannot edit")
@@ -364,9 +372,11 @@ class MessageSender:
         # Delete remaining messages
         for msg_id in message_ids[1:]:
             try:
-                message = await channel.fetch_message(int(msg_id))
-                await message.delete()
-                log.debug(f"Deleted extra message {msg_id}")
+                from utils.message_cache import fetch_message_cached
+                message = await fetch_message_cached(channel, msg_id)
+                if message:
+                    await message.delete()
+                    log.debug(f"Deleted extra message {msg_id}")
             except discord.NotFound:
                 log.debug(f"Message {msg_id} already deleted")
             except discord.Forbidden:
@@ -428,11 +438,14 @@ class MessageSender:
                 # Edit existing message
                 msg_id = message_ids[i]
                 try:
+                    from utils.message_cache import fetch_message_cached
+                    
                     if mode == "bot":
-                        message = await channel.fetch_message(int(msg_id))
-                        await message.edit(content=chunk)
-                        result_ids.append(msg_id)
-                        log.debug(f"Edited message {msg_id}")
+                        message = await fetch_message_cached(channel, msg_id)
+                        if message:
+                            await message.edit(content=chunk)
+                            result_ids.append(msg_id)
+                            log.debug(f"Edited message {msg_id}")
                     else:
                         # Webhook mode
                         if not webhook_url:
@@ -483,9 +496,11 @@ class MessageSender:
         if len(message_ids) > len(chunks):
             for msg_id in message_ids[len(chunks):]:
                 try:
-                    message = await channel.fetch_message(int(msg_id))
-                    await message.delete()
-                    log.debug(f"Deleted extra message {msg_id}")
+                    from utils.message_cache import fetch_message_cached
+                    message = await fetch_message_cached(channel, msg_id)
+                    if message:
+                        await message.delete()
+                        log.debug(f"Deleted extra message {msg_id}")
                 except Exception as e:
                     log.debug(f"Could not delete extra message {msg_id}: {e}")
         
