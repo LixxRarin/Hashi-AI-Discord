@@ -577,3 +577,75 @@ def delete_memory_file(server_id: str, channel_id: str, ai_name: str, chat_id: s
     except Exception as e:
         log.error(f"Error deleting memory files for {server_id}/{channel_id}/{ai_name}: {e}")
         return False
+
+
+def delete_server_memory_files(server_id: str) -> int:
+    """
+    Delete all memory files for a server. Used during server cleanup.
+    
+    Args:
+        server_id: Server ID
+        
+    Returns:
+        int: Number of files deleted
+    """
+    try:
+        # Sanitize server_id for filename matching
+        safe_server_id = "".join(c for c in server_id if c.isalnum() or c in "_-")
+        
+        # Pattern to match all memory files for this server
+        pattern = f"memory_{safe_server_id}_*.json"
+        
+        deleted_count = 0
+        for path in MEMORY_DIR.glob(pattern):
+            path.unlink()
+            log.info(f"Deleted memory file: {path.name}")
+            deleted_count += 1
+        
+        if deleted_count > 0:
+            log.info(f"Deleted {deleted_count} memory file(s) for server {server_id}")
+        else:
+            log.debug(f"No memory files found for server {server_id}")
+        
+        return deleted_count
+        
+    except Exception as e:
+        log.error(f"Error deleting memory files for server {server_id}: {e}")
+        return 0
+
+
+def delete_channel_memory_files(server_id: str, channel_id: str) -> int:
+    """
+    Delete all memory files for a specific channel. Used during channel cleanup.
+    
+    Args:
+        server_id: Server ID
+        channel_id: Channel ID
+        
+    Returns:
+        int: Number of files deleted
+    """
+    try:
+        # Sanitize IDs for filename matching
+        safe_server_id = "".join(c for c in server_id if c.isalnum() or c in "_-")
+        safe_channel_id = "".join(c for c in channel_id if c.isalnum() or c in "_-")
+        
+        # Pattern to match all memory files for this channel
+        pattern = f"memory_{safe_server_id}_{safe_channel_id}_*.json"
+        
+        deleted_count = 0
+        for path in MEMORY_DIR.glob(pattern):
+            path.unlink()
+            log.info(f"Deleted memory file: {path.name}")
+            deleted_count += 1
+        
+        if deleted_count > 0:
+            log.info(f"Deleted {deleted_count} memory file(s) for channel {channel_id} in server {server_id}")
+        else:
+            log.debug(f"No memory files found for channel {channel_id} in server {server_id}")
+        
+        return deleted_count
+        
+    except Exception as e:
+        log.error(f"Error deleting memory files for channel {channel_id} in server {server_id}: {e}")
+        return 0

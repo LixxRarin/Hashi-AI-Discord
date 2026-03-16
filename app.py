@@ -126,6 +126,9 @@ class BridgeBot(commands.Bot):
     async def _initialize_all_webhooks(self):
         """Initialize all webhooks with their respective character configurations"""
         func.log.debug("Checking webhook configurations...")
+        
+        # Track channels that no longer exist for cleanup
+        channels_to_cleanup = []
 
         # Iterate over all sessions to verify configuration only
         for server_id, server_data in func.session_cache.items():
@@ -134,8 +137,10 @@ class BridgeBot(commands.Bot):
                 # Get the channel object (if available)
                 channel = self.get_channel(int(channel_id))
                 if not channel:
+                    # Channel no longer exists - mark for cleanup
                     func.log.warning(
-                        "Channel with ID %s not found.", channel_id)
+                        "Channel with ID %s not found - will be cleaned up.", channel_id)
+                    channels_to_cleanup.append((server_id, channel_id))
                     continue
 
                 # Skip if channel_data is None (can happen after removing all AIs)
@@ -153,6 +158,23 @@ class BridgeBot(commands.Bot):
                             "No webhook URL found for AI %s in channel %s in server %s",
                             ai_name, channel_id, server_id
                         )
+        
+        # Cleanup channels that no longer exist
+        if channels_to_cleanup:
+            func.log.info(f"Found {len(channels_to_cleanup)} orphaned channel(s), starting cleanup...")
+            
+            for server_id, channel_id in channels_to_cleanup:
+                try:
+                    results = await func.cleanup_channel_data(server_id, channel_id)
+                    if results["success"]:
+                        func.log.info(f"Cleaned up orphaned channel {channel_id} in server {server_id}")
+                    else:
+                        func.log.warning(
+                            f"Cleanup completed with errors for channel {channel_id}: "
+                            f"{', '.join(results.get('errors', []))}"
+                        )
+                except Exception as e:
+                    func.log.error(f"Error cleaning up channel {channel_id}: {e}")
 
         func.log.debug("Webhook configuration check complete!")
 
@@ -582,6 +604,101 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         
     except Exception as e:
         func.log.error(f"Error processing message edit: {e}")
+
+
+@bot.event
+async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
+    """
+    Handle channel deletion.
+    Automatically cleanup all associated data for the deleted channel.
+    """
+    # Only process text channels where the bot can have AIs
+    if not isinstance(channel, discord.TextChannel):
+        return
+    
+    server_id = str(channel.guild.id)
+    channel_id = str(channel.id)
+    channel_name = channel.name
+    server_name = channel.guild.name
+    
+    func.log.warning(
+        f"Channel deleted: #{channel_name} (ID: {channel_id}) in server '{server_name}'"
+    )
+    
+    try:
+        # Check if this channel had any AI configurations
+        session_data = func.get_session_data(server_id, channel_id)
+        
+        if not session_data:
+            func.log.debug(f"No AI configurations found for deleted channel #{channel_name}")
+            return
+        
+        ai_count = len(session_data)
+        func.log.info(f"Channel #{channel_name} had {ai_count} AI(s) configured, starting cleanup...")
+        
+        # Perform cleanup
+        results = await func.cleanup_channel_data(server_id, channel_id, channel_name)
+        
+        # Log results
+        if results["success"]:
+            func.log.info(
+                f"Successfully cleaned up data for channel #{channel_name}!")
+        else:
+            func.log.error(
+                f"Cleanup completed with errors for channel #{channel_name}. "
+                f"Errors: {', '.join(results.get('errors', []))}"
+            )
+    except Exception as e:
+        func.log.error(
+            f"Fatal error during cleanup for channel #{channel_name} (ID: {channel_id}): {e}",
+            exc_info=True
+        )
+
+
+@bot.event
+async def on_guild_remove(guild: discord.Guild):
+    """
+    Handle bot removal from a server.
+    Automatically cleanup all associated data.
+    """
+    server_id = str(guild.id)
+    server_name = guild.name
+    
+    func.log.warning(
+        f"Bot removed from server: {server_name} (ID: {server_id})"
+    )
+    
+    try:
+        # Perform cleanup
+        results = await func.cleanup_server_data(server_id, server_name)
+        
+        # Log detailed results
+        if results["success"]:
+            card_info = results.get("character_cards", {})
+            func.log.info(
+                f"Successfully cleaned up data for server '{server_name}'!\n")
+            
+            # Log skipped character cards if any
+            if card_info.get('skipped_reasons'):
+                skipped = card_info['skipped_reasons']
+                if skipped.get('system_cards'):
+                    func.log.info(
+                        f"  • System cards preserved: {', '.join(skipped['system_cards'])}"
+                    )
+                if skipped.get('shared_cards'):
+                    func.log.info(
+                        f"  • Shared cards preserved: {', '.join(skipped['shared_cards'])}"
+                    )
+        else:
+            func.log.error(
+                f"❌ Cleanup completed with errors for server '{server_name}'. "
+                f"Errors: {', '.join(results.get('errors', []))}"
+            )
+    except Exception as e:
+        func.log.error(
+            f"❌ Fatal error during cleanup for server '{server_name}' (ID: {server_id}): {e}",
+            exc_info=True
+        )
 
 
 @bot.event

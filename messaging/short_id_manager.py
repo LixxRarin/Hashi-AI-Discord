@@ -305,6 +305,76 @@ class ShortIDManager:
                 "total_ais": total_ais,
                 "servers": len(self._maps)
             }
+    
+    async def delete_server_mappings(self, server_id: str) -> bool:
+        """
+        Delete all short ID mappings for a server.
+        
+        Args:
+            server_id: Discord server ID
+            
+        Returns:
+            bool: True if deleted successfully, False otherwise
+        """
+        async with self._lock:
+            try:
+                if server_id in self._maps:
+                    # Count data before deletion for logging
+                    channel_count = len(self._maps[server_id])
+                    ai_count = sum(len(channel_data) for channel_data in self._maps[server_id].values())
+                    
+                    # Delete server mappings
+                    del self._maps[server_id]
+                    
+                    log.info(
+                        f"Deleted short ID mappings for server {server_id}: "
+                        f"{channel_count} channel(s), {ai_count} AI(s)"
+                    )
+                    return True
+                else:
+                    log.debug(f"No short ID mappings found for server {server_id}")
+                    return True  # Not an error if data doesn't exist
+                    
+            except Exception as e:
+                log.error(f"Error deleting short ID mappings for server {server_id}: {e}")
+                return False
+    
+    async def delete_channel_mappings(self, server_id: str, channel_id: str) -> bool:
+        """
+        Delete all short ID mappings for a specific channel.
+        
+        Args:
+            server_id: Discord server ID
+            channel_id: Discord channel ID
+            
+        Returns:
+            bool: True if deleted successfully, False otherwise
+        """
+        async with self._lock:
+            try:
+                if server_id in self._maps and channel_id in self._maps[server_id]:
+                    # Count data before deletion for logging
+                    ai_count = len(self._maps[server_id][channel_id])
+                    
+                    # Delete channel mappings
+                    del self._maps[server_id][channel_id]
+                    
+                    # Clean up empty server entries
+                    if not self._maps[server_id]:
+                        del self._maps[server_id]
+                    
+                    log.info(
+                        f"Deleted short ID mappings for channel {channel_id} in server {server_id}: "
+                        f"{ai_count} AI(s)"
+                    )
+                    return True
+                else:
+                    log.debug(f"No short ID mappings found for channel {channel_id} in server {server_id}")
+                    return True  # Not an error if data doesn't exist
+                    
+            except Exception as e:
+                log.error(f"Error deleting short ID mappings for channel {channel_id} in server {server_id}: {e}")
+                return False
 
 
 # Global instance

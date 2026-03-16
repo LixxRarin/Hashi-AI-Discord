@@ -764,3 +764,270 @@ def get_thinking_config(session: Dict[str, Any], server_id: str) -> tuple[bool, 
     
     return hide_tags, patterns
 
+
+async def delete_server_session_data(server_id: str) -> bool:
+    """
+    Delete all session data for a server.
+    
+    Args:
+        server_id: Discord server ID
+        
+    Returns:
+        bool: True if deleted successfully, False otherwise
+    """
+    global session_cache
+    
+    try:
+        # Remove from in-memory cache
+        if server_id in session_cache:
+            del session_cache[server_id]
+            log.info(f"Removed server {server_id} from session cache")
+        
+        # Update persistent storage
+        session_file = get_session_file()
+        data = await asyncio.to_thread(read_json, session_file) or {}
+        
+        if server_id in data:
+            del data[server_id]
+            await asyncio.to_thread(write_json, session_file, data)
+            log.info(f"Deleted session data for server {server_id} from {session_file}")
+            return True
+        else:
+            log.debug(f"No session data found for server {server_id}")
+            return True  # Not an error if data doesn't exist
+            
+    except Exception as e:
+        log.error(f"Error deleting session data for server {server_id}: {e}")
+        return False
+
+
+async def delete_server_api_connections(server_id: str) -> bool:
+    """
+    Delete all API connections for a server.
+    
+    Args:
+        server_id: Discord server ID
+        
+    Returns:
+        bool: True if deleted successfully, False otherwise
+    """
+    try:
+        connections = await load_api_connections()
+        
+        if server_id in connections:
+            connection_count = len(connections[server_id])
+            del connections[server_id]
+            await save_api_connections(connections)
+            log.info(f"Deleted {connection_count} API connection(s) for server {server_id}")
+            return True
+        else:
+            log.debug(f"No API connections found for server {server_id}")
+            return True  # Not an error if data doesn't exist
+            
+    except Exception as e:
+        log.error(f"Error deleting API connections for server {server_id}: {e}")
+        return False
+
+
+async def cleanup_server_data(server_id: str, server_name: str = None) -> Dict[str, Any]:
+    """
+    Orchestrate complete cleanup of all server data.
+    
+    This function coordinates cleanup across all data storage systems:
+    - Session configurations
+    - API connections
+    - Character cards (with smart file deletion)
+    - Conversation histories
+    - Short ID mappings
+    - Memory files
+    
+    Args:
+        server_id: Discord server ID
+        server_name: Server name for logging (optional)
+    
+    Returns:
+        Dict with cleanup results containing success status and details for each component
+    """
+    server_display = f"{server_name} (ID: {server_id})" if server_name else f"ID: {server_id}"
+    log.info(f"Starting cleanup for server: {server_display}")
+    
+    results = {
+        "success": True,
+        "session_data": False,
+        "api_connections": False,
+        "character_cards": {},
+        "conversations": False,
+        "short_id_mappings": False,
+        "memory_files": 0,
+        "errors": []
+    }
+    
+    # 1. Clean session data
+    try:
+        results["session_data"] = await delete_server_session_data(server_id)
+    except Exception as e:
+        error_msg = f"Session data cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+    
+    # 2. Clean API connections
+    try:
+        results["api_connections"] = await delete_server_api_connections(server_id)
+    except Exception as e:
+        error_msg = f"API connections cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+    
+    # 3. Clean character cards (with smart deletion)
+    try:
+        from utils.func_character_cards import delete_server_character_cards
+        results["character_cards"] = await delete_server_character_cards(server_id)
+        if not results["character_cards"].get("success", False):
+            results["success"] = False
+    except Exception as e:
+        error_msg = f"Character cards cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+        results["character_cards"] = {"success": False, "error": str(e)}
+    
+    # 4. Clean conversation history
+    try:
+        from messaging.store import get_store
+        store = get_store()
+        results["conversations"] = await store.delete_server_conversations(server_id)
+    except Exception as e:
+        error_msg = f"Conversations cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+    
+    # 5. Clean short ID mappings
+    try:
+        from messaging.short_id_manager import get_short_id_manager
+        manager = get_short_id_manager()
+        results["short_id_mappings"] = await manager.delete_server_mappings(server_id)
+    except Exception as e:
+        error_msg = f"Short ID mappings cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+    
+    # 6. Clean memory files
+    try:
+        from AI.tools.memory_tools import delete_server_memory_files
+        results["memory_files"] = delete_server_memory_files(server_id)
+    except Exception as e:
+        error_msg = f"Memory files cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+    
+    # Log summary
+    if results["success"]:
+        log.info(
+            f"Successfully cleaned up data for server {server_display}:\n"
+            f"  - Session data: {'✓' if results['session_data'] else '✗'}\n"
+            f"  - API connections: {'✓' if results['api_connections'] else '✗'}\n"
+            f"  - Character cards: {results['character_cards'].get('cards_unregistered', 0)} unregistered, "
+            f"{results['character_cards'].get('files_deleted', 0)} files deleted\n"
+            f"  - Conversations: {'✓' if results['conversations'] else '✗'}\n"
+            f"  - Short ID mappings: {'✓' if results['short_id_mappings'] else '✗'}\n"
+            f"  - Memory files: {results['memory_files']} deleted"
+        )
+    else:
+        log.error(
+            f"Cleanup completed with errors for server {server_display}. "
+            f"Errors: {', '.join(results['errors'])}"
+        )
+    return results
+
+
+async def cleanup_channel_data(server_id: str, channel_id: str, channel_name: str = None) -> Dict[str, Any]:
+    """
+    Cleanup all data for a deleted channel.
+    
+    This function is called when a channel is deleted from a server.
+    It removes channel-specific data while preserving server-level data.
+    
+    Args:
+        server_id: Discord server ID
+        channel_id: Discord channel ID
+        channel_name: Channel name for logging (optional)
+    
+    Returns:
+        Dict with cleanup results
+    """
+    channel_display = f"#{channel_name} (ID: {channel_id})" if channel_name else f"ID: {channel_id}"
+    log.info(f"Starting cleanup for deleted channel: {channel_display} in server {server_id}")
+    
+    results = {
+        "success": True,
+        "session_data": False,
+        "conversations": False,
+        "short_id_mappings": False,
+        "memory_files": 0,
+        "errors": []
+    }
+    
+    # 1. Clean session data for this channel
+    try:
+        results["session_data"] = await remove_session_data(server_id, channel_id)
+    except Exception as e:
+        error_msg = f"Session data cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+    
+    # 2. Clean conversation history for this channel
+    try:
+        from messaging.store import get_store
+        store = get_store()
+        results["conversations"] = await store.delete_channel_conversations(server_id, channel_id)
+    except Exception as e:
+        error_msg = f"Conversations cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+    
+    # 3. Clean short ID mappings for this channel
+    try:
+        from messaging.short_id_manager import get_short_id_manager
+        manager = get_short_id_manager()
+        results["short_id_mappings"] = await manager.delete_channel_mappings(server_id, channel_id)
+    except Exception as e:
+        error_msg = f"Short ID mappings cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+    
+    # 4. Clean memory files for this channel
+    try:
+        from AI.tools.memory_tools import delete_channel_memory_files
+        results["memory_files"] = delete_channel_memory_files(server_id, channel_id)
+    except Exception as e:
+        error_msg = f"Memory files cleanup failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+        results["success"] = False
+    
+    # Log summary
+    if results["success"]:
+        log.info(
+            f"Successfully cleaned up data for channel {channel_display}:\n"
+            f"  - Session data: {'✓' if results['session_data'] else '✗'}\n"
+            f"  - Conversations: {'✓' if results['conversations'] else '✗'}\n"
+            f"  - Short ID mappings: {'✓' if results['short_id_mappings'] else '✗'}\n"
+            f"  - Memory files: {results['memory_files']} deleted"
+        )
+    else:
+        log.error(
+            f"Cleanup completed with errors for channel {channel_display}. "
+            f"Errors: {', '.join(results['errors'])}"
+        )
+    
+    return results
+
+

@@ -1305,6 +1305,82 @@ class ConversationStore:
             "total_ais": total_ais,
             "servers": len(self._data)
         }
+    
+    async def delete_server_conversations(self, server_id: str) -> bool:
+        """
+        Delete all conversation history for a server.
+        
+        Args:
+            server_id: Discord server ID
+            
+        Returns:
+            bool: True if deleted successfully, False otherwise
+        """
+        async with self._lock:
+            try:
+                if server_id in self._data:
+                    # Count data before deletion for logging
+                    channel_count = len(self._data[server_id])
+                    ai_count = sum(len(channel_data) for channel_data in self._data[server_id].values())
+                    
+                    # Delete server data
+                    del self._data[server_id]
+                    
+                    # Schedule save
+                    self.schedule_save()
+                    
+                    log.info(
+                        f"Deleted conversation history for server {server_id}: "
+                        f"{channel_count} channel(s), {ai_count} AI(s)"
+                    )
+                    return True
+                else:
+                    log.debug(f"No conversation history found for server {server_id}")
+                    return True  # Not an error if data doesn't exist
+                    
+            except Exception as e:
+                log.error(f"Error deleting conversations for server {server_id}: {e}")
+                return False
+    
+    async def delete_channel_conversations(self, server_id: str, channel_id: str) -> bool:
+        """
+        Delete all conversation history for a specific channel.
+        
+        Args:
+            server_id: Discord server ID
+            channel_id: Discord channel ID
+            
+        Returns:
+            bool: True if deleted successfully, False otherwise
+        """
+        async with self._lock:
+            try:
+                if server_id in self._data and channel_id in self._data[server_id]:
+                    # Count data before deletion for logging
+                    ai_count = len(self._data[server_id][channel_id])
+                    
+                    # Delete channel data
+                    del self._data[server_id][channel_id]
+                    
+                    # Clean up empty server entries
+                    if not self._data[server_id]:
+                        del self._data[server_id]
+                    
+                    # Schedule save
+                    self.schedule_save()
+                    
+                    log.info(
+                        f"Deleted conversation history for channel {channel_id} in server {server_id}: "
+                        f"{ai_count} AI(s)"
+                    )
+                    return True
+                else:
+                    log.debug(f"No conversation history found for channel {channel_id} in server {server_id}")
+                    return True  # Not an error if data doesn't exist
+                    
+            except Exception as e:
+                log.error(f"Error deleting conversations for channel {channel_id} in server {server_id}: {e}")
+                return False
 
 
 # Global store instance
