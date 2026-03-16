@@ -122,6 +122,16 @@ class BridgeBot(commands.Bot):
             except Exception as e:
                 func.log.warning(f"Failed to initialize Rich Presence: {e}")
                 func.log.debug("Bot will continue running without Rich Presence")
+            
+            # Initialize Bot Status Manager (for sleep mode status changes)
+            try:
+                from utils.bot_status_manager import BotStatusManager, set_bot_status_manager
+                status_manager = BotStatusManager(self)
+                set_bot_status_manager(status_manager)
+                await status_manager.initialize_from_sleep_states()
+            except Exception as e:
+                func.log.warning(f"Failed to initialize Bot Status Manager: {e}")
+                func.log.debug("Bot will continue running without status management")
 
     async def _initialize_all_webhooks(self):
         """Initialize all webhooks with their respective character configurations"""

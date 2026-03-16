@@ -324,6 +324,15 @@ class MessagePipeline:
                     state["consecutive_refusals"] = 0
                     state["last_activity"] = time.time()
                     response_filter._save_sleep_state(server_id, channel_id, ai_name)
+                    
+                    # Notify bot status manager
+                    try:
+                        from utils.bot_status_manager import get_bot_status_manager
+                        status_manager = get_bot_status_manager()
+                        if status_manager:
+                            await status_manager.on_ai_wake(server_id, channel_id, ai_name)
+                    except Exception as e:
+                        log.debug(f"Failed to notify bot status manager on wake: {e}")
         
         if config.get("use_response_filter", False):
             is_mentioned = False
@@ -564,12 +573,23 @@ class MessagePipeline:
                 
                 if state_key in response_filter.sleep_state:
                     state = response_filter.sleep_state[state_key]
+                    was_sleeping = state.get("in_sleep_mode", False)
                     if state["consecutive_refusals"] > 0:
                         log.debug(f"Resetting ignore counter for AI {ai_name} (was {state['consecutive_refusals']})")
                     state["consecutive_refusals"] = 0
                     state["in_sleep_mode"] = False
                     state["last_activity"] = time.time()
                     response_filter._save_sleep_state(server_id, channel_id, ai_name)
+                    
+                    # Notify bot status manager if AI was sleeping
+                    if was_sleeping:
+                        try:
+                            from utils.bot_status_manager import get_bot_status_manager
+                            status_manager = get_bot_status_manager()
+                            if status_manager:
+                                await status_manager.on_ai_wake(server_id, channel_id, ai_name)
+                        except Exception as e:
+                            log.debug(f"Failed to notify bot status manager on wake: {e}")
             
             
             formatted_user_content = await self.buffer.get_formatted_content(
@@ -664,6 +684,16 @@ class MessagePipeline:
         if state["consecutive_refusals"] >= ignore_threshold:
             state["in_sleep_mode"] = True
             response_filter._save_sleep_state(server_id, channel_id, ai_name)
+            
+            # Notify bot status manager
+            try:
+                from utils.bot_status_manager import get_bot_status_manager
+                status_manager = get_bot_status_manager()
+                if status_manager:
+                    await status_manager.on_ai_sleep(server_id, channel_id, ai_name)
+            except Exception as e:
+                log.debug(f"Failed to notify bot status manager on sleep: {e}")
+            
             log.warning(
                 f"AI {ai_name} entering sleep mode after "
                 f"{state['consecutive_refusals']} consecutive ignores. "

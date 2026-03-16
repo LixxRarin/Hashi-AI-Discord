@@ -205,6 +205,15 @@ class ResponseFilter:
                 state["consecutive_refusals"] = 0
                 self._save_sleep_state(server_id, channel_id, ai_name)
                 
+                # Notify bot status manager
+                try:
+                    from utils.bot_status_manager import get_bot_status_manager
+                    status_manager = get_bot_status_manager()
+                    if status_manager:
+                        await status_manager.on_ai_wake(server_id, channel_id, ai_name)
+                except Exception as e:
+                    func.log.debug(f"Failed to notify bot status manager on wake: {e}")
+                
                 # Don't pass through normal filter logic which might refuse again
                 return True, {
                     "should_respond": True,
@@ -281,6 +290,16 @@ class ResponseFilter:
                         if state["consecutive_refusals"] >= sleep_mode_threshold:
                             state["in_sleep_mode"] = True
                             self._save_sleep_state(server_id, channel_id, ai_name)
+                            
+                            # Notify bot status manager
+                            try:
+                                from utils.bot_status_manager import get_bot_status_manager
+                                status_manager = get_bot_status_manager()
+                                if status_manager:
+                                    await status_manager.on_ai_sleep(server_id, channel_id, ai_name)
+                            except Exception as e:
+                                func.log.debug(f"Failed to notify bot status manager on sleep: {e}")
+                            
                             func.log.warning(
                                 f"[SLEEP MODE] AI {ai_name} entering sleep mode after "
                                 f"{state['consecutive_refusals']} consecutive refusals. "
