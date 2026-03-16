@@ -146,6 +146,11 @@ class ConfigViewCommands(commands.Cog):
         reply_status = "✅ Enabled" if reply_enabled else "❌ Disabled"
         embed.add_field(name="💬 Reply System", value=reply_status, inline=True)
         
+        # Reaction System
+        reaction_enabled = config.get('enable_reaction_system', False)
+        reaction_status = "✅ Enabled" if reaction_enabled else "❌ Disabled"
+        embed.add_field(name="😊 Reaction System", value=reaction_status, inline=True)
+        
         # Ignore System
         ignore_enabled = config.get('enable_ignore_system', False)
         ignore_status = "✅ Enabled" if ignore_enabled else "❌ Disabled"
@@ -337,6 +342,21 @@ class ConfigViewCommands(commands.Cog):
                 inline=False
             )
             embed.set_footer(text="Use /config_reply to modify these settings")
+        
+        elif category == "reaction":
+            embed.add_field(
+                name="Reaction System Enabled",
+                value=f"`{config.get('enable_reaction_system', False)}`\nAllow AI to react to messages with emojis",
+                inline=False
+            )
+            prompt = config.get('reaction_prompt', '')
+            prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
+            embed.add_field(
+                name="Reaction Prompt",
+                value=f"```\n{prompt_preview}\n```",
+                inline=False
+            )
+            embed.set_footer(text="Use /config_reaction to modify these settings")
         
         elif category == "tools":
             tool_config = config.get('tool_calling', {})

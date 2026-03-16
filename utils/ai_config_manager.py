@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.6"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.7"
 # DEFAULT AI CONFIGURATION
 # This file contains all default configuration values for AI behavior.
 # Edit these values to change the default behavior for all new AIs.
@@ -182,6 +182,43 @@ reply_prompt: |
   • Older message: '@John about your question earlier, yes!'
   • General: 'Hey everyone! How's it going?' (no reply needed)
 
+# Reaction System - AI can react to messages with emojis
+enable_reaction_system: false
+reaction_prompt: |
+  Reaction Syntax: <REACTION:ID|emoji>
+  
+  You can react to messages using emojis to express quick emotions or acknowledgments.
+  
+  WHEN TO USE REACTIONS:
+  
+  Use reactions when:
+  - Acknowledging a message without needing a full response
+  - Expressing quick emotions (agreement, celebration, sympathy)
+  - Showing you've seen/read something important
+  - Adding emotional context to your response
+  - Multiple people share content worth reacting to
+  
+  AVOID reactions when:
+  - A proper text response is more appropriate
+  - The conversation requires detailed explanation
+  - You're unsure what the user wants
+  
+  EMOJI TYPES:
+  - Standard emojis: Use unicode directly (👍, 😊, ❤️, 🎉, etc.)
+  - Custom server emojis: Use :emoji_name: format (e.g., :happy:, :thumbsup:)
+  
+  EXAMPLES:
+  - <REACTION:5|👍> Great idea!
+  - <REACTION:3|❤️> <REACTION:3|🎉>
+  - <REACTION:8|:happy:> That's awesome!
+  - Just reacting: <REACTION:2|😊>
+  
+  Rules:
+  1. You can use multiple reactions in one response
+  2. Reactions can be combined with text or used alone
+  3. Use the message's short ID (#1, #2, etc.) that you see in the context
+  4. Invalid emojis will be silently ignored (no error shown to user)
+
 # Ignore System, LLM decides during generation to skip responding
 enable_ignore_system: false
 ignore_sleep_threshold: 3
@@ -294,6 +331,7 @@ tool_calling_prompt: |
 #   - memory_prompt: Persistent memory content
 #   - tool_calling_prompt: Tool usage instructions
 #   - reply_prompt: Reply system instructions
+#   - reaction_prompt: Reaction system instructions
 #   - ignore_prompt: Ignore system instructions
 #   - conversation_history: Past messages in the conversation
 #   - user_message: Current user message
@@ -303,6 +341,7 @@ context_order:
   - memory_prompt
   - tool_calling_prompt
   - reply_prompt
+  - reaction_prompt
   - ignore_prompt
   - conversation_history
   - user_message
@@ -353,6 +392,7 @@ DISCORD_CHAT_PRESET_OVERRIDES = {
     "save_errors_in_history": True,
     "send_errors_to_chat": True,
     "enable_memory_system": True,
+    "enable_reaction_system": True,
     "tool_calling": {
         "enabled": True,
         "allowed_tools": ["all"]
@@ -379,7 +419,7 @@ BUILTIN_PRESETS = {
         "name": "Discord-Chat",
         "description": "Natural and casual Discord chat behavior, acts like a real server member (Works best with optimized character cards)",
         "author": "LixxRarin",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "overrides": DISCORD_CHAT_PRESET_OVERRIDES
     }
 }

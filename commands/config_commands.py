@@ -611,6 +611,62 @@ class ConfigCommands(commands.Cog):
             ephemeral=True
         )
     
+    @app_commands.command(name="config_reaction", description="Configure reaction system settings")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(
+        ai_name="Name of the AI to configure",
+        enabled="Enable reaction system (AI can react to messages with emojis)",
+        custom_prompt="Custom reaction prompt (or 'default' for default)"
+    )
+    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
+    async def config_reaction(
+        self,
+        interaction: discord.Interaction,
+        ai_name: str,
+        enabled: Optional[bool] = None,
+        custom_prompt: Optional[str] = None
+    ):
+        """Configure reaction system settings."""
+        server_id = str(interaction.guild.id)
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        
+        if not found_ai_data:
+            await interaction.response.send_message(f"❌ AI '{ai_name}' not found.", ephemeral=True)
+            return
+        
+        found_channel_id, session = found_ai_data
+        if session is None:
+            await interaction.response.send_message(f"❌ AI '{ai_name}' session data is invalid.", ephemeral=True)
+            return
+        
+        config = session.setdefault("config", {})
+        changes = []
+        
+        if enabled is not None:
+            config["enable_reaction_system"] = enabled
+            changes.append(f"• Reaction System: `{enabled}`")
+        
+        if custom_prompt is not None:
+            if custom_prompt.lower() == "default":
+                config["reaction_prompt"] = func.get_default_ai_config()["reaction_prompt"]
+                changes.append("• Prompt: `Reset to default`")
+            else:
+                config["reaction_prompt"] = custom_prompt
+                changes.append(f"• Prompt: `Custom ({len(custom_prompt)} chars)`")
+        
+        if not changes:
+            await interaction.response.send_message("❌ No changes specified.", ephemeral=True)
+            return
+        
+        channel_data = func.get_session_data(server_id, found_channel_id)
+        channel_data[ai_name] = session
+        await func.update_session_data(server_id, found_channel_id, channel_data)
+        
+        await interaction.response.send_message(
+            f"✅ **Reaction system updated for '{ai_name}':**\n" + "\n".join(changes),
+            ephemeral=True
+        )
+    
     @app_commands.command(name="config_advanced", description="Configure advanced settings")
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(

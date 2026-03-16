@@ -346,6 +346,17 @@ class ChatService:
         else:
             components["reply_prompt"] = None
         
+        # Reaction prompt
+        if config.get("enable_reaction_system", False):
+            reaction_prompt = config.get("reaction_prompt")
+            if reaction_prompt:
+                reaction_prompt = process_cbs(reaction_prompt, char_name, user_name, session)
+                components["reaction_prompt"] = reaction_prompt
+            else:
+                components["reaction_prompt"] = None
+        else:
+            components["reaction_prompt"] = None
+        
         # Ignore prompt
         if config.get("enable_ignore_system", False):
             ignore_prompt = config.get("ignore_prompt")

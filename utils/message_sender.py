@@ -43,6 +43,137 @@ class MessageSender:
         """Initialize the message sender."""
         pass
     
+    async def _process_reactions(
+        self,
+        response_text: str,
+        channel: discord.TextChannel,
+        session: dict
+    ) -> tuple[str, List[tuple[str, str]]]:
+        """
+        Process reaction syntax and return clean text + list of reactions.
+        
+        Args:
+            response_text: Response text with possible reaction syntax
+            channel: Discord channel
+            session: AI session
+            
+        Returns:
+            Tuple (clean_text, reactions_list)
+            where reactions_list = [(message_id, emoji), ...]
+        """
+        from utils.reaction_parser import ReactionParser
+        
+        # Check if system is enabled
+        enable_reaction_system = session.get("config", {}).get("enable_reaction_system", False)
+        
+        if not enable_reaction_system:
+            return response_text, []
+        
+        # Check if there's reaction syntax
+        if not ReactionParser.has_reaction_syntax(response_text):
+            return response_text, []
+        
+        # Extract reactions
+        reactions = ReactionParser.parse_reactions(response_text)
+        
+        # Remove syntax from text
+        clean_text = ReactionParser.remove_reaction_syntax(response_text)
+        
+        log.debug(f"Extracted {len(reactions)} reaction(s) from response")
+        
+        return clean_text, reactions
+    
+    async def _process_emoji_for_reaction(
+        self,
+        emoji: str,
+        channel: discord.TextChannel
+    ) -> Optional[str]:
+        """
+        Process emoji to appropriate format for add_reaction().
+        
+        Args:
+            emoji: Emoji in :name: format or unicode
+            channel: Discord channel
+            
+        Returns:
+            Processed emoji or None if invalid
+        """
+        # If it's a custom emoji (:name:)
+        if emoji.startswith(':') and emoji.endswith(':'):
+            emoji_name = emoji[1:-1]  # Remove the :
+            
+            if not channel.guild:
+                return None
+            
+            # Search for emoji in guild
+            for guild_emoji in channel.guild.emojis:
+                if guild_emoji.name.lower() == emoji_name.lower():
+                    return guild_emoji
+            
+            # Custom emoji not found
+            log.warning(f"Custom emoji {emoji} not found in guild")
+            return None
+        
+        # It's a standard emoji (unicode)
+        return emoji
+    
+    async def _add_reaction_to_message(
+        self,
+        channel: discord.TextChannel,
+        message_id: str,
+        emoji: str,
+        server_id: str,
+        ai_name: str
+    ) -> bool:
+        """
+        Add a reaction to a specific message.
+        
+        Args:
+            channel: Discord channel
+            message_id: Message ID (short or full)
+            emoji: Emoji to react with (:name: or unicode)
+            server_id: Server ID
+            ai_name: AI name
+            
+        Returns:
+            True if successful, False if failed
+        """
+        from utils.reply_parser import ReplyParser
+        
+        try:
+            # Fetch message (supports short IDs)
+            message = await ReplyParser.fetch_message_safe(
+                channel, message_id,
+                server_id=server_id,
+                ai_name=ai_name
+            )
+            
+            if not message:
+                log.warning(f"Message {message_id} not found for reaction")
+                return False
+            
+            # Process emoji
+            processed_emoji = await self._process_emoji_for_reaction(emoji, channel)
+            
+            if not processed_emoji:
+                log.warning(f"Invalid emoji: {emoji}")
+                return False
+            
+            # Add reaction
+            await message.add_reaction(processed_emoji)
+            log.debug(f"Added reaction {emoji} to message {message_id}")
+            return True
+            
+        except discord.Forbidden:
+            log.warning(f"No permission to add reaction to message {message_id}")
+            return False
+        except discord.HTTPException as e:
+            log.error(f"HTTP error adding reaction: {e}")
+            return False
+        except Exception as e:
+            log.error(f"Error adding reaction to message {message_id}: {e}")
+            return False
+    
     async def send(
         self,
         response_text: str,
@@ -75,6 +206,10 @@ class MessageSender:
         # Extract context for short ID conversion
         server_id = session.get("server_id")
         ai_name = session.get("ai_name")
+        
+        # Process reactions FIRST (before emoji conversion)
+        # This extracts reaction syntax and returns clean text + reactions list
+        response_text, reactions = await self._process_reactions(response_text, channel, session)
         
         # Convert @username mentions to proper Discord mentions
         response_text = await self._convert_username_mentions(response_text, channel)
@@ -157,6 +292,14 @@ class MessageSender:
                 except Exception as e:
                     log.error(f"Error creating MessageActionsView: {e}")
                     view = None
+        
+        # Add reactions to target messages (if any)
+        if reactions:
+            log.debug(f"Processing {len(reactions)} reaction(s)")
+            for message_id, emoji in reactions:
+                await self._add_reaction_to_message(
+                    channel, message_id, emoji, server_id, ai_name
+                )
         
         return discord_ids, view
     

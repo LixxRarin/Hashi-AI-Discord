@@ -393,10 +393,17 @@ class MessageProcessor:
                 reply_prompt = self.process_cbs(reply_prompt, session, message_author)
                 api_messages.append({"role": "system", "content": reply_prompt})
         
-        # 4. Add conversation history
+        # 4. Add reaction prompt (if enabled)
+        if config.get("enable_reaction_system", False):
+            reaction_prompt = config.get("reaction_prompt")
+            if reaction_prompt:
+                reaction_prompt = self.process_cbs(reaction_prompt, session, message_author)
+                api_messages.append({"role": "system", "content": reaction_prompt})
+        
+        # 5. Add conversation history
         api_messages.extend(conversation_history)
         
-        # 5. Add current pending messages
+        # 6. Add current pending messages
         if messages:
             formatted_content = await self.format_messages(messages, session)
             formatted_content = self.process_cbs(formatted_content, session, message_author)
