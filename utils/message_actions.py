@@ -19,6 +19,97 @@ import logging
 log = logging.getLogger(__name__)
 
 
+def create_control_message_content() -> str:
+    """
+    Create simple control panel message content for webhook mode compatibility.
+    
+    When an AI is in webhook mode, Discord doesn't allow the bot to edit
+    webhook messages to add buttons. This function creates a simple text
+    message that will contain the control buttons.
+    
+    Returns:
+        Simple text message content
+    """
+    return "-# You can do anything!"
+
+
+async def attach_buttons_with_webhook_compatibility(
+    bot,
+    channel: discord.TextChannel,
+    discord_ids: List[str],
+    server_id: str,
+    channel_id: str,
+    ai_name: str,
+    session: Dict[str, Any],
+    response_manager
+) -> Optional[str]:
+    """
+    Attach action buttons to AI message with webhook mode compatibility.
+    
+    For webhook mode: Sends a separate bot message with embed and buttons
+    For bot mode: Edits the last message to add buttons directly
+    
+    This solves the Discord limitation where bots cannot edit webhook messages
+    (403 Forbidden error). The separate control message allows buttons to work
+    in webhook mode while maintaining the same functionality.
+    
+    Args:
+        bot: Bot instance
+        channel: Discord channel
+        discord_ids: List of message IDs from the AI response
+        server_id: Server ID
+        channel_id: Channel ID
+        ai_name: AI name
+        session: AI session data
+        response_manager: ResponseManager instance
+        
+    Returns:
+        Control message ID (for webhook mode) or None (for bot mode)
+    """
+    from utils.message_cache import fetch_message_cached
+    
+    mode = session.get("mode", "webhook")
+    
+    # Create the view with action buttons
+    view = MessageActionsView(
+        bot=bot,
+        server_id=server_id,
+        channel_id=channel_id,
+        ai_name=ai_name,
+        session=session,
+        timeout=None
+    )
+    
+    if mode == "webhook":
+        # WEBHOOK MODE: Send separate bot message with embed + buttons
+        try:
+            # Send control message after the webhook message with simple text
+            content = create_control_message_content()
+            control_msg = await channel.send(content=content, view=view)
+            
+            log.debug(
+                f"Sent control message {control_msg.id} for webhook AI {ai_name}"
+            )
+            
+            return str(control_msg.id)
+            
+        except Exception as e:
+            log.error(f"Error sending control message for webhook mode: {e}")
+            return None
+    else:
+        # BOT MODE: Attach buttons directly to the message
+        try:
+            last_msg_id = discord_ids[-1]
+            last_msg = await fetch_message_cached(channel, last_msg_id)
+            if last_msg:
+                await last_msg.edit(view=view)
+                log.debug(f"Attached buttons to bot message for AI {ai_name}")
+        except Exception as e:
+            log.error(f"Error attaching buttons to bot message: {e}")
+        
+        return None
+
+
 class EditMessageModal(ui.Modal):
     """
     Modal for editing AI messages.
@@ -403,8 +494,31 @@ class MessageActionsView(ui.View):
             # Update button states
             self._update_button_states()
             
-            # Update the view
-            await interaction.edit_original_response(view=self)
+            # Update control message embed if in webhook mode
+            if mode == "webhook":
+                try:
+                    # Get state's control message ID (shared across all generations)
+                    if state.control_message_id:
+                        control_msg = await channel.fetch_message(int(state.control_message_id))
+                        
+                        # Update view (buttons) with new state
+                        await control_msg.edit(view=self)
+                        log.debug(f"Updated control message buttons for navigation")
+                        
+                        # Acknowledge the interaction (required for webhook mode)
+                        try:
+                            await interaction.followup.send(
+                                f"Navigated to generation {info['current_number']}/{info['total_count']}",
+                                ephemeral=True,
+                                delete_after=2
+                            )
+                        except:
+                            pass  # Interaction might have timed out
+                except Exception as e:
+                    log.error(f"Error updating control message embed: {e}")
+            else:
+                # Bot mode: just update the view
+                await interaction.edit_original_response(view=self)
             
             log.info(f"Navigated to previous generation ({info['current_number']}/{info['total_count']}) for AI {self.ai_name}")
             
@@ -471,8 +585,31 @@ class MessageActionsView(ui.View):
             # Update button states
             self._update_button_states()
             
-            # Update the view
-            await interaction.edit_original_response(view=self)
+            # Update control message embed if in webhook mode
+            if mode == "webhook":
+                try:
+                    # Get state's control message ID (shared across all generations)
+                    if state.control_message_id:
+                        control_msg = await channel.fetch_message(int(state.control_message_id))
+                        
+                        # Update view (buttons) with new state
+                        await control_msg.edit(view=self)
+                        log.debug(f"Updated control message buttons for navigation")
+                        
+                        # Acknowledge the interaction (required for webhook mode)
+                        try:
+                            await interaction.followup.send(
+                                f"Navigated to generation {info['current_number']}/{info['total_count']}",
+                                ephemeral=True,
+                                delete_after=2
+                            )
+                        except:
+                            pass  # Interaction might have timed out
+                except Exception as e:
+                    log.error(f"Error updating control message embed: {e}")
+            else:
+                # Bot mode: just update the view
+                await interaction.edit_original_response(view=self)
             
             log.info(f"Navigated to next generation ({info['current_number']}/{info['total_count']}) for AI {self.ai_name}")
             
@@ -665,24 +802,48 @@ class MessageActionsView(ui.View):
                 # NOW create buttons AFTER ResponseManager has been updated
                 if discord_ids:
                     try:
-                        from utils.message_actions import MessageActionsView
+                        # For webhook mode, reuse existing control message or create new one
+                        if mode == "webhook":
+                            # Check if control message already exists
+                            if final_state.control_message_id:
+                                # Update existing control message
+                                try:
+                                    control_msg = await channel.fetch_message(int(final_state.control_message_id))
+                                    
+                                    # Create new view with updated state
+                                    new_view = MessageActionsView(
+                                        bot=self.bot,
+                                        server_id=self.server_id,
+                                        channel_id=self.channel_id,
+                                        ai_name=self.ai_name,
+                                        session=self.session,
+                                        timeout=None
+                                    )
+                                    
+                                    # Update view (buttons) with new state
+                                    await control_msg.edit(view=new_view)
+                                    log.debug(f"Updated existing control message after regeneration")
+                                except discord.NotFound:
+                                    # Control message was deleted, create new one
+                                    log.warning(f"Control message {final_state.control_message_id} not found, creating new one")
+                                    final_state.control_message_id = None
                         
-                        new_view = MessageActionsView(
-                            bot=self.bot,
-                            server_id=self.server_id,
-                            channel_id=self.channel_id,
-                            ai_name=self.ai_name,
-                            session=self.session,
-                            timeout=None
-                        )
-                        
-                        # Attach view to last message
-                        from utils.message_cache import fetch_message_cached
-                        
-                        last_msg_id = discord_ids[-1]
-                        last_msg = await fetch_message_cached(channel, last_msg_id)
-                        if last_msg:
-                            await last_msg.edit(view=new_view)
+                        # If no control message exists (or was deleted), create new one
+                        if not final_state.control_message_id or mode != "webhook":
+                            control_msg_id = await attach_buttons_with_webhook_compatibility(
+                                bot=self.bot,
+                                channel=channel,
+                                discord_ids=discord_ids,
+                                server_id=self.server_id,
+                                channel_id=self.channel_id,
+                                ai_name=self.ai_name,
+                                session=self.session,
+                                response_manager=response_manager
+                            )
+                            
+                            # Store control message ID in state (shared across all generations)
+                            if control_msg_id:
+                                final_state.control_message_id = control_msg_id
                         
                         log.debug(f"Reattached buttons after regeneration with correct state: {final_info['current_number']}/{final_info['total_count']}")
                         
@@ -738,6 +899,23 @@ class MessageActionsView(ui.View):
                     log.warning(f"Message {msg_id} not found, skipping")
                 except Exception as e:
                     log.error(f"Error deleting message {msg_id}: {e}")
+            
+            # Delete control message if it exists (webhook mode)
+            mode = self.session.get("mode", "webhook")
+            if mode == "webhook":
+                response_manager = self.bot.message_pipeline.response_manager
+                state = response_manager.get_state(self.server_id, self.channel_id, self.ai_name)
+                if state.control_message_id:
+                    try:
+                        control_msg = await channel.fetch_message(int(state.control_message_id))
+                        await control_msg.delete()
+                        deleted_count += 1
+                        log.debug(f"Deleted control message {state.control_message_id}")
+                        state.control_message_id = None  # Clear the ID
+                    except discord.NotFound:
+                        log.warning(f"Control message {state.control_message_id} not found")
+                    except Exception as e:
+                        log.error(f"Error deleting control message: {e}")
             
             # Remove from ResponseManager
             response_manager.clear(self.server_id, self.channel_id, self.ai_name)

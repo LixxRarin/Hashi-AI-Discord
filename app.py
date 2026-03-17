@@ -239,6 +239,29 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
             except Exception as e:
                 func.log.error(f"Error removing buttons from previous messages: {e}")
         
+        # Delete control panel message if in webhook mode
+        mode = session.get("mode", "webhook")
+        if mode == "webhook":
+            try:
+                state = bot.message_pipeline.response_manager.get_state(
+                    server_id, channel_id, ai_name
+                )
+                if state.control_message_id:
+                    try:
+                        control_msg = await fetch_message_cached(channel, state.control_message_id)
+                        if control_msg:
+                            await control_msg.delete()
+                            func.log.debug(f"Deleted control panel message {state.control_message_id}")
+                    except discord.NotFound:
+                        func.log.debug(f"Control panel message {state.control_message_id} not found")
+                    except Exception as e:
+                        func.log.warning(f"Could not delete control panel message: {e}")
+                    finally:
+                        # Clear the control message ID regardless of success
+                        state.control_message_id = None
+            except Exception as e:
+                func.log.error(f"Error deleting control panel message: {e}")
+        
         # Callback to send response to Discord using centralized MessageSender
         async def send_callback(response_text, ids_list):
             """Send response to Discord and populate ids_list."""
@@ -293,24 +316,28 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
                 try:
                     button_config = session.get("config", {}).get("message_action_buttons", {})
                     if button_config.get("enabled", False):
-                        from utils.message_actions import MessageActionsView
-                        from utils.message_cache import fetch_message_cached, get_message_cache
+                        from utils.message_actions import attach_buttons_with_webhook_compatibility
                         
-                        view = MessageActionsView(
+                        # Attach buttons with webhook mode compatibility
+                        control_msg_id = await attach_buttons_with_webhook_compatibility(
                             bot=bot,
+                            channel=channel,
+                            discord_ids=discord_ids,
                             server_id=server_id,
                             channel_id=channel_id,
                             ai_name=ai_name,
                             session=session,
-                            timeout=None
+                            response_manager=bot.message_pipeline.response_manager
                         )
                         
-                        # Attach to last message - use cached fetch
-                        last_msg_id = discord_ids[-1]
-                        last_msg = await fetch_message_cached(channel, last_msg_id)
-                        if last_msg:
-                            await last_msg.edit(view=view)
-                            func.log.debug(f"Attached buttons after ResponseManager update for AI {ai_name}")
+                        # Store control message ID in state (shared across all generations)
+                        if control_msg_id:
+                            state = bot.message_pipeline.response_manager.get_state(
+                                server_id, channel_id, ai_name
+                            )
+                            state.control_message_id = control_msg_id
+                        
+                        func.log.debug(f"Attached buttons after ResponseManager update for AI {ai_name}")
                 except Exception as e:
                     func.log.error(f"Error attaching buttons after generation: {e}")
         
@@ -630,10 +657,6 @@ async def on_guild_channel_delete(channel: discord.abc.GuildChannel):
     channel_id = str(channel.id)
     channel_name = channel.name
     server_name = channel.guild.name
-    
-    func.log.warning(
-        f"Channel deleted: #{channel_name} (ID: {channel_id}) in server '{server_name}'"
-    )
     
     try:
         # Check if this channel had any AI configurations

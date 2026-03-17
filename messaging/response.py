@@ -56,6 +56,7 @@ class ResponseState:
     current_index: int = 0
     max_generations: int = 10
     sleep_state: Dict[str, Any] = field(default_factory=dict)
+    control_message_id: Optional[str] = None  # For webhook mode button compatibility (shared across all generations)
     
     def add_generation(
         self,
@@ -122,7 +123,8 @@ class ResponseState:
             "generations": [g.to_dict() for g in self.generations],
             "current_index": self.current_index,
             "max_generations": self.max_generations,
-            "sleep_state": self.sleep_state
+            "sleep_state": self.sleep_state,
+            "control_message_id": self.control_message_id
         }
     
     @classmethod
@@ -133,7 +135,8 @@ class ResponseState:
             generations=[Generation.from_dict(g) for g in data.get("generations", [])],
             current_index=data.get("current_index", 0),
             max_generations=data.get("max_generations", 10),
-            sleep_state=data.get("sleep_state", {})
+            sleep_state=data.get("sleep_state", {}),
+            control_message_id=data.get("control_message_id")
         )
 
 
