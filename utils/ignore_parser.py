@@ -97,10 +97,7 @@ class IgnoreParser:
         if is_pure:
             log.debug(f"Detected pure <IGNORE> tag in response")
         elif IgnoreParser.has_ignore_tag(text):
-            log.warning(
-                f"Found <IGNORE> tag but with additional content - "
-                f"treating as normal message: '{text[:100]}'"
-            )
+            log.warning(f"Found <IGNORE> tag with additional content - treating as normal message!")
         
         return is_pure
     

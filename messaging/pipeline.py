@@ -555,6 +555,11 @@ class MessagePipeline:
                         server_id, channel_id, ai_name, processing_message_ids
                     )
                     return None
+                
+                # Check for <IGNORE> with additional content and remove it
+                if IgnoreParser.has_ignore_tag(response):
+                    log.info(f"AI {ai_name} sent <IGNORE> with additional content - removing tag")
+                    response = IgnoreParser.remove_ignore_tag(response)
             
             cleaned_response = self.processor.clean_response(response, session_with_context)
             
