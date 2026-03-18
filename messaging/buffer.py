@@ -414,6 +414,7 @@ class MessageBuffer:
         """
         Update typing indicator timestamp.
         
+        
         Args:
             server_id: Server ID
             channel_id: Channel ID
@@ -423,7 +424,6 @@ class MessageBuffer:
         async with self._lock:
             state = self._ensure_path(server_id, channel_id, ai_name)
             state.typing_until = typing_until
-            state.last_activity = time.time()
     
     async def is_typing(
         self,
