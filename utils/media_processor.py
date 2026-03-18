@@ -171,7 +171,7 @@ class ImageProcessor:
         # Encode to base64
         base64_data = self.encode_base64(image_data)
         
-        logger.info(f"Processed image: {filename} ({size / 1024:.1f}KB, {content_type})")
+        logger.debug(f"Processed image: {filename} ({size / 1024:.1f}KB, {content_type})")
         
         return {
             'url': url,

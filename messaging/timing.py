@@ -171,11 +171,6 @@ class TimingController:
                 # Monitoring continues (to detect future wake-up patterns)
                 return False
             
-            if in_sleep and should_wake:
-                # AI is in sleep mode but wake-up pattern detected
-                # Log the wake-up and proceed with normal response logic
-                log.info(f"AI {ai_name} waking up from sleep mode (wake-up pattern detected)")
-        
         # Get timing configuration
         config = TimingConfig.from_session(session)
         

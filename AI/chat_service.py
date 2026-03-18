@@ -884,7 +884,7 @@ class ChatService:
         
         
         if hasattr(message, 'attachments') and message.attachments:
-            func.log.info(f"Found {len(message.attachments)} attachment(s) in message")
+            func.log.debug(f"Found {len(message.attachments)} attachment(s) in message")
             
             from messaging.processor import MessageProcessor
             processor = MessageProcessor()
@@ -898,7 +898,7 @@ class ChatService:
             processed_images = await processor.process_message_images(temp_message, session, server_id)
             
             if processed_images:
-                func.log.info(f"Processed {len(processed_images)} images for vision analysis")
+                func.log.debug(f"Processed {len(processed_images)} images for vision analysis")
             else:
                 func.log.warning(f"No images processed from {len(message.attachments)} attachment(s) - vision may be disabled or no valid images found")
 
