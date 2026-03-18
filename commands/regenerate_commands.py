@@ -28,6 +28,10 @@ class RegenerateCommands(commands.Cog):
             
             choices = []
             for channel_id_str, channel_data in all_server_data.items():
+                # Skip if channel_data is None (defensive check)
+                if channel_data is None:
+                    continue
+                    
                 channel_obj = interaction.guild.get_channel(int(channel_id_str))
                 channel_name = channel_obj.name if channel_obj else f"Deleted Channel ({channel_id_str})"
 
@@ -164,11 +168,16 @@ class RegenerateCommands(commands.Cog):
                 return
             
             deleted_count = 0
+            from utils.message_cache import fetch_message_cached
+            
             for msg_id in current.discord_ids:
                 try:
-                    msg = await channel.fetch_message(int(msg_id))
-                    await msg.delete()
-                    deleted_count += 1
+                    msg = await fetch_message_cached(channel, msg_id)
+                    if msg:
+                        await msg.delete()
+                        deleted_count += 1
+                    # Small delay to prevent burst operations
+                    await asyncio.sleep(0.1)
                 except discord.NotFound:
                     func.log.warning(f"Message {msg_id} not found, skipping")
                 except Exception as e:

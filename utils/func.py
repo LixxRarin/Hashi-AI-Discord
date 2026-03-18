@@ -358,7 +358,15 @@ async def update_session_data(server_id: str, channel_id: str, new_data: Dict[st
         session_cache[server_id] = {"channels": {}}
     if "channels" not in session_cache[server_id]:
         session_cache[server_id]["channels"] = {}
-    session_cache[server_id]["channels"][channel_id] = new_data
+    
+    # Handle None (deletion) vs update
+    if new_data is None:
+        # Remove the key from cache when deleting
+        if channel_id in session_cache[server_id]["channels"]:
+            del session_cache[server_id]["channels"][channel_id]
+    else:
+        # Update the cache with new data
+        session_cache[server_id]["channels"][channel_id] = new_data
 
     # Write directly to file
     session_data = await asyncio.to_thread(read_json, get_session_file()) or {}
@@ -407,6 +415,9 @@ def get_ai_session_data_from_all_channels(server_id: str, ai_name: str) -> Optio
     channels_data = server_data.get("channels", {})
 
     for channel_id, channel_ais in channels_data.items():
+        # Skip if channel_ais is None (defensive check)
+        if channel_ais is None:
+            continue
         if ai_name in channel_ais:
             return channel_id, channel_ais[ai_name]
     return None

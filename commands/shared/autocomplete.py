@@ -35,6 +35,10 @@ class AutocompleteHelpers:
             
             choices = []
             for channel_id_str, channel_data in all_server_data.items():
+                # Skip if channel_data is None (shouldn't happen after fix, but defensive)
+                if channel_data is None:
+                    continue
+                    
                 channel_obj = interaction.guild.get_channel(int(channel_id_str))
                 channel_name = channel_obj.name if channel_obj else f"Deleted Channel ({channel_id_str})"
 
@@ -68,6 +72,10 @@ class AutocompleteHelpers:
             
             choices = []
             for channel_id_str, channel_data in all_server_data.items():
+                # Skip if channel_data is None (shouldn't happen after fix, but defensive)
+                if channel_data is None:
+                    continue
+                    
                 channel_obj = interaction.guild.get_channel(int(channel_id_str))
                 channel_name = channel_obj.name if channel_obj else f"Deleted Channel ({channel_id_str})"
 

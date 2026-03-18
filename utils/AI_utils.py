@@ -36,6 +36,10 @@ class discord_AI_bot:
         
         for server_id, server_info in func.session_cache.items():
             for channel_id, channel_data in server_info.get("channels", {}).items():
+                # Skip if channel_data is None (defensive check)
+                if channel_data is None:
+                    continue
+                    
                 # Process each AI in the channel
                 for ai_name, session_data in channel_data.items():
                     webhook_url = session_data.get("webhook_url")

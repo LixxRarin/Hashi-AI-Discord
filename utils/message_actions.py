@@ -499,7 +499,8 @@ class MessageActionsView(ui.View):
                 try:
                     # Get state's control message ID (shared across all generations)
                     if state.control_message_id:
-                        control_msg = await channel.fetch_message(int(state.control_message_id))
+                        from utils.message_cache import fetch_message_cached
+                        control_msg = await fetch_message_cached(channel, state.control_message_id)
                         
                         # Update view (buttons) with new state
                         await control_msg.edit(view=self)
@@ -590,7 +591,8 @@ class MessageActionsView(ui.View):
                 try:
                     # Get state's control message ID (shared across all generations)
                     if state.control_message_id:
-                        control_msg = await channel.fetch_message(int(state.control_message_id))
+                        from utils.message_cache import fetch_message_cached
+                        control_msg = await fetch_message_cached(channel, state.control_message_id)
                         
                         # Update view (buttons) with new state
                         await control_msg.edit(view=self)
@@ -907,7 +909,8 @@ class MessageActionsView(ui.View):
                 state = response_manager.get_state(self.server_id, self.channel_id, self.ai_name)
                 if state.control_message_id:
                     try:
-                        control_msg = await channel.fetch_message(int(state.control_message_id))
+                        from utils.message_cache import fetch_message_cached
+                        control_msg = await fetch_message_cached(channel, state.control_message_id)
                         await control_msg.delete()
                         deleted_count += 1
                         log.debug(f"Deleted control message {state.control_message_id}")

@@ -354,8 +354,13 @@ class MessagePipeline:
                                 # Check if the referenced message is from the bot
                                 # We check against bot_user_id to verify it's actually a reply to the bot
                                 try:
-                                    ref_msg = await msg.raw_message.channel.fetch_message(ref_msg_id)
-                                    is_reply_to_bot = (ref_msg.author.id == bot_user_id)
+                                    from utils.message_cache import fetch_message_cached
+                                    ref_msg = await fetch_message_cached(msg.raw_message.channel, str(ref_msg_id))
+                                    if ref_msg:
+                                        is_reply_to_bot = (ref_msg.author.id == bot_user_id)
+                                    else:
+                                        # If we can't fetch the message, assume it's a reply to bot
+                                        is_reply_to_bot = True
                                 except Exception:
                                     # If we can't fetch the message, assume it's a reply to bot
                                     # (better to wake up unnecessarily than miss a wake-up)

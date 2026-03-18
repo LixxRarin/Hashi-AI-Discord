@@ -259,10 +259,11 @@ async def fetch_message_cached(
     message_id: str
 ) -> Optional[discord.Message]:
     """
-    Fetch a message with caching.
+    Fetch a message with caching and rate limiting.
     
     This is a drop-in replacement for channel.fetch_message() that
-    uses the cache to reduce API calls.
+    uses the cache to reduce API calls and rate limiting to prevent
+    Discord API errors.
     
     Args:
         channel: Discord channel
@@ -271,7 +272,10 @@ async def fetch_message_cached(
     Returns:
         Discord message if found, None otherwise
     """
+    from utils.rate_limiter import get_rate_limiter, with_backoff
+    
     cache = get_message_cache()
+    rate_limiter = get_rate_limiter()
     channel_id = str(channel.id)
     
     # Try cache first
@@ -279,9 +283,18 @@ async def fetch_message_cached(
     if cached_msg:
         return cached_msg
     
-    # Cache miss - fetch from API
+    # Cache miss - fetch from API with rate limiting and backoff
     try:
-        message = await channel.fetch_message(int(message_id))
+        # Acquire rate limit token before making request
+        await rate_limiter.acquire(f"channel_{channel_id}")
+        
+        # Use exponential backoff for automatic retry on 429 errors
+        message = await with_backoff(
+            lambda: channel.fetch_message(int(message_id)),
+            max_retries=3,
+            base_delay=1.0
+        )
+        
         await cache.set(channel_id, message_id, message)
         return message
     except discord.NotFound:

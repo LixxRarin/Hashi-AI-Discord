@@ -548,9 +548,9 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
         if message.author.id == bot.user.id:
             return
         
-        # Invalidate cache for this message since it was edited
+        # Update cache with edited message content (don't invalidate!)
         cache = get_message_cache()
-        await cache.invalidate(channel_id, message_id)
+        await cache.set(channel_id, message_id, message)
         
         # Get session data for the channel
         session_data = func.get_session_data(server_id, channel_id)

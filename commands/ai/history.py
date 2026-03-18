@@ -307,12 +307,17 @@ class HistoryManager(commands.Cog):
             elif msg.role == "assistant" and msg.discord_ids:
                 discord_ids_to_delete.extend(msg.discord_ids)
         
-        # 4. Fetch message objects for deletion
+        # 4. Fetch message objects for deletion (with caching and rate limiting)
+        from utils.message_cache import fetch_message_cached
+        
         messages_to_delete = []
         for discord_id in discord_ids_to_delete:
             try:
-                msg = await channel.fetch_message(int(discord_id))
-                messages_to_delete.append(msg)
+                msg = await fetch_message_cached(channel, discord_id)
+                if msg:
+                    messages_to_delete.append(msg)
+                # Small delay to prevent burst fetching
+                await asyncio.sleep(0.1)
             except discord.NotFound:
                 func.log.debug(f"Message {discord_id} not found, skipping")
             except Exception as e:
@@ -404,17 +409,22 @@ class HistoryManager(commands.Cog):
             if target_msg.discord_id:
                 discord_ids_to_delete.append(target_msg.discord_id)
         
-        # 4. Delete from Discord
+        # 4. Delete from Discord (with caching and rate limiting)
+        from utils.message_cache import fetch_message_cached
+        
         deleted_count = 0
         failed_ids = []
         for discord_id in discord_ids_to_delete:
             try:
-                msg = await channel.fetch_message(int(discord_id))
-                success = await self._delete_single_message_with_retry(msg)
-                if success:
-                    deleted_count += 1
-                else:
-                    failed_ids.append(discord_id)
+                msg = await fetch_message_cached(channel, discord_id)
+                if msg:
+                    success = await self._delete_single_message_with_retry(msg)
+                    if success:
+                        deleted_count += 1
+                    else:
+                        failed_ids.append(discord_id)
+                # Small delay to prevent burst fetching
+                await asyncio.sleep(0.1)
             except discord.NotFound:
                 func.log.debug(f"Message {discord_id} already deleted")
             except Exception as e:
@@ -542,9 +552,15 @@ class HistoryManager(commands.Cog):
         if not message_id:
             func.log.info(f"No message_id provided, searching for last bot message from AI '{ai_name}'")
             
-            # Find last bot message
+            # Find last bot message and cache all messages we iterate through
+            from utils.message_cache import get_message_cache
+            cache = get_message_cache()
+            
             last_bot_message = None
             async for message in channel.history(limit=50):
+                # Cache each message as we iterate to reduce future API calls
+                await cache.set(str(channel.id), str(message.id), message)
+                
                 if message.author.id == bot_id or (message.webhook_id and ai_name.lower() in message.author.name.lower()):
                     last_bot_message = message
                     break
