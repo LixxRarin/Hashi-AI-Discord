@@ -24,10 +24,10 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.7"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.8"
 # DEFAULT AI CONFIGURATION
-# This file contains all default configuration values for AI behavior.
-# Edit these values to change the default behavior for all new AIs.
+    # This file contains all default configuration values for AI behavior.
+    # Edit these values to change the default behavior for all new AIs.
 
 # Display Settings - How the AI appears and sends messages
 use_card_ai_display_name: true
@@ -40,7 +40,7 @@ cache_count_threshold: 5
 engaged_delay: 2.5
 engaged_message_threshold: 3
 typing_detection_enabled: true
-typing_grace_period: 2.0
+typing_grace_period: 8.0
 
 new_chat_on_reset: false
 

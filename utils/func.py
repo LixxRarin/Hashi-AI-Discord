@@ -6,7 +6,7 @@ import time
 from typing import Any, Dict, Optional, Callable, Awaitable, TypeVar
 
 import yaml
-from colorama import Fore, init
+from colorama import Fore, Style, init
 
 from utils.persistence import read_json, write_json
 
@@ -28,22 +28,32 @@ class ColoredFormatter(logging.Formatter):
     """Custom formatter that adds colors to log messages based on severity level."""
 
     def format(self, record):
-        LOG_COLORS = {
+        # Color scheme for different log levels
+        LEVEL_COLORS = {
             "DEBUG": Fore.CYAN,
             "INFO": Fore.GREEN,
             "WARNING": Fore.YELLOW,
             "ERROR": Fore.RED,
-            "CRITICAL": Fore.RED + "\033[1m",
+            "CRITICAL": Fore.RED,
         }
-        log_color = LOG_COLORS.get(record.levelname, Fore.WHITE)
+        level_color = LEVEL_COLORS.get(record.levelname, Fore.WHITE)
 
-        # Format timestamp using record time
+        # Format timestamp with full date and time
         timestamp = datetime.datetime.fromtimestamp(
-            record.created).strftime('%H:%M:%S')
+            record.created).strftime('%Y-%m-%d %H:%M:%S')
         message = record.getMessage()
 
-        # Display: [HH:MM:SS] LEVEL    [file:line] - message
-        return f"{log_color}[{timestamp}] {record.levelname:<8} [{record.filename}:{record.lineno}] {Fore.RESET}- {message}"
+        # Build colorized log line with different colors for each component:
+        # - Timestamp: Green
+        # - Level: Bold + level-specific color
+        # - Module path: Blue
+        # - Message: Bold white
+        colored_timestamp = f"{Fore.GREEN}{timestamp}{Fore.RESET}"
+        colored_level = f"{Style.BRIGHT}{level_color}{record.levelname:<8}{Style.RESET_ALL}"
+        colored_module = f"{Fore.BLUE}{record.name}:{record.funcName}:{record.lineno}{Fore.RESET}"
+        colored_message = f"{Style.BRIGHT}{Fore.WHITE}{message}{Style.RESET_ALL}"
+
+        return f"{colored_timestamp} | {colored_level} | {colored_module} - {colored_message}"
 
 
 def load_config() -> Dict[str, Any]:
@@ -74,31 +84,27 @@ def setup_logging(debug_mode=False) -> logging.Logger:
     # Initialize colorama with autoreset enabled
     init(autoreset=True)
 
-    # Remove any existing handlers to ensure basicConfig applies correctly
-    for handler in logging.root.handlers[:]:
-        logging.root.removeHandler(handler)
-
-    # Configure file logging
-    logging.basicConfig(
-        level=logging.DEBUG,            # Global logging level
-        filename="app.log",             # Log file name
-        filemode="a",                   # Append mode
-        format="[%(filename)s] %(levelname)s : %(message)s",
-        encoding="utf-8",
-    )
-
-    # Create a console handler with colors
-    console_handler = logging.StreamHandler()
-
-    if debug_mode:
-        console_handler.setLevel(logging.DEBUG)
-    else:
-        console_handler.setLevel(logging.INFO)
-
-    console_handler.setFormatter(ColoredFormatter())
-
-    # Add the console handler to the root logger
+    # Get root logger and remove any existing handlers
     root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)  # Set root level to DEBUG
+    
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+
+    # Create file handler with structured format
+    file_handler = logging.FileHandler("app.log", mode="a", encoding="utf-8")
+    file_handler.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter(
+        fmt="%(asctime)s | %(levelname)-8s | %(name)s:%(funcName)s:%(lineno)d - %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S"
+    )
+    file_handler.setFormatter(file_formatter)
+    root_logger.addHandler(file_handler)
+
+    # Create console handler with colors
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.DEBUG if debug_mode else logging.INFO)
+    console_handler.setFormatter(ColoredFormatter())
     root_logger.addHandler(console_handler)
 
     # Silence noisy third-party libraries
@@ -108,8 +114,9 @@ def setup_logging(debug_mode=False) -> logging.Logger:
     logging.getLogger("anthropic").setLevel(logging.WARNING)
     logging.getLogger("anthropic._base_client").setLevel(logging.WARNING)
     logging.getLogger("ollama").setLevel(logging.WARNING)
-    logging.getLogger("discord").setLevel(logging.INFO)
+    logging.getLogger("discord").setLevel(logging.WARNING)  # Reduced Discord noise
     logging.getLogger("discord.http").setLevel(logging.WARNING)
+    logging.getLogger("discord.gateway").setLevel(logging.WARNING)  # Silence gateway messages
 
     return root_logger
 

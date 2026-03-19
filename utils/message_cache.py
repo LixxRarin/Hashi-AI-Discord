@@ -7,9 +7,12 @@ API calls and prevent rate limiting.
 Features:
 - LRU eviction (max 1000 messages)
 - TTL expiration (10 minutes default)
+- Concurrency limiting (max 3 concurrent API fetches)
+- Rate limiting integration
 - Async-safe with locks
 - Automatic invalidation on edits/deletes
 - Cache statistics tracking
+- Exponential backoff on errors
 """
 
 import asyncio
@@ -245,6 +248,9 @@ class MessageCache:
 # Global cache instance
 _global_cache: Optional[MessageCache] = None
 
+# Global fetch semaphore for concurrency control
+_fetch_semaphore: Optional[asyncio.Semaphore] = None
+
 
 def get_message_cache() -> MessageCache:
     """Get the global message cache instance."""
@@ -254,16 +260,35 @@ def get_message_cache() -> MessageCache:
     return _global_cache
 
 
+def get_fetch_semaphore() -> asyncio.Semaphore:
+    """
+    Get the global fetch semaphore for concurrency control.
+    
+    This limits the number of concurrent Discord API fetch requests
+    to prevent rate limiting during burst operations (e.g., startup).
+    
+    Returns:
+        Semaphore with max 3 concurrent fetches
+    """
+    global _fetch_semaphore
+    if _fetch_semaphore is None:
+        _fetch_semaphore = asyncio.Semaphore(3)
+        log.info("Fetch semaphore initialized (max_concurrent=3)")
+    return _fetch_semaphore
+
+
 async def fetch_message_cached(
     channel: discord.TextChannel,
     message_id: str
 ) -> Optional[discord.Message]:
     """
-    Fetch a message with caching and rate limiting.
+    Fetch a message with caching, concurrency limiting, and rate limiting.
     
-    This is a drop-in replacement for channel.fetch_message() that
-    uses the cache to reduce API calls and rate limiting to prevent
-    Discord API errors.
+    This is a drop-in replacement for channel.fetch_message() that:
+    - Uses cache to reduce API calls
+    - Limits concurrent fetches (max 3) to prevent burst overload
+    - Uses rate limiting to stay within Discord's limits
+    - Implements exponential backoff for retry on errors
     
     Args:
         channel: Discord channel
@@ -276,36 +301,42 @@ async def fetch_message_cached(
     
     cache = get_message_cache()
     rate_limiter = get_rate_limiter()
+    semaphore = get_fetch_semaphore()
     channel_id = str(channel.id)
     
-    # Try cache first
+    # Try cache first (no semaphore needed for cache access)
     cached_msg = await cache.get(channel_id, message_id)
     if cached_msg:
         return cached_msg
     
-    # Cache miss - fetch from API with rate limiting and backoff
-    try:
-        # Acquire rate limit token before making request
-        await rate_limiter.acquire(f"channel_{channel_id}")
+    # Cache miss - fetch from API with concurrency control, rate limiting, and backoff
+    # Semaphore limits concurrent API calls to prevent burst overload
+    async with semaphore:
+        log.debug(f"Fetching message {message_id} from API (semaphore acquired)")
         
-        # Use exponential backoff for automatic retry on 429 errors
-        message = await with_backoff(
-            lambda: channel.fetch_message(int(message_id)),
-            max_retries=3,
-            base_delay=1.0
-        )
-        
-        await cache.set(channel_id, message_id, message)
-        return message
-    except discord.NotFound:
-        log.debug(f"Message {message_id} not found in channel {channel_id}")
-        return None
-    except discord.Forbidden:
-        log.warning(f"No permission to fetch message {message_id} in channel {channel_id}")
-        return None
-    except discord.HTTPException as e:
-        log.error(f"HTTP error fetching message {message_id}: {e}")
-        return None
-    except Exception as e:
-        log.error(f"Unexpected error fetching message {message_id}: {e}")
-        return None
+        try:
+            # Acquire rate limit token before making request
+            await rate_limiter.acquire(f"channel_{channel_id}")
+            
+            # Use exponential backoff for automatic retry on 429 errors
+            message = await with_backoff(
+                lambda: channel.fetch_message(int(message_id)),
+                max_retries=3,
+                base_delay=1.0
+            )
+            
+            await cache.set(channel_id, message_id, message)
+            log.debug(f"Successfully fetched and cached message {message_id}")
+            return message
+        except discord.NotFound:
+            log.debug(f"Message {message_id} not found in channel {channel_id}")
+            return None
+        except discord.Forbidden:
+            log.warning(f"No permission to fetch message {message_id} in channel {channel_id}")
+            return None
+        except discord.HTTPException as e:
+            log.error(f"HTTP error fetching message {message_id}: {e}")
+            return None
+        except Exception as e:
+            log.error(f"Unexpected error fetching message {message_id}: {e}")
+            return None
