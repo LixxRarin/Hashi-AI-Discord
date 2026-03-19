@@ -185,7 +185,7 @@ class ChatService:
                         target_chat_id = chat_id if chat_id else "default"
                         await self.append_to_history(server_id, channel_id, ai_name, "assistant", greeting_text, target_chat_id)
                     else:
-                        func.log.warning(f"No greeting text found for AI {ai_name}")
+                        func.log.warning("No greeting text found")
             
             if immediate:
                 return await self.store.save_immediate()
@@ -315,7 +315,7 @@ class ChatService:
                 "ai_name": ai_name
             })
             components["memory_prompt"] = memory_prompt
-            func.log.debug(f"Injected memory prompt for {ai_name}/{chat_id} ({memory_count} entries)")
+            func.log.debug(f"Injected memory prompt for chat {chat_id} ({memory_count} entries)")
         else:
             components["memory_prompt"] = None
         
@@ -329,7 +329,7 @@ class ChatService:
                     "user": user_name
                 })
                 components["tool_calling_prompt"] = tool_prompt
-                func.log.debug(f"Injected tool calling prompt for {ai_name}")
+                func.log.debug("Injected tool calling prompt")
             else:
                 components["tool_calling_prompt"] = None
         else:
@@ -521,7 +521,7 @@ class ChatService:
                 # Add at end if not specified
                 conv_messages.append(user_message)
         
-        func.log.debug(f"Prepared {len(conv_messages)} messages for {ai_name} (context order: {len(context_order)} components)")
+        func.log.debug(f"Prepared {len(conv_messages)} messages (context order: {len(context_order)} components)")
         
         return conv_messages
     
@@ -638,7 +638,7 @@ class ChatService:
             
             if (pattern.lower() in response_start and is_short and not has_quotes):
                 is_error = True
-                func.log.warning(f"Detected error response for AI {ai_name} (legacy pattern)")
+                func.log.warning("Detected error response (legacy pattern)")
                 break
         
         if is_error:
@@ -785,7 +785,7 @@ class ChatService:
                     if 0 <= greeting_index - 1 < len(alt_greetings):
                         greeting_text = alt_greetings[greeting_index - 1]
                     else:
-                        func.log.warning(f"Invalid greeting_index {greeting_index} for {ai_name}")
+                        func.log.warning(f"Invalid greeting_index {greeting_index}")
                         greeting_text = card_data.get("first_mes")
             
             if greeting_text and greeting_text.strip():
@@ -907,7 +907,7 @@ class ChatService:
         if hasattr(message, 'content'):
             formatted_data = message.content
         else:
-            func.log.error(f"No message content available for AI {ai_name}")
+            func.log.error("No message content available")
             return "I'm sorry, but I couldn't process your message."
         
         

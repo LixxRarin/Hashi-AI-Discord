@@ -163,7 +163,7 @@ class AILifecycle(commands.Cog):
         
         # Extract ai_name from character card
         ai_name = character_card.name
-        func.log.info(f"Using character card name as AI name: {ai_name}")
+        func.log.info("Using character card name as AI identifier")
         
         # Get display name and avatar
         display_name = character_card.nickname or character_card.name
@@ -469,7 +469,7 @@ class AILifecycle(commands.Cog):
             if preset_config:
                 # Replace the default config with preset config
                 session["config"] = preset_config
-                func.log.info(f"Applied preset '{preset}' to AI '{ai_name}'")
+                func.log.info(f"Applied preset '{preset}' to AI session")
             else:
                 func.log.warning(f"Preset '{preset}' not found, using default config")
         
@@ -492,7 +492,7 @@ class AILifecycle(commands.Cog):
         # send_the_greeting_message is controlled by preset/defaults.yml
         preset_info = f" with preset '{preset}'" if preset else ""
         send_greeting = session["config"].get("send_the_greeting_message", True)
-        func.log.info(f"Created session for AI '{ai_name}'{preset_info} with greeting_index={greeting_index}, send_greeting={send_greeting}")
+        func.log.info(f"Created AI session{preset_info} with greeting_index={greeting_index}, send_greeting={send_greeting}")
         
         return session
     
@@ -527,7 +527,7 @@ class AILifecycle(commands.Cog):
         if greetings:
             try:
                 await self.webhook_utils.send_message(WB_url, greetings, session)
-                func.log.info("Greeting message sent via webhook for AI %s", ai_name)
+                func.log.info("Greeting message sent via webhook")
                 messages_sent = True
             except Exception as e:
                 func.log.error("Error sending greeting via webhook: %s", e)
@@ -592,7 +592,7 @@ class AILifecycle(commands.Cog):
         if greetings:
             try:
                 await channel.send(greetings)
-                func.log.info(f"Greeting message sent as bot for AI {ai_name}")
+                func.log.info("Greeting message sent as bot")
                 messages_sent = True
             except Exception as e:
                 func.log.error(f"Error sending greeting as bot: {e}")
@@ -676,7 +676,7 @@ class AILifecycle(commands.Cog):
                     async with aiohttp.ClientSession() as aio_session:
                         webhook_obj = discord.Webhook.from_url(webhook_url, session=aio_session)
                         await webhook_obj.delete(reason=f"AI '{ai_name}' removed from channel")
-                    func.log.info(f"Deleted webhook for AI '{ai_name}'")
+                    func.log.info("Deleted webhook for AI")
                 except Exception as e:
                     func.log.error(f"Failed to delete webhook: {e}")
         
@@ -685,33 +685,33 @@ class AILifecycle(commands.Cog):
         
         # Clear ALL conversation history for this AI
         await service.clear_ai_history(server_id, found_channel_id, ai_name, chat_id=None, keep_greeting=False)
-        func.log.info(f"Cleared conversation history for AI '{ai_name}'")
+        func.log.info("Cleared conversation history for AI")
         
         # Clear memory files
         try:
             from AI.tools.memory_tools import delete_memory_file
             deleted = delete_memory_file(server_id, found_channel_id, ai_name)  # Deletes all chats for this AI in this channel
             if deleted:
-                func.log.info(f"Deleted memory files for AI '{ai_name}' in channel {found_channel_id}")
+                func.log.info(f"Deleted memory files in channel {found_channel_id}")
         except Exception as e:
-            func.log.warning(f"Failed to delete memory files for AI '{ai_name}': {e}")
+            func.log.warning(f"Failed to delete memory files: {e}")
         
         # Clear ResponseManager data
         try:
             if hasattr(self.bot, 'message_pipeline'):
                 response_manager = self.bot.message_pipeline.response_manager
                 response_manager.clear(server_id, found_channel_id, ai_name)
-                func.log.info(f"Cleared response manager data for AI '{ai_name}'")
+                func.log.info("Cleared response manager data")
         except Exception as e:
-            func.log.warning(f"Failed to clear response manager data for AI '{ai_name}': {e}")
+            func.log.warning(f"Failed to clear response manager data: {e}")
         
         # Clear MessageBuffer data
         try:
             if hasattr(self.bot, 'message_pipeline'):
                 await self.bot.message_pipeline.buffer.clear(server_id, found_channel_id, ai_name)
-                func.log.info(f"Cleared message buffer for AI '{ai_name}'")
+                func.log.info("Cleared message buffer")
         except Exception as e:
-            func.log.warning(f"Failed to clear message buffer for AI '{ai_name}': {e}")
+            func.log.warning(f"Failed to clear message buffer: {e}")
         
         # Remove from session data
         del channel_data[ai_name]
@@ -725,7 +725,7 @@ class AILifecycle(commands.Cog):
         channel_obj = interaction.guild.get_channel(int(found_channel_id))
         channel_name = f"#{channel_obj.name}" if channel_obj else f"Channel {found_channel_id}"
         
-        func.log.info(f"Successfully removed AI '{ai_name}' and all related data from {server_id}/{found_channel_id}")
+        func.log.info(f"Successfully removed AI and all related data from channel {found_channel_id}")
         
         await interaction.followup.send(
             f"✅ **AI '{ai_name}' successfully removed!**\n\n"

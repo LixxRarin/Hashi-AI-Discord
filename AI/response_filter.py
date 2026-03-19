@@ -235,7 +235,7 @@ class ResponseFilter:
         
         filter_conn_name = config.get("response_filter_api_connection")
         if not filter_conn_name:
-            func.log.warning(f"Response filter enabled but no API connection configured for {ai_name}")
+            func.log.warning("Response filter enabled but no API connection configured")
             return self._fallback(config)
         
         filter_conn = func.get_api_connection(server_id, filter_conn_name)
@@ -309,10 +309,10 @@ class ResponseFilter:
                 return analysis["should_respond"], analysis
                 
         except asyncio.TimeoutError:
-            func.log.warning(f"Response filter timeout for {ai_name}")
+            func.log.warning("Response filter timeout")
             return self._fallback(config)
         except Exception as e:
-            func.log.error(f"Response filter error for {ai_name}: {e}")
+            func.log.error(f"Response filter error: {e}")
             return self._fallback(config)
     
     def _build_prompt(self, ai_name: str, cached_messages: str, history: list) -> str:

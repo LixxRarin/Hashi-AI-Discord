@@ -187,7 +187,7 @@ class RegenerateCommands(commands.Cog):
             if len(history) >= 2:
                 updated_history = history[:-2]
                 await service.set_ai_history(server_id, found_channel_id, ai_name, updated_history, current_chat_id)
-                func.log.debug(f"Removed last 2 messages from history for AI {ai_name}")
+                func.log.debug("Removed last 2 messages from history")
             
             await interaction.followup.send(
                 f"✅ Deleted {deleted_count} message(s) and removed from history.\n"
@@ -229,9 +229,9 @@ class RegenerateCommands(commands.Cog):
                 if result:
                     response, discord_ids = result
                 
-                func.log.info(f"Regeneration complete for AI {ai_name}")
+                func.log.info("Regeneration complete")
             else:
-                func.log.warning(f"No user message found for regeneration for AI {ai_name}")
+                func.log.warning("No user message found for regeneration")
             
         except Exception as e:
             func.log.error(f"Error during regeneration: {e}")

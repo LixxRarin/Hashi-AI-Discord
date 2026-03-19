@@ -313,7 +313,7 @@ class ToolExecutor:
             try:
                 guild = bot_client.get_guild(int(server_id))
                 if guild:
-                    log.debug(f"Retrieved real guild from bot_client for server {server_id}")
+                    log.debug("Retrieved real guild from bot_client")
             except Exception as e:
                 log.warning(f"Failed to get guild from bot_client: {e}")
         

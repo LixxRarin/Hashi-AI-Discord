@@ -381,7 +381,7 @@ class CardRegistry(commands.Cog):
                         await func.update_session_data(server_id, channel_id, channel_data)
                         cleaned_ais.append(ai_name)
                 except Exception as e:
-                    func.log.error(f"Error cleaning AI reference for {ai_name}: {e}")
+                    func.log.error(f"Error cleaning AI reference: {e}")
         
         # Build result message
         result_msg = f"✅ **Card removed successfully!**\n\n"

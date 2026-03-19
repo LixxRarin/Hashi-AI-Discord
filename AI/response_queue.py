@@ -63,7 +63,7 @@ class ResponseQueue:
             "callback": callback,
             "request_handler": request_handler
         })
-        func.log.debug(f"Queued AI response request for AI {ai_name} in channel {channel_id}")
+        func.log.debug(f"Queued AI response request in channel {channel_id}")
         return True
     
     async def process_queue(self):

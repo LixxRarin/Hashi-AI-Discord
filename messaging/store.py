@@ -1048,7 +1048,7 @@ class ConversationStore:
                 manager = get_short_id_manager_sync()
                 await manager.clear_mappings(server_id, channel_id, ai_name)
                 
-                log.info(f"Deleted chat '{chat_id}' for AI '{ai_name}' in server {server_id}")
+                log.info(f"Deleted chat '{chat_id}'")
                 
             except Exception as e:
                 log.error(f"Error deleting chat: {e}")
@@ -1101,7 +1101,7 @@ class ConversationStore:
                 if ai_data.get("active_chat") == old_chat_id:
                     ai_data["active_chat"] = new_chat_id
                 
-                log.info(f"Renamed chat '{old_chat_id}' to '{new_chat_id}' for AI '{ai_name}' in server {server_id}")
+                log.info(f"Renamed chat '{old_chat_id}' to '{new_chat_id}'")
                 
             except Exception as e:
                 log.error(f"Error renaming chat: {e}")
@@ -1335,11 +1335,11 @@ class ConversationStore:
                     )
                     return True
                 else:
-                    log.debug(f"No conversation history found for server {server_id}")
+                    log.debug("No conversation history found for server")
                     return True  # Not an error if data doesn't exist
                     
             except Exception as e:
-                log.error(f"Error deleting conversations for server {server_id}: {e}")
+                log.error(f"Error deleting conversations: {e}")
                 return False
     
     async def delete_channel_conversations(self, server_id: str, channel_id: str) -> bool:
@@ -1375,11 +1375,11 @@ class ConversationStore:
                     )
                     return True
                 else:
-                    log.debug(f"No conversation history found for channel {channel_id} in server {server_id}")
+                    log.debug(f"No conversation history found for channel {channel_id}")
                     return True  # Not an error if data doesn't exist
                     
             except Exception as e:
-                log.error(f"Error deleting conversations for channel {channel_id} in server {server_id}: {e}")
+                log.error(f"Error deleting conversations for channel {channel_id}: {e}")
                 return False
 
 

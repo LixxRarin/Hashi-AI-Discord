@@ -77,7 +77,7 @@ class discord_AI_bot:
                                         # Check if it's a PNG file
                                         if data[:8] == b'\x89PNG\r\n\x1a\n':
                                             avatar_bytes = data
-                                            func.log.debug(f"Loaded avatar from PNG card file for AI {ai_name}")
+                                            func.log.debug("Loaded avatar from PNG card file")
                                         # For CHARX files, would need to extract from ZIP
                                         elif card_file.suffix.lower() == '.charx':
                                             import zipfile
@@ -87,7 +87,7 @@ class discord_AI_bot:
                                                     for name in zf.namelist():
                                                         if 'icon' in name.lower() or 'avatar' in name.lower():
                                                             avatar_bytes = zf.read(name)
-                                                            func.log.debug(f"Extracted avatar from CHARX for AI {ai_name}")
+                                                            func.log.debug("Extracted avatar from CHARX")
                                                             break
                                             except Exception as e:
                                                 func.log.debug(f"Failed to extract avatar from CHARX: {e}")

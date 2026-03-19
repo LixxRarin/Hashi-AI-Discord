@@ -90,7 +90,7 @@ async def register_character_card(
     # Check if a card with the same URL already exists
     for existing_card_name, existing_card_data in cards[server_id].items():
         if existing_card_data.get("card_url") == card_url:
-            log.info(f"Card with URL '{card_url}' already registered as '{existing_card_name}' in server {server_id}")
+            log.info(f"Card with URL '{card_url}' already registered as '{existing_card_name}'")
             return existing_card_name
     
     # Generate unique name if card_name already exists
@@ -122,7 +122,7 @@ async def register_character_card(
     }
     
     await save_character_cards(cards)
-    log.info(f"Registered character card '{card_name}' -> {filename} in server {server_id}")
+    log.info(f"Registered a new character card!")
     return card_name
 
 
@@ -140,7 +140,7 @@ async def unregister_character_card(server_id: str, card_name: str) -> bool:
     cards = await load_character_cards()
     
     if server_id not in cards or card_name not in cards[server_id]:
-        log.warning(f"Character card '{card_name}' not found in server {server_id}")
+        log.warning(f"Character card '{card_name}' not found")
         return False
     
     del cards[server_id][card_name]
@@ -150,7 +150,7 @@ async def unregister_character_card(server_id: str, card_name: str) -> bool:
         del cards[server_id]
     
     await save_character_cards(cards)
-    log.info(f"Unregistered character card '{card_name}' from server {server_id}")
+    log.info(f"Unregistered character card '{card_name}'")
     return True
 
 
@@ -238,7 +238,7 @@ async def delete_server_character_cards(server_id: str) -> Dict[str, Any]:
         cards = await load_character_cards()
         
         if server_id not in cards:
-            log.debug(f"No character cards found for server {server_id}")
+            log.debug("No character cards found for server")
             return results
         
         server_cards = cards[server_id]
@@ -299,10 +299,10 @@ async def delete_server_character_cards(server_id: str) -> Dict[str, Any]:
         # Remove server entry from registry
         del cards[server_id]
         await save_character_cards(cards)
-        log.info(f"Removed server {server_id} from character cards registry")
-        
+        log.info("Removed server from character cards registry")
+
     except Exception as e:
-        log.error(f"Error in delete_server_character_cards for server {server_id}: {e}")
+        log.error(f"Error in delete_server_character_cards: {e}")
         results["success"] = False
     
     return results

@@ -240,7 +240,7 @@ class DebugCommands(commands.Cog):
             ephemeral=True
         )
         
-        func.log.info(f"Debug log level changed to {level.value} for server {server_id}")
+        func.log.info(f"Debug log level changed to {level.value}")
     
     @app_commands.command(name="toggle_debug", description="Enable or disable debug logging")
     @app_commands.default_permissions(administrator=True)
@@ -286,9 +286,9 @@ class DebugCommands(commands.Cog):
         )
         
         if new_status:
-            func.log.info(f"Debug logging enabled for server {server_id}")
+            func.log.debug("Debug logging enabled")
         else:
-            func.log.info(f"Debug logging disabled for server {server_id}")
+            func.log.debug("Debug logging disabled")
     
     @app_commands.command(name="debug_status", description="Show debug system status and statistics")
     @app_commands.default_permissions(administrator=True)

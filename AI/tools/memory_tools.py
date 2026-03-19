@@ -98,7 +98,7 @@ def _load_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str) ->
                 
                 # Validate structure
                 if not isinstance(data, list):
-                    log.error(f"Invalid memory file structure in old format for {ai_name}/{chat_id}")
+                    log.error(f"Invalid memory file structure in old format for chat {chat_id}")
                     return []
                 
                 # Save to new format (migration)
@@ -109,10 +109,10 @@ def _load_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str) ->
                 return data
                 
             except json.JSONDecodeError as e:
-                log.error(f"Failed to parse old memory file for {ai_name}/{chat_id}: {e}")
+                log.error(f"Failed to parse old memory file for chat {chat_id}: {e}")
                 return []
             except Exception as e:
-                log.error(f"Failed to migrate old memory file for {ai_name}/{chat_id}: {e}")
+                log.error(f"Failed to migrate old memory file for chat {chat_id}: {e}")
                 return []
         
         # No file exists in either format
@@ -125,16 +125,16 @@ def _load_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str) ->
             
         # Validate structure
         if not isinstance(data, list):
-            log.error(f"Invalid memory file structure for {server_id}/{channel_id}/{ai_name}/{chat_id}")
+            log.error(f"Invalid memory file structure for channel {channel_id}/chat {chat_id}")
             return []
         
         return data
         
     except json.JSONDecodeError as e:
-        log.error(f"Failed to parse memory file for {server_id}/{channel_id}/{ai_name}/{chat_id}: {e}")
+        log.error(f"Failed to parse memory file for channel {channel_id}/chat {chat_id}: {e}")
         return []
     except Exception as e:
-        log.error(f"Failed to load memory for {server_id}/{channel_id}/{ai_name}/{chat_id}: {e}")
+        log.error(f"Failed to load memory for channel {channel_id}/chat {chat_id}: {e}")
         return []
 
 
@@ -158,11 +158,11 @@ def _save_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str, en
         with open(path, 'w', encoding='utf-8') as f:
             json.dump(entries, f, ensure_ascii=False, indent=2)
         
-        log.debug(f"Saved {len(entries)} memory entries for {server_id}/{channel_id}/{ai_name}/{chat_id}")
+        log.debug(f"Saved {len(entries)} memory entries for channel {channel_id}/chat {chat_id}")
         return True
         
     except Exception as e:
-        log.error(f"Failed to save memory for {server_id}/{channel_id}/{ai_name}/{chat_id}: {e}")
+        log.error(f"Failed to save memory for channel {channel_id}/chat {chat_id}: {e}")
         return False
 
 
@@ -297,7 +297,7 @@ async def add_memory(content: str, context: Dict[str, Any] = None) -> Dict[str, 
         if not _save_memory(server_id, channel_id, ai_name, chat_id, entries):
             return {"error": "Failed to save memory"}
         
-        log.info(f"Added memory #{new_id} for {server_id}/{channel_id}/{ai_name}/{chat_id} ({new_tokens} tokens)")
+        log.info(f"Added memory #{new_id} for channel {channel_id}/chat {chat_id} ({new_tokens} tokens)")
         
         return {
             "success": True,
@@ -377,7 +377,7 @@ async def update_memory(memory_id: int, content: str, context: Dict[str, Any] = 
         if not _save_memory(server_id, channel_id, ai_name, chat_id, entries):
             return {"error": "Failed to save memory"}
         
-        log.info(f"Updated memory #{memory_id} for {server_id}/{channel_id}/{ai_name}/{chat_id}")
+        log.info(f"Updated memory #{memory_id} for channel {channel_id}/chat {chat_id}")
         
         return {
             "success": True,
@@ -437,7 +437,7 @@ async def remove_memory(memory_id: int, context: Dict[str, Any] = None) -> Dict[
         if not _save_memory(server_id, channel_id, ai_name, chat_id, entries):
             return {"error": "Failed to save memory"}
         
-        log.info(f"Removed memory #{memory_id} for {server_id}/{channel_id}/{ai_name}/{chat_id}")
+        log.info(f"Removed memory #{memory_id} for channel {channel_id}/chat {chat_id}")
         
         return {
             "success": True,
@@ -533,7 +533,7 @@ def read_memory_content(server_id: str, channel_id: str, ai_name: str, chat_id: 
         return "\n".join(lines)
         
     except Exception as e:
-        log.error(f"Error reading memory content for {server_id}/{channel_id}/{ai_name}/{chat_id}: {e}")
+        log.error(f"Error reading memory content for channel {channel_id}/chat {chat_id}: {e}")
         return None
 
 
@@ -575,7 +575,7 @@ def delete_memory_file(server_id: str, channel_id: str, ai_name: str, chat_id: s
             return deleted_count > 0
             
     except Exception as e:
-        log.error(f"Error deleting memory files for {server_id}/{channel_id}/{ai_name}: {e}")
+        log.error(f"Error deleting memory files for channel {channel_id}: {e}")
         return False
 
 
@@ -603,14 +603,14 @@ def delete_server_memory_files(server_id: str) -> int:
             deleted_count += 1
         
         if deleted_count > 0:
-            log.info(f"Deleted {deleted_count} memory file(s) for server {server_id}")
+            log.info(f"Deleted {deleted_count} memory file(s)")
         else:
-            log.debug(f"No memory files found for server {server_id}")
+            log.debug("No memory files found")
         
         return deleted_count
         
     except Exception as e:
-        log.error(f"Error deleting memory files for server {server_id}: {e}")
+        log.error(f"Error deleting memory files: {e}")
         return 0
 
 
@@ -640,12 +640,12 @@ def delete_channel_memory_files(server_id: str, channel_id: str) -> int:
             deleted_count += 1
         
         if deleted_count > 0:
-            log.info(f"Deleted {deleted_count} memory file(s) for channel {channel_id} in server {server_id}")
+            log.info(f"Deleted {deleted_count} memory file(s) for channel {channel_id}")
         else:
-            log.debug(f"No memory files found for channel {channel_id} in server {server_id}")
+            log.debug(f"No memory files found for channel {channel_id}")
         
         return deleted_count
         
     except Exception as e:
-        log.error(f"Error deleting memory files for channel {channel_id} in server {server_id}: {e}")
+        log.error(f"Error deleting memory files for channel {channel_id}: {e}")
         return 0

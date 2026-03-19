@@ -304,7 +304,7 @@ class MessagePipeline:
             
             if in_sleep and not should_wake:
                 # AI is in sleep mode and no wake-up pattern found
-                log.debug(f"AI {ai_name} staying in ignore-based sleep mode (no wake-up pattern matched)")
+                log.debug("AI staying in ignore-based sleep mode (no wake-up pattern matched)")
                 await self.buffer.clear_specific_messages(
                     server_id, channel_id, ai_name, processing_message_ids
                 )
@@ -312,7 +312,7 @@ class MessagePipeline:
             
             if in_sleep and should_wake:
                 # AI is waking up from sleep mode
-                log.info(f"AI {ai_name} waking up from ignore-based sleep mode (wake-up pattern detected)")
+                log.info("AI waking up from ignore-based sleep mode (wake-up pattern detected)")
                 # The should_wake_from_sleep function doesn't modify state, so we need to do it here
                 import time
                 response_filter = get_response_filter()
@@ -419,7 +419,7 @@ class MessagePipeline:
                 try:
                     real_guild = self.bot_client.get_guild(int(server_id))
                 except Exception as e:
-                    log.warning(f"Failed to get guild {server_id} from bot: {e}")
+                    log.warning(f"Failed to get guild from bot: {e}")
             
             class FakeMessage:
                 def __init__(self, guild_id, channel_id, author, content, attachments=None):
@@ -474,13 +474,13 @@ class MessagePipeline:
                             session_with_context.get("chat_id", "default"),
                             short_id=None  # No short_id for error messages
                         )
-                        log.debug(f"Error saved to history for AI {ai_name}")
+                        log.debug("Error saved to history")
                     
                     # Send to Discord if configured
                     discord_ids = []
                     if display_msg:
                         await send_callback(display_msg, discord_ids)
-                        log.debug(f"Error sent to chat for AI {ai_name}")
+                        log.debug("Error sent to chat")
                         
                         # Add error message to ResponseManager so buttons work correctly
                         if discord_ids:
@@ -496,7 +496,7 @@ class MessagePipeline:
                                 discord_ids,
                                 is_regeneration=is_regeneration
                             )
-                            log.debug(f"Error message added to ResponseManager for AI {ai_name}")
+                            log.debug("Error message added to ResponseManager")
                     
                     # Clear buffer
                     await self.buffer.clear_specific_messages(
@@ -514,7 +514,7 @@ class MessagePipeline:
                     return None
             
             if response is None:
-                log.warning("Error response detected by chat_service for AI %s, not saving to history", ai_name)
+                log.warning("Error response detected by chat_service, not saving to history")
                 # Clear only the messages that were processed (prevents race condition)
                 await self.buffer.clear_specific_messages(
                     server_id, channel_id, ai_name, processing_message_ids
@@ -522,7 +522,7 @@ class MessagePipeline:
                 return None
             
             if not response:
-                log.warning("Empty response from chat_service for AI %s", ai_name)
+                log.warning("Empty response from chat_service")
                 # Clear only the messages that were processed (prevents race condition)
                 await self.buffer.clear_specific_messages(
                     server_id, channel_id, ai_name, processing_message_ids
@@ -534,7 +534,7 @@ class MessagePipeline:
                 from utils.ignore_parser import IgnoreParser
                 
                 if IgnoreParser.is_pure_ignore(response):
-                    log.debug(f"AI {ai_name} sent <IGNORE>")
+                    log.debug("AI sent <IGNORE>")
                     
 
                     await self.processor.short_id_manager.skip_next_id(
@@ -563,7 +563,7 @@ class MessagePipeline:
                 
                 # Check for <IGNORE> with additional content and remove it
                 if IgnoreParser.has_ignore_tag(response):
-                    log.info(f"AI {ai_name} sent <IGNORE> with additional content - removing tag")
+                    log.info("AI sent <IGNORE> with additional content - removing tag")
                     response = IgnoreParser.remove_ignore_tag(response)
             
             cleaned_response = self.processor.clean_response(response, session_with_context)
@@ -585,7 +585,7 @@ class MessagePipeline:
                     state = response_filter.sleep_state[state_key]
                     was_sleeping = state.get("in_sleep_mode", False)
                     if state["consecutive_refusals"] > 0:
-                        log.debug(f"Resetting ignore counter for AI {ai_name} (was {state['consecutive_refusals']})")
+                        log.debug(f"Resetting ignore counter (was {state['consecutive_refusals']})")
                     state["consecutive_refusals"] = 0
                     state["in_sleep_mode"] = False
                     state["last_activity"] = time.time()
@@ -644,7 +644,7 @@ class MessagePipeline:
             return (response, discord_ids)
             
         except Exception as e:
-            log.error("Error generating response for AI %s: %s", ai_name, e)
+            log.error("Error generating response: %s", e)
             return None
             
         finally:

@@ -74,16 +74,9 @@ async def upload_thumbnail_to_discord(
         # Extract CDN URL from the uploaded attachment
         if temp_message.attachments:
             cdn_url = temp_message.attachments[0].url
-            
-            # NOTE: We do NOT delete the temporary message because Discord invalidates
-            # the CDN URL when the message is deleted. The message needs to stay for
-            # the thumbnail to work in embeds.
-            #
-            # The temporary messages will remain in the channel, but this is necessary
-            # for thumbnails to work with pagination.
-            
-            log.debug(f"Uploaded thumbnail to Discord CDN: {cdn_url}")
-            log.info(f"Temporary message {temp_message.id} kept for CDN URL validity")
+        
+            log.debug("Uploaded thumbnail to Discord CDN")
+
             return cdn_url
         else:
             log.warning("No attachments found in uploaded message")

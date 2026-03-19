@@ -38,7 +38,7 @@ def is_in_sleep_mode(
         return state.get("in_sleep_mode", False)
         
     except Exception as e:
-        log.error(f"Error checking sleep mode for AI {ai_name}: {e}")
+        log.error(f"Error checking sleep mode: {e}")
         return False
 
 
@@ -231,7 +231,7 @@ def get_sleep_state_info(
         }
         
     except Exception as e:
-        log.error(f"Error getting sleep state info for AI {ai_name}: {e}")
+        log.error(f"Error getting sleep state info: {e}")
         return {
             "exists": False,
             "error": str(e)

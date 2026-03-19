@@ -404,7 +404,7 @@ class APIConnections(commands.Cog):
             # Update connection_name for subsequent operations
             connection_name = new_connection_name
             renamed = True
-            func.log.info(f"Renamed connection '{old_name}' to '{new_connection_name}' in server {server_id}")
+            func.log.info(f"Renamed connection '{old_name}' to '{new_connection_name}'")
         
         # Validate parameters if provided
         if temperature is not None and (temperature < 0.0 or temperature > 2.0):

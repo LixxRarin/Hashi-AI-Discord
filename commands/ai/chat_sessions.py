@@ -515,7 +515,7 @@ class ChatSessions(commands.Cog):
                             await confirm_msg.clear_reactions()
                         except discord.NotFound:
                             pass
-                        func.log.info(f"Deleted chat '{chat_id}' for AI '{ai_name}' in server {server_id}")
+                        func.log.info(f"Deleted chat '{chat_id}'")
                     else:
                         await interaction.followup.send(
                             f"❌ Failed to delete chat. Check logs for details.",
@@ -608,7 +608,7 @@ class ChatSessions(commands.Cog):
                     result_msg += f"\n💡 This was the active chat. Session updated."
                 
                 await interaction.followup.send(result_msg, ephemeral=True)
-                func.log.info(f"Renamed chat '{old_name}' to '{new_name}' for AI '{ai_name}' in server {server_id}")
+                func.log.info(f"Renamed chat '{old_name}' to '{new_name}'")
             else:
                 await interaction.followup.send(
                     f"❌ Failed to rename chat. Check logs for details.",

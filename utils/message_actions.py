@@ -103,7 +103,7 @@ async def attach_buttons_with_webhook_compatibility(
             last_msg = await fetch_message_cached(channel, last_msg_id)
             if last_msg:
                 await last_msg.edit(view=view)
-                log.debug(f"Attached buttons to bot message for AI {ai_name}")
+                log.debug("Attached buttons to bot message")
         except Exception as e:
             log.error(f"Error attaching buttons to bot message: {e}")
         
@@ -247,7 +247,7 @@ class EditMessageModal(ui.Modal):
                 ephemeral=True
             )
             
-            log.info(f"Message edited for AI {self.ai_name} in channel {self.channel_id}")
+            log.info(f"Message edited in channel {self.channel_id}")
             
         except Exception as e:
             log.error(f"Error editing message: {e}", exc_info=True)
@@ -521,7 +521,7 @@ class MessageActionsView(ui.View):
                 # Bot mode: just update the view
                 await interaction.edit_original_response(view=self)
             
-            log.info(f"Navigated to previous generation ({info['current_number']}/{info['total_count']}) for AI {self.ai_name}")
+            log.info(f"Navigated to previous generation ({info['current_number']}/{info['total_count']}) in channel {self.channel_id}")
             
         except Exception as e:
             log.error(f"Error navigating to previous: {e}", exc_info=True)
@@ -613,7 +613,7 @@ class MessageActionsView(ui.View):
                 # Bot mode: just update the view
                 await interaction.edit_original_response(view=self)
             
-            log.info(f"Navigated to next generation ({info['current_number']}/{info['total_count']}) for AI {self.ai_name}")
+            log.info(f"Navigated to next generation ({info['current_number']}/{info['total_count']}) in channel {self.channel_id}")
             
         except Exception as e:
             log.error(f"Error navigating to next: {e}", exc_info=True)
@@ -961,7 +961,7 @@ class MessageActionsView(ui.View):
                 ephemeral=True
             )
             
-            log.info(f"Message deleted for AI {self.ai_name} in channel {self.channel_id}")
+            log.info(f"Message deleted in channel {self.channel_id}")
             
         except Exception as e:
             log.error(f"Error deleting message: {e}", exc_info=True)
@@ -1011,7 +1011,7 @@ class MessageActionsView(ui.View):
                 if isinstance(item, ui.Button):
                     item.disabled = True
             
-            log.debug(f"MessageActionsView timed out for AI {self.ai_name}")
+            log.debug("MessageActionsView timed out")
             
         except Exception as e:
             log.error(f"Error handling view timeout: {e}")

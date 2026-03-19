@@ -390,7 +390,7 @@ async def update_session_data(server_id: str, channel_id: str, new_data: Dict[st
         session_data[server_id]["channels"][channel_id] = new_data
     
     await asyncio.to_thread(write_json, get_session_file(), session_data)
-    log.debug(f"Updated session data for server {server_id}, channel {channel_id}")
+    log.debug(f"Updated session data for channel {channel_id}")
 
 
 def get_session_data(server_id: str, channel_id: str) -> Optional[Dict[str, Any]]:
@@ -442,7 +442,7 @@ async def remove_session_data(server_id: str, channel_id: str) -> None:
     if server_id in session_cache and channel_id in session_cache[server_id].get("channels", {}):
         # Remove from in-memory cache
         del session_cache[server_id]["channels"][channel_id]
-        log.info(f"Removed session data for server {server_id}, channel {channel_id} from cache.")
+        log.info(f"Removed session data for channel {channel_id} from cache")
 
         # Update persistent storage directly
         await update_session_data(server_id, channel_id, None)
@@ -566,7 +566,7 @@ async def create_api_connection(
         connections[server_id] = {}
     
     if connection_name in connections[server_id]:
-        log.warning(f"Connection '{connection_name}' already exists in server {server_id}")
+        log.warning(f"Connection '{connection_name}' already exists")
         return False
     
     connections[server_id][connection_name] = {
@@ -595,7 +595,7 @@ async def create_api_connection(
     }
     
     await save_api_connections(connections)
-    log.info(f"Created API connection '{connection_name}' in server {server_id}")
+    log.info(f"Created API connection '{connection_name}'")
     return True
 
 
@@ -618,7 +618,7 @@ async def update_api_connection(
     connections = await load_api_connections()
     
     if server_id not in connections or connection_name not in connections[server_id]:
-        log.warning(f"Connection '{connection_name}' not found in server {server_id}")
+        log.warning(f"Connection '{connection_name}' not found")
         return False
     
     # Remove None values from updates
@@ -626,7 +626,7 @@ async def update_api_connection(
     
     connections[server_id][connection_name].update(updates)
     await save_api_connections(connections)
-    log.info(f"Updated API connection '{connection_name}' in server {server_id}")
+    log.info(f"Updated API connection '{connection_name}'")
     return True
 
 
@@ -659,7 +659,7 @@ async def rename_api_connection(
     # Rename the connection in api_connections.json
     connections[server_id][new_connection_name] = connections[server_id].pop(old_connection_name)
     await save_api_connections(connections)
-    log.info(f"Renamed API connection '{old_connection_name}' to '{new_connection_name}' in server {server_id}")
+    log.info(f"Renamed API connection '{old_connection_name}' to '{new_connection_name}'")
     
     # Update all AI sessions that use this connection
     updated_ais = []
@@ -694,7 +694,7 @@ async def delete_api_connection(server_id: str, connection_name: str) -> bool:
     connections = await load_api_connections()
     
     if server_id not in connections or connection_name not in connections[server_id]:
-        log.warning(f"Connection '{connection_name}' not found in server {server_id}")
+        log.warning(f"Connection '{connection_name}' not found")
         return False
     
     del connections[server_id][connection_name]
@@ -704,7 +704,7 @@ async def delete_api_connection(server_id: str, connection_name: str) -> bool:
         del connections[server_id]
     
     await save_api_connections(connections)
-    log.info(f"Deleted API connection '{connection_name}' from server {server_id}")
+    log.info(f"Deleted API connection '{connection_name}'")
     return True
 
 
@@ -799,7 +799,7 @@ async def delete_server_session_data(server_id: str) -> bool:
         # Remove from in-memory cache
         if server_id in session_cache:
             del session_cache[server_id]
-            log.info(f"Removed server {server_id} from session cache")
+            log.info("Removed server from session cache")
         
         # Update persistent storage
         session_file = get_session_file()
@@ -808,14 +808,14 @@ async def delete_server_session_data(server_id: str) -> bool:
         if server_id in data:
             del data[server_id]
             await asyncio.to_thread(write_json, session_file, data)
-            log.info(f"Deleted session data for server {server_id} from {session_file}")
+            log.info(f"Deleted session data from {session_file}")
             return True
         else:
-            log.debug(f"No session data found for server {server_id}")
+            log.debug("No session data found for server")
             return True  # Not an error if data doesn't exist
             
     except Exception as e:
-        log.error(f"Error deleting session data for server {server_id}: {e}")
+        log.error(f"Error deleting session data: {e}")
         return False
 
 
@@ -836,14 +836,14 @@ async def delete_server_api_connections(server_id: str) -> bool:
             connection_count = len(connections[server_id])
             del connections[server_id]
             await save_api_connections(connections)
-            log.info(f"Deleted {connection_count} API connection(s) for server {server_id}")
+            log.info(f"Deleted {connection_count} API connection(s)")
             return True
         else:
-            log.debug(f"No API connections found for server {server_id}")
+            log.debug("No API connections found")
             return True  # Not an error if data doesn't exist
             
     except Exception as e:
-        log.error(f"Error deleting API connections for server {server_id}: {e}")
+        log.error(f"Error deleting API connections: {e}")
         return False
 
 
@@ -979,7 +979,7 @@ async def cleanup_channel_data(server_id: str, channel_id: str, channel_name: st
         Dict with cleanup results
     """
     channel_display = f"#{channel_name} (ID: {channel_id})" if channel_name else f"ID: {channel_id}"
-    log.info(f"Starting cleanup for deleted channel: {channel_display} in server {server_id}")
+    log.info(f"Starting cleanup for deleted channel: {channel_display}")
     
     results = {
         "success": True,

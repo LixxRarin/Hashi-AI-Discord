@@ -188,7 +188,7 @@ class ShortIDManager:
             mapping["short_to_discord"].clear()
             mapping["next_id"] = 1
             
-            log.info(f"Cleared ID mappings for AI {ai_name} in {server_id}/{channel_id}")
+            log.info(f"Cleared ID mappings in channel {channel_id}")
     
     async def remove_mapping(
         self,
@@ -332,11 +332,11 @@ class ShortIDManager:
                     )
                     return True
                 else:
-                    log.debug(f"No short ID mappings found for server {server_id}")
+                    log.debug("No short ID mappings found for server")
                     return True  # Not an error if data doesn't exist
                     
             except Exception as e:
-                log.error(f"Error deleting short ID mappings for server {server_id}: {e}")
+                log.error(f"Error deleting short ID mappings: {e}")
                 return False
     
     async def delete_channel_mappings(self, server_id: str, channel_id: str) -> bool:
@@ -369,11 +369,11 @@ class ShortIDManager:
                     )
                     return True
                 else:
-                    log.debug(f"No short ID mappings found for channel {channel_id} in server {server_id}")
+                    log.debug(f"No short ID mappings found for channel {channel_id}")
                     return True  # Not an error if data doesn't exist
                     
             except Exception as e:
-                log.error(f"Error deleting short ID mappings for channel {channel_id} in server {server_id}: {e}")
+                log.error(f"Error deleting short ID mappings for channel {channel_id}: {e}")
                 return False
 
 

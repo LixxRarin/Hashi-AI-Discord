@@ -113,7 +113,7 @@ class HistoryManager(commands.Cog):
                     await confirm_msg.clear_reactions()
                 except discord.NotFound:
                     pass
-                func.log.info(f"Cleared history for AI '{ai_name}' in server {server_id}")
+                func.log.info("Cleared history for AI")
             else:
                 try:
                     await confirm_msg.edit(
@@ -550,7 +550,7 @@ class HistoryManager(commands.Cog):
         
         # If message_id not provided, find the last bot message
         if not message_id:
-            func.log.info(f"No message_id provided, searching for last bot message from AI '{ai_name}'")
+            func.log.info("No message_id provided, searching for last bot message")
             
             # Find last bot message and cache all messages we iterate through
             from utils.message_cache import get_message_cache

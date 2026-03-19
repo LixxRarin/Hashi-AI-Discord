@@ -369,7 +369,7 @@ class TimingController:
             except asyncio.CancelledError:
                 pass
             except Exception as e:
-                log.error("Error in monitoring for AI %s: %s", ai_name, e)
+                log.error("Error in monitoring: %s", e)
         
         self._monitoring_tasks[task_key] = asyncio.create_task(monitor())
     

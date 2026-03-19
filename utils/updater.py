@@ -50,11 +50,11 @@ def update_session_file(file_path: Optional[str] = None) -> None:
 
     # Iterate over each server in the session data
     for server_id, server_data in session_data.items():
-        func.log.debug(f"Processing server: {server_id}")
+        func.log.debug("Processing server data")
         
         # Only update if the server has a 'channels' key
         if "channels" not in server_data:
-            func.log.debug(f"No channels found for server: {server_id}. Skipping.")
+            func.log.debug("No channels found for server. Skipping.")
             continue
             
         channels = server_data["channels"]
@@ -74,13 +74,13 @@ def update_session_file(file_path: Optional[str] = None) -> None:
                 if ai_data is None:
                     continue
                     
-                func.log.debug(f"Processing AI '{ai_name}' in channel: {channel_id}")
+                func.log.debug(f"Processing AI in channel {channel_id}")
                 
                 # Ensure provider field exists
                 if "provider" not in ai_data:
                     detected_provider = _detect_provider_from_session(ai_data)
                     ai_data["provider"] = detected_provider
-                    func.log.info(f"Set provider to '{detected_provider}' for AI '{ai_name}'")
+                    func.log.info(f"Set provider to '{detected_provider}'")
                 
                 # Get default model based on the AI's provider
                 ai_provider = ai_data.get("provider", "openai")
@@ -103,7 +103,7 @@ def update_session_file(file_path: Optional[str] = None) -> None:
                 keys_to_keep = set(default_ai_model.keys()) | preserved_fields
                 for key in list(ai_data.keys()):
                     if key not in keys_to_keep:
-                        func.log.debug(f"Removing deprecated key '{key}' from AI '{ai_name}'")
+                        func.log.debug(f"Removing deprecated key '{key}'")
                         del ai_data[key]
                 
                 # Clean up config: remove obsolete LLM parameters (now in api_connections.json)
@@ -124,7 +124,7 @@ def update_session_file(file_path: Optional[str] = None) -> None:
                                     f"(now managed in api_connections.json)"
                                 )
                             else:
-                                func.log.debug(f"Removing deprecated config key '{ckey}' from AI '{ai_name}'")
+                                func.log.debug(f"Removing deprecated config key '{ckey}'")
                             del ai_data["config"][ckey]
                 
                 # Warning for sessions without api_connection

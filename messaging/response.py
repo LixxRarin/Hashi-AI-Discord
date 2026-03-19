@@ -277,9 +277,8 @@ class ResponseManager:
         
         # Debug logging
         log.debug(
-            f"add_response called for AI {ai_name}: "
-            f"user_message={user_message[:50] if user_message else 'None'}..., "
-            f"current_state.user_message={state.user_message[:50] if state.user_message else 'None'}..., "
+            f"add_response called: "
+            f"user_message_len={len(user_message) if user_message else 0}, "
             f"current_generations={len(state.generations)}, "
             f"is_regeneration={is_regeneration}"
         )
@@ -290,22 +289,22 @@ class ResponseManager:
         normalized_old = state.user_message.strip() if state.user_message else ""
         
         if not is_regeneration and normalized_old != normalized_new:
-            log.debug(f"User message changed for AI {ai_name}, clearing {len(state.generations)} generations")
+            log.debug(f"User message changed in channel {channel_id}, clearing {len(state.generations)} generations")
             state.user_message = user_message
             state.generations.clear()
             state.current_index = 0
         else:
             if is_regeneration:
-                log.debug(f"Regeneration mode for AI {ai_name}, keeping {len(state.generations)} generations")
+                log.debug(f"Regeneration mode in channel {channel_id}, keeping {len(state.generations)} generations")
             else:
-                log.debug(f"User message same for AI {ai_name}, keeping {len(state.generations)} generations")
+                log.debug(f"User message same in channel {channel_id}, keeping {len(state.generations)} generations")
             # Update user_message to keep it current (but don't clear generations)
             state.user_message = user_message
         
         state.add_generation(response_text, discord_ids, group_id)
         
         log.debug(
-            f"After add_generation for AI {ai_name}: total={len(state.generations)}, current_index={state.current_index}"
+            f"After add_generation: total={len(state.generations)}, current_index={state.current_index}"
         )
     
     def get_current(
@@ -413,10 +412,10 @@ class ResponseManager:
         
         if current:
             current.text = new_text
-            log.debug("Updated generation text for AI %s", ai_name)
+            log.debug("Updated generation text in channel %s", channel_id)
             return True
         
-        log.warning("No current generation to update for AI %s", ai_name)
+        log.warning("No current generation to update in channel %s", channel_id)
         return False
     
     def clear(
@@ -438,7 +437,7 @@ class ResponseManager:
             ai_name in self._responses[server_id][channel_id]):
             
             del self._responses[server_id][channel_id][ai_name]
-            log.debug("Cleared responses for AI %s", ai_name)
+            log.debug("Cleared responses in channel %s", channel_id)
     
     def get_discord_ids_for_current(
         self,

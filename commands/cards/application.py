@@ -488,7 +488,7 @@ class CardApplication(commands.Cog):
                     if avatar_bytes:
                         await self.webhook_utils.update_avatar(webhook_url, avatar_bytes)
                         avatar_updated = True
-                        func.log.info(f"Updated avatar for AI '{ai_name}'")
+                        func.log.info("Updated avatar for AI")
                 except Exception as e:
                     func.log.warning(f"Failed to update avatar: {e}")
             
@@ -497,7 +497,7 @@ class CardApplication(commands.Cog):
                     display_name = card_data.get("nickname") or card_data.get("name", ai_name)
                     await self.webhook_utils.update_name(webhook_url, display_name)
                     name_updated = True
-                    func.log.info(f"Updated display name for AI '{ai_name}' to '{display_name}'")
+                    func.log.info(f"Updated display name for AI to '{display_name}'")
                 except Exception as e:
                     func.log.warning(f"Failed to update display name: {e}")
         

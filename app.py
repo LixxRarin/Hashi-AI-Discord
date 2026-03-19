@@ -177,7 +177,7 @@ class BridgeBot(commands.Bot):
                 try:
                     results = await func.cleanup_channel_data(server_id, channel_id)
                     if results["success"]:
-                        func.log.info(f"Cleaned up orphaned channel {channel_id} in server {server_id}")
+                        func.log.info(f"Cleaned up orphaned channel {channel_id}")
                     else:
                         func.log.warning(
                             f"Cleanup completed with errors for channel {channel_id}: "
@@ -337,12 +337,12 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
                             )
                             state.control_message_id = control_msg_id
                         
-                        func.log.debug(f"Attached buttons after ResponseManager update for AI {ai_name}")
+                        func.log.debug("Attached buttons after ResponseManager update")
                 except Exception as e:
                     func.log.error(f"Error attaching buttons after generation: {e}")
         
     except Exception as e:
-        func.log.error("Error in _generate_ai_response for AI %s: %s", ai_name, e)
+        func.log.error("Error in _generate_ai_response: %s", e)
 
 
 @bot.event
