@@ -111,13 +111,13 @@ class discord_AI_bot:
                                 )
                             
                             func.log.info(
-                                "Updated webhook for AI %s in channel %s (no API call)",
-                                ai_name, channel_id
+                                "Updated webhook for channel %s (no API call)",
+                                channel_id
                             )
                     except Exception as e:
                         func.log.error(
-                            "Failed to update webhook for AI %s in channel %s: %s",
-                            ai_name, channel_id, e
+                            "Failed to update webhook in channel %s: %s",
+                            channel_id, e
                         )
         
         func.log.info("Webhook synchronization complete (0 API calls made)")
