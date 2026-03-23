@@ -12,6 +12,7 @@ from typing import Optional
 
 import utils.func as func
 from commands.shared.autocomplete import AutocompleteHelpers
+from expressions import get_expression_registry
 
 
 class ConfigCommands(commands.Cog):
@@ -389,8 +390,16 @@ class ConfigCommands(commands.Cog):
         
         if enabled is not None:
             # Check for mutual exclusivity with ignore system
-            if enabled and config.get("enable_ignore_system", False):
-                config["enable_ignore_system"] = False
+            registry = get_expression_registry()
+            ignore_expr = registry.get('ignore')
+            
+            if enabled and ignore_expr and ignore_expr.is_enabled(config):
+                # Disable ignore system
+                if "advanced_expressions" not in config:
+                    config["advanced_expressions"] = {}
+                if "ignore" not in config["advanced_expressions"]:
+                    config["advanced_expressions"]["ignore"] = {}
+                config["advanced_expressions"]["ignore"]["enabled"] = False
                 changes.append("⚠️ Ignore system automatically disabled (mutually exclusive)")
             
             config["use_response_filter"] = enabled
@@ -440,61 +449,6 @@ class ConfigCommands(commands.Cog):
             ephemeral=True
         )
      
-    @app_commands.command(name="config_reply", description="Configure LLM reply system")
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(
-        ai_name="Name of the AI to configure",
-        enabled="Enable reply system",
-        custom_prompt="Custom reply prompt (or 'default' for default)"
-    )
-    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
-    async def config_reply(
-        self,
-        interaction: discord.Interaction,
-        ai_name: str,
-        enabled: bool = None,
-        custom_prompt: str = None
-    ):
-        """Configure reply system settings."""
-        server_id = str(interaction.guild.id)
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        
-        if not found_ai_data:
-            await interaction.response.send_message(f"❌ AI '{ai_name}' not found.", ephemeral=True)
-            return
-        
-        found_channel_id, session = found_ai_data
-        if session is None:
-            await interaction.response.send_message(f"❌ AI '{ai_name}' session data is invalid.", ephemeral=True)
-            return
-        
-        config = session.setdefault("config", {})
-        changes = []
-        
-        if enabled is not None:
-            config["enable_reply_system"] = enabled
-            changes.append(f"• Reply System: `{enabled}`")
-        
-        if custom_prompt is not None:
-            if custom_prompt.lower() == "default":
-                config["reply_prompt"] = func.get_default_ai_config()["reply_prompt"]
-                changes.append("• Prompt: `Reset to default`")
-            else:
-                config["reply_prompt"] = custom_prompt
-                changes.append(f"• Prompt: `Custom ({len(custom_prompt)} chars)`")
-        
-        if not changes:
-            await interaction.response.send_message("❌ No changes specified.", ephemeral=True)
-            return
-        
-        channel_data = func.get_session_data(server_id, found_channel_id)
-        channel_data[ai_name] = session
-        await func.update_session_data(server_id, found_channel_id, channel_data)
-        
-        await interaction.response.send_message(
-            f"✅ **Reply system updated for '{ai_name}':**\n" + "\n".join(changes),
-            ephemeral=True
-        )
     
     @app_commands.command(name="config_sleep", description="Configure sleep mode settings")
     @app_commands.default_permissions(administrator=True)
@@ -551,121 +505,7 @@ class ConfigCommands(commands.Cog):
             ephemeral=True
         )
     
-    @app_commands.command(name="config_ignore", description="Configure ignore system settings")
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(
-        ai_name="Name of the AI to configure",
-        enabled="Enable ignore system (LLM decides during generation)",
-        sleep_threshold="Consecutive ignores before entering sleep mode"
-    )
-    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
-    async def config_ignore(
-        self,
-        interaction: discord.Interaction,
-        ai_name: str,
-        enabled: Optional[bool] = None,
-        sleep_threshold: Optional[int] = None
-    ):
-        """Configure ignore system settings."""
-        server_id = str(interaction.guild.id)
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        
-        if not found_ai_data:
-            await interaction.response.send_message(f"❌ AI '{ai_name}' not found.", ephemeral=True)
-            return
-        
-        found_channel_id, session = found_ai_data
-        if session is None:
-            await interaction.response.send_message(f"❌ AI '{ai_name}' session data is invalid.", ephemeral=True)
-            return
-        
-        config = session.setdefault("config", {})
-        changes = []
-        
-        if enabled is not None:
-            # Check for mutual exclusivity with response filter
-            if enabled and config.get("use_response_filter", False):
-                config["use_response_filter"] = False
-                changes.append("⚠️ Response filter automatically disabled (mutually exclusive)")
-            
-            config["enable_ignore_system"] = enabled
-            changes.append(f"• Ignore System: `{enabled}`")
-        
-        if sleep_threshold is not None:
-            if sleep_threshold <= 0 or sleep_threshold > 20:
-                await interaction.response.send_message("❌ Threshold must be between 1 and 20.", ephemeral=True)
-                return
-            config["ignore_sleep_threshold"] = sleep_threshold
-            changes.append(f"• Sleep Threshold: `{sleep_threshold}`")
-        
-        if not changes:
-            await interaction.response.send_message("❌ No changes specified.", ephemeral=True)
-            return
-        
-        channel_data = func.get_session_data(server_id, found_channel_id)
-        channel_data[ai_name] = session
-        await func.update_session_data(server_id, found_channel_id, channel_data)
-        
-        await interaction.response.send_message(
-            f"✅ **Ignore system updated for '{ai_name}':**\n" + "\n".join(changes),
-            ephemeral=True
-        )
     
-    @app_commands.command(name="config_reaction", description="Configure reaction system settings")
-    @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(
-        ai_name="Name of the AI to configure",
-        enabled="Enable reaction system (AI can react to messages with emojis)",
-        custom_prompt="Custom reaction prompt (or 'default' for default)"
-    )
-    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
-    async def config_reaction(
-        self,
-        interaction: discord.Interaction,
-        ai_name: str,
-        enabled: Optional[bool] = None,
-        custom_prompt: Optional[str] = None
-    ):
-        """Configure reaction system settings."""
-        server_id = str(interaction.guild.id)
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        
-        if not found_ai_data:
-            await interaction.response.send_message(f"❌ AI '{ai_name}' not found.", ephemeral=True)
-            return
-        
-        found_channel_id, session = found_ai_data
-        if session is None:
-            await interaction.response.send_message(f"❌ AI '{ai_name}' session data is invalid.", ephemeral=True)
-            return
-        
-        config = session.setdefault("config", {})
-        changes = []
-        
-        if enabled is not None:
-            config["enable_reaction_system"] = enabled
-            changes.append(f"• Reaction System: `{enabled}`")
-        
-        if custom_prompt is not None:
-            if custom_prompt.lower() == "default":
-                config["reaction_prompt"] = func.get_default_ai_config()["reaction_prompt"]
-                changes.append("• Prompt: `Reset to default`")
-            else:
-                config["reaction_prompt"] = custom_prompt
-                changes.append(f"• Prompt: `Custom ({len(custom_prompt)} chars)`")
-        
-        if not changes:
-            await interaction.response.send_message("❌ No changes specified.", ephemeral=True)
-            return
-        
-        channel_data = func.get_session_data(server_id, found_channel_id)
-        channel_data[ai_name] = session
-        await func.update_session_data(server_id, found_channel_id, channel_data)
-        
-        await interaction.response.send_message(
-            f"✅ **Reaction system updated for '{ai_name}':**\n" + "\n".join(changes),
-            ephemeral=True
-        )
     
     @app_commands.command(name="config_advanced", description="Configure advanced settings")
     @app_commands.default_permissions(administrator=True)
@@ -954,6 +794,95 @@ class ConfigCommands(commands.Cog):
             response += f"  • `{tool}`\n"
         
         await interaction.response.send_message(response, ephemeral=True)
+    
+    @app_commands.command(name="config_expressions", description="Configure advanced expression systems (Reply, Reaction, Ignore)")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(
+        ai_name="Name of the AI to configure",
+        expression="Which expression system to configure",
+        enabled="Enable or disable this expression",
+        custom_prompt="Custom prompt (or 'default' to reset)",
+        sleep_threshold="(Ignore only) Number of ignores before sleep mode"
+    )
+    @app_commands.choices(expression=[
+        app_commands.Choice(name="💬 Reply System", value="reply"),
+        app_commands.Choice(name="😊 Reaction System", value="reaction"),
+        app_commands.Choice(name="🚫 Ignore System", value="ignore")
+    ])
+    @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
+    async def config_expressions(
+        self,
+        interaction: discord.Interaction,
+        ai_name: str,
+        expression: app_commands.Choice[str],
+        enabled: bool = None,
+        custom_prompt: str = None,
+        sleep_threshold: int = None
+    ):
+        """Configure advanced expression systems."""
+        server_id = str(interaction.guild.id)
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        
+        if not found_ai_data:
+            await interaction.response.send_message(f"❌ AI '{ai_name}' not found.", ephemeral=True)
+            return
+        
+        found_channel_id, session = found_ai_data
+        if session is None:
+            await interaction.response.send_message(f"❌ AI '{ai_name}' session data is invalid.", ephemeral=True)
+            return
+        
+        config = session.setdefault("config", {})
+        changes = []
+        
+        expr_name = expression.value
+        registry = get_expression_registry()
+        expr = registry.get(expr_name)
+        
+        if not expr:
+            await interaction.response.send_message(f"❌ Expression '{expr_name}' not found.", ephemeral=True)
+            return
+        
+        # Ensure advanced_expressions structure exists
+        if "advanced_expressions" not in config:
+            config["advanced_expressions"] = {}
+        
+        if expr_name not in config["advanced_expressions"]:
+            config["advanced_expressions"][expr_name] = {}
+        
+        expr_config = config["advanced_expressions"][expr_name]
+        
+        # Update enabled status
+        if enabled is not None:
+            expr_config["enabled"] = enabled
+            changes.append(f"• {expr.display_name}: `{'✅ Enabled' if enabled else '❌ Disabled'}`")
+        
+        # Update prompt
+        if custom_prompt is not None:
+            if custom_prompt.lower() == "default":
+                expr_config["prompt"] = expr.get_default_prompt()
+                changes.append(f"• Prompt: `Reset to default`")
+            else:
+                expr_config["prompt"] = custom_prompt
+                changes.append(f"• Prompt: `Custom ({len(custom_prompt)} chars)`")
+        
+        # Update sleep_threshold for ignore expression
+        if sleep_threshold is not None and expr_name == "ignore":
+            expr_config["sleep_threshold"] = sleep_threshold
+            changes.append(f"• Sleep Threshold: `{sleep_threshold}`")
+        
+        if not changes:
+            await interaction.response.send_message("❌ No changes specified.", ephemeral=True)
+            return
+        
+        channel_data = func.get_session_data(server_id, found_channel_id)
+        channel_data[ai_name] = session
+        await func.update_session_data(server_id, found_channel_id, channel_data)
+        
+        await interaction.response.send_message(
+            f"✅ **{expr.display_name} updated for '{ai_name}':**\n" + "\n".join(changes),
+            ephemeral=True
+        )
 
 
 async def setup(bot):

@@ -18,6 +18,7 @@ from messaging.processor import MessageProcessor, get_processor
 from messaging.store import ConversationStore, get_store
 from messaging.response import ResponseManager, get_response_manager
 from AI.response_filter import get_response_filter
+from expressions import get_expression_registry
 
 log = logging.getLogger(__name__)
 
@@ -281,7 +282,11 @@ class MessagePipeline:
         
         # Ensure only one sleep mode system is active at a time
         # Priority: ignore system > response filter
-        if config.get("enable_ignore_system", False) and config.get("use_response_filter", False):
+        registry = get_expression_registry()
+        ignore_expr = registry.get('ignore')
+        ignore_enabled = ignore_expr.is_enabled(config) if ignore_expr else False
+        
+        if ignore_enabled and config.get("use_response_filter", False):
             log.warning(
                 f"Both ignore system and response filter are enabled for AI {ai_name}! "
                 f"Disabling response filter (ignore system takes precedence)."
@@ -290,7 +295,7 @@ class MessagePipeline:
         
         # IGNORE SYSTEM SLEEP MODE CHECK
         # This handles sleep mode when using <IGNORE> tags
-        if config.get("enable_ignore_system", False) and config.get("sleep_mode_enabled", False):
+        if ignore_enabled and config.get("sleep_mode_enabled", False):
             from utils.sleep_mode_utils import should_wake_from_sleep
             
             in_sleep, should_wake = should_wake_from_sleep(
@@ -529,53 +534,53 @@ class MessagePipeline:
                 )
                 return None
             
-            # Check for <IGNORE> tag (if ignore system is enabled)
-            if config.get("enable_ignore_system", False):
-                from utils.ignore_parser import IgnoreParser
+            # Process advanced expressions (Reply, Reaction, Ignore systems)
+            registry = get_expression_registry()
+            expr_result = registry.process_text(response, config)
+            
+            # Handle ignore expression (should_skip = True means <IGNORE> was detected)
+            if expr_result.should_skip:
+                log.debug("Expression system: AI sent <IGNORE>, skipping message")
                 
-                if IgnoreParser.is_pure_ignore(response):
-                    log.debug("AI sent <IGNORE>")
-                    
+                await self.processor.short_id_manager.skip_next_id(
+                    server_id, channel_id, ai_name
+                )
+                
+                await self.store.add_assistant_message(
+                    server_id,
+                    channel_id,
+                    ai_name,
+                    "<IGNORE>",  # Save the tag itself
+                    [],  # No Discord IDs (message not sent)
+                    session_with_context.get("chat_id", "default"),
+                    short_id=None  # No short_id for ignored messages
+                )
+                
+                if config.get("sleep_mode_enabled", False):
+                    await self._handle_ignore_for_sleep(
+                        server_id, channel_id, ai_name, session_with_context
+                    )
+                
+                await self.buffer.clear_specific_messages(
+                    server_id, channel_id, ai_name, processing_message_ids
+                )
+                return None
+            
 
-                    await self.processor.short_id_manager.skip_next_id(
-                        server_id, channel_id, ai_name
-                    )
-                    
-                    await self.store.add_assistant_message(
-                        server_id,
-                        channel_id,
-                        ai_name,
-                        "<IGNORE>",  # Save the tag itself
-                        [],  # No Discord IDs (message not sent)
-                        session_with_context.get("chat_id", "default"),
-                        short_id=None  # No short_id for ignored messages
-                    )
-                    
-                    if config.get("sleep_mode_enabled", False):
-                        await self._handle_ignore_for_sleep(
-                            server_id, channel_id, ai_name, session_with_context
-                        )
-                    
-                    await self.buffer.clear_specific_messages(
-                        server_id, channel_id, ai_name, processing_message_ids
-                    )
-                    return None
-                
-                # Check for <IGNORE> with additional content and remove it
-                if IgnoreParser.has_ignore_tag(response):
-                    log.info("AI sent <IGNORE> with additional content - removing tag")
-                    response = IgnoreParser.remove_ignore_tag(response)
             
-            cleaned_response = self.processor.clean_response(response, session_with_context)
-            
-            display_response = self.processor.prepare_for_display(response, session_with_context)
-            
+
+    
             discord_ids = []
-            await send_callback(display_response, discord_ids)
+            await send_callback(response, discord_ids)
+            
+            # Clean response for history (remove expression syntax)
+            response_without_syntax = registry.remove_all_syntax(response, config)
+            cleaned_response = self.processor.clean_response(response_without_syntax, session_with_context)
+            display_response = self.processor.prepare_for_display(response_without_syntax, session_with_context)
             
             # Reset ignore counter when AI responds normally (not <IGNORE>)
             # This should happen whenever ignore system is enabled, not just when sleep mode is enabled
-            if config.get("enable_ignore_system", False):
+            if ignore_enabled:
                 import time
                 
                 response_filter = get_response_filter()
@@ -734,7 +739,11 @@ class MessagePipeline:
         config = session.get("config", {})
         
         # Se ignore system não está habilitado, sempre acordar
-        if not config.get("enable_ignore_system", False):
+        from expressions import get_expression_registry
+        registry = get_expression_registry()
+        ignore_expr = registry.get('ignore')
+        
+        if not ignore_expr or not ignore_expr.is_enabled(config):
             return True
         
         # Se sleep mode não está habilitado, sempre acordar

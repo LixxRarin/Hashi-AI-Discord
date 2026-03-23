@@ -142,100 +142,102 @@ response_filter_api_connection: null
 response_filter_fallback: "respond"  # Options: respond, ignore
 response_filter_timeout: 5.0
 
-# Reply System - AI can reply to specific messages
-enable_reply_system: false
-reply_prompt: |
-  Reply Syntax: <REPLY:ID> [your response]
+# Advanced Expressions - Unified system for LLM-Discord interactions
+advanced_expressions:
+  reply:
+    enabled: false
+    prompt: |
+      Reply Syntax: <REPLY:ID> [your response]
+      
+      WHEN TO USE REPLIES (Be proactive):
+      
+      ALWAYS use <REPLY:ID> when:
+      • Multiple people are actively talking (group chat) for clarity
+      • Responding to a message that's not the most recent one
+      • Answering a specific question from someone
+      • Continuing a conversation thread from earlier messages
+      • Any ambiguity about who/what you're responding to
+      
+      ONLY skip replies when:
+      • True 1:1 conversation (just you and one person, back-and-forth)
+      • Making a general statement to everyone
+      • Starting a new topic
+      
+      MENTIONS: Use @username when:
+      • You want to get someone's attention
+      • Replying to them (combine with <REPLY:ID>)
+      • Referring to someone in your message
+      
+      Example: '<REPLY:5> @user This is the user who was asking about XXXX.'
+      
+      CONTEXT: You'll see quoted content showing what users replied to:
+      > Author: original message (ID #1)
+      [time] User (@user) #2 → #1: their reply
+      
+      Rules:
+      1. Never use the same <REPLY:id> twice in one response
+      2. Line breaks (\n) send separate messages
+      3. When in doubt, USE the reply - it's better to over-use than under-use
+      
+      EXAMPLES:
+      • Group chat: '<REPLY:3> Hello, user.' (ALWAYS reply in groups)
+      • Older message: '@John about your question earlier, yes!'
+      • General: 'Hey everyone! How's it going?' (no reply needed)
   
-  WHEN TO USE REPLIES (Be proactive):
+  reaction:
+    enabled: false
+    prompt: |
+      Reaction Syntax: <REACTION:ID|emoji>
+      
+      You can react to messages using emojis to express quick emotions or acknowledgments.
+      
+      WHEN TO USE REACTIONS:
+      
+      Use reactions when:
+      - Acknowledging a message without needing a full response
+      - Expressing quick emotions (agreement, celebration, sympathy)
+      - Showing you've seen/read something important
+      - Adding emotional context to your response
+      - Multiple people share content worth reacting to
+      
+      AVOID reactions when:
+      - A proper text response is more appropriate
+      - The conversation requires detailed explanation
+      - You're unsure what the user wants
+      
+      EMOJI TYPES:
+      - Standard emojis: Use unicode directly (👍, 😊, ❤️, 🎉, etc.)
+      - Custom server emojis: Use :emoji_name: format (e.g., :happy:, :thumbsup:)
+      
+      EXAMPLES:
+      - <REACTION:5|👍> Great idea!
+      - <REACTION:3|❤️> <REACTION:3|🎉>
+      - <REACTION:8|:happy:> That's awesome!
+      - Just reacting: <REACTION:2|😊>
+      
+      Rules:
+      1. You can use multiple reactions in one response
+      2. Reactions can be combined with text or used alone
+      3. Use the message's short ID (#1, #2, etc.) that you see in the context
+      4. Invalid emojis will be silently ignored (no error shown to user)
   
-  ALWAYS use <REPLY:ID> when:
-  • Multiple people are actively talking (group chat) for clarity
-  • Responding to a message that's not the most recent one
-  • Answering a specific question from someone
-  • Continuing a conversation thread from earlier messages
-  • Any ambiguity about who/what you're responding to
-  
-  ONLY skip replies when:
-  • True 1:1 conversation (just you and one person, back-and-forth)
-  • Making a general statement to everyone
-  • Starting a new topic
-  
-  MENTIONS: Use @username when:
-  • You want to get someone's attention
-  • Replying to them (combine with <REPLY:ID>)
-  • Referring to someone in your message
-  
-  Example: '<REPLY:5> @user This is the user who was asking about XXXX.'
-  
-  CONTEXT: You'll see quoted content showing what users replied to:
-  > Author: original message (ID #1)
-  [time] User (@user) #2 → #1: their reply
-  
-  Rules:
-  1. Never use the same <REPLY:id> twice in one response
-  2. Line breaks (\n) send separate messages
-  3. When in doubt, USE the reply - it's better to over-use than under-use
-  
-  EXAMPLES:
-  • Group chat: '<REPLY:3> Hello, user.' (ALWAYS reply in groups)
-  • Older message: '@John about your question earlier, yes!'
-  • General: 'Hey everyone! How's it going?' (no reply needed)
-
-# Reaction System - AI can react to messages with emojis
-enable_reaction_system: false
-reaction_prompt: |
-  Reaction Syntax: <REACTION:ID|emoji>
-  
-  You can react to messages using emojis to express quick emotions or acknowledgments.
-  
-  WHEN TO USE REACTIONS:
-  
-  Use reactions when:
-  - Acknowledging a message without needing a full response
-  - Expressing quick emotions (agreement, celebration, sympathy)
-  - Showing you've seen/read something important
-  - Adding emotional context to your response
-  - Multiple people share content worth reacting to
-  
-  AVOID reactions when:
-  - A proper text response is more appropriate
-  - The conversation requires detailed explanation
-  - You're unsure what the user wants
-  
-  EMOJI TYPES:
-  - Standard emojis: Use unicode directly (👍, 😊, ❤️, 🎉, etc.)
-  - Custom server emojis: Use :emoji_name: format (e.g., :happy:, :thumbsup:)
-  
-  EXAMPLES:
-  - <REACTION:5|👍> Great idea!
-  - <REACTION:3|❤️> <REACTION:3|🎉>
-  - <REACTION:8|:happy:> That's awesome!
-  - Just reacting: <REACTION:2|😊>
-  
-  Rules:
-  1. You can use multiple reactions in one response
-  2. Reactions can be combined with text or used alone
-  3. Use the message's short ID (#1, #2, etc.) that you see in the context
-  4. Invalid emojis will be silently ignored (no error shown to user)
-
-# Ignore System, LLM decides during generation to skip responding
-enable_ignore_system: false
-ignore_sleep_threshold: 3
-ignore_prompt: |
-  Ignore Syntax:
-  
-  You can use <IGNORE> when you detect conversations not directed at you.
-  
-  When to use <IGNORE>:
-  - Users are talking among themselves
-  - Conversation is not directed at you
-  - You have nothing useful to contribute
-  - A complement to the user's previous sentence that does not need to be responded to (e.g., emoji)
-  - Context makes it clear you shouldn't respond
-  
-  When you decide not to respond, output ONLY: <IGNORE>
-  Do not add any other text or explanation.
+  ignore:
+    enabled: false
+    sleep_threshold: 3
+    prompt: |
+      Ignore Syntax:
+      
+      You can use <IGNORE> when you detect conversations not directed at you.
+      
+      When to use <IGNORE>:
+      - Users are talking among themselves
+      - Conversation is not directed at you
+      - You have nothing useful to contribute
+      - A complement to the user's previous sentence that does not need to be responded to (e.g., emoji)
+      - Context makes it clear you shouldn't respond
+      
+      When you decide not to respond, output ONLY: <IGNORE>
+      Do not add any other text or explanation.
 
 # Sleep Mode, AI stops responding after too many refusals
 sleep_mode_enabled: false
@@ -362,7 +364,11 @@ ROLEPLAY_PRESET_OVERRIDES = {
     "cache_count_threshold": 1,
     "engaged_delay": 0.0,
     "typing_detection_enabled": False,
-    "enable_reply_system": False,
+    "advanced_expressions": {
+        "reply": {"enabled": False},
+        "reaction": {"enabled": False},
+        "ignore": {"enabled": False}
+    },
     "send_message_line_by_line": False,
     "user_syntax_replacement": "display_name",
     "use_lorebook": True,
@@ -384,15 +390,17 @@ ROLEPLAY_PRESET_OVERRIDES = {
 
 # Discord Chat Preset. Natural casual behavior like a real server member
 DISCORD_CHAT_PRESET_OVERRIDES = {
-    "enable_reply_system": True,
-    "enable_ignore_system": True,
+    "advanced_expressions": {
+        "reply": {"enabled": True},
+        "reaction": {"enabled": True},
+        "ignore": {"enabled": True}
+    },
     "sleep_mode_enabled": True,
     "send_message_line_by_line": True,
     "error_handling_mode": "friendly",
     "save_errors_in_history": True,
     "send_errors_to_chat": True,
     "enable_memory_system": True,
-    "enable_reaction_system": True,
     "tool_calling": {
         "enabled": True,
         "allowed_tools": ["all"]

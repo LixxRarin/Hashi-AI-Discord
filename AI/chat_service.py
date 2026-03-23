@@ -20,6 +20,9 @@ from AI.provider_registry import get_registry
 # Import character cards support
 from utils.ccv3 import process_cbs, process_lorebook
 
+# Import expressions system
+from expressions import get_expression_registry
+
 
 class ChatService:
     """Central orchestrator for AI operations including conversation history, message preparation, and response processing."""
@@ -335,38 +338,26 @@ class ChatService:
         else:
             components["tool_calling_prompt"] = None
         
-        # Reply prompt
-        if config.get("enable_reply_system", False):
-            reply_prompt = config.get("reply_prompt")
-            if reply_prompt:
-                reply_prompt = process_cbs(reply_prompt, char_name, user_name, session)
-                components["reply_prompt"] = reply_prompt
-            else:
-                components["reply_prompt"] = None
-        else:
-            components["reply_prompt"] = None
+        # Advanced Expressions prompts (Reply, Reaction, Ignore systems)
+        # Use the expressions registry to get all enabled expression prompts
+        expr_registry = get_expression_registry()
+        expression_prompts = expr_registry.get_prompts(config)
         
-        # Reaction prompt
-        if config.get("enable_reaction_system", False):
-            reaction_prompt = config.get("reaction_prompt")
-            if reaction_prompt:
-                reaction_prompt = process_cbs(reaction_prompt, char_name, user_name, session)
-                components["reaction_prompt"] = reaction_prompt
+        # Process each expression prompt and add to components
+        for expr_name, prompt in expression_prompts.items():
+            prompt_key = f"{expr_name}_prompt"
+            if prompt:
+                # Process CBS placeholders in the prompt
+                processed_prompt = process_cbs(prompt, char_name, user_name, session)
+                components[prompt_key] = processed_prompt
             else:
-                components["reaction_prompt"] = None
-        else:
-            components["reaction_prompt"] = None
+                components[prompt_key] = None
         
-        # Ignore prompt
-        if config.get("enable_ignore_system", False):
-            ignore_prompt = config.get("ignore_prompt")
-            if ignore_prompt:
-                ignore_prompt = process_cbs(ignore_prompt, char_name, user_name, session)
-                components["ignore_prompt"] = ignore_prompt
-            else:
-                components["ignore_prompt"] = None
-        else:
-            components["ignore_prompt"] = None
+        # Ensure all expression prompt keys exist (even if disabled)
+        for expr_name in ['reply', 'reaction', 'ignore']:
+            prompt_key = f"{expr_name}_prompt"
+            if prompt_key not in components:
+                components[prompt_key] = None
         
         return components
     
@@ -401,8 +392,8 @@ class ChatService:
         # Get context order from config (with default fallback)
         context_order = config.get("context_order", [
             "character_description", "system_message", "lorebook_entries",
-            "memory_prompt", "tool_calling_prompt", "reply_prompt", "ignore_prompt",
-            "conversation_history", "user_message"
+            "memory_prompt", "tool_calling_prompt", "ignore_prompt",
+            "reply_prompt", "reaction_prompt", "conversation_history", "user_message"
         ])
         
         # Process context order
@@ -414,6 +405,13 @@ class ChatService:
                 history_position = len(conv_messages)
             elif component_name == "user_message":
                 user_message_position = len(conv_messages)
+            elif component_name == "expression_prompts":
+                # Handle grouped expression prompts - inject all enabled expression prompts
+                for expr_key in ['ignore_prompt', 'reply_prompt', 'reaction_prompt']:
+                    component_content = components.get(expr_key)
+                    if component_content:
+                        conv_messages.append({"role": "system", "content": component_content})
+                        func.log.debug(f"Injected context: {expr_key}")
             else:
                 # Add system component if it exists
                 component_content = components.get(component_name)
@@ -507,7 +505,7 @@ class ChatService:
                         user_message["content"] = client.prepare_multimodal_content(
                             user_content_processed, images
                         )
-                        func.log.info(f"Attached {len(images)} images to message")
+                        func.log.debug(f"Attached {len(images)} images to message")
                 else:
                     func.log.debug("Images provided but vision_enabled=False, skipping")
             

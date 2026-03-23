@@ -12,6 +12,7 @@ import utils.func as func
 from utils.ai_config_manager import get_ai_config_manager
 from commands.shared.autocomplete import AutocompleteHelpers
 from AI.provider_registry import get_registry
+from expressions import get_expression_registry
 
 
 class ConfigViewCommands(commands.Cog):
@@ -42,7 +43,7 @@ class ConfigViewCommands(commands.Cog):
         app_commands.Choice(name="Text Processing", value="text"),
         app_commands.Choice(name="Character Card", value="card"),
         app_commands.Choice(name="Response Filter", value="filter"),
-        app_commands.Choice(name="Reply System", value="reply"),
+        app_commands.Choice(name="Advanced Expressions", value="expressions"),
         app_commands.Choice(name="Tool Calling", value="tools"),
         app_commands.Choice(name="Memory System", value="memory"),
         app_commands.Choice(name="Sleep Mode", value="sleep"),
@@ -141,18 +142,24 @@ class ConfigViewCommands(commands.Cog):
         filter_status = "✅ Enabled" if filter_enabled else "❌ Disabled"
         embed.add_field(name="🔍 Response Filter", value=filter_status, inline=True)
         
+        # Advanced Expressions - use registry
+        expr_registry = get_expression_registry()
+        
         # Reply System
-        reply_enabled = config.get('enable_reply_system', False)
+        reply_expr = expr_registry.get('reply')
+        reply_enabled = reply_expr.is_enabled(config) if reply_expr else False
         reply_status = "✅ Enabled" if reply_enabled else "❌ Disabled"
         embed.add_field(name="💬 Reply System", value=reply_status, inline=True)
         
         # Reaction System
-        reaction_enabled = config.get('enable_reaction_system', False)
+        reaction_expr = expr_registry.get('reaction')
+        reaction_enabled = reaction_expr.is_enabled(config) if reaction_expr else False
         reaction_status = "✅ Enabled" if reaction_enabled else "❌ Disabled"
         embed.add_field(name="😊 Reaction System", value=reaction_status, inline=True)
         
         # Ignore System
-        ignore_enabled = config.get('enable_ignore_system', False)
+        ignore_expr = expr_registry.get('ignore')
+        ignore_enabled = ignore_expr.is_enabled(config) if ignore_expr else False
         ignore_status = "✅ Enabled" if ignore_enabled else "❌ Disabled"
         embed.add_field(name="🚫 Ignore System", value=ignore_status, inline=True)
         
@@ -328,35 +335,34 @@ class ConfigViewCommands(commands.Cog):
             )
             embed.set_footer(text="Use /config_filter to modify these settings")
         
-        elif category == "reply":
+        elif category == "expressions":
+            # Advanced Expressions - unified view of all expression systems
+            expr_registry = get_expression_registry()
+            
             embed.add_field(
-                name="Reply System Enabled",
-                value=f"`{config.get('enable_reply_system', False)}`\nAllow AI to reply to specific messages",
+                name="📋 Advanced Expressions",
+                value=f"{len(expr_registry)} expression systems available",
                 inline=False
             )
-            prompt = config.get('reply_prompt', '')
-            prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
+            
+            # List each registered expression dynamically
+            for expr in expr_registry.get_all():
+                is_enabled = expr.is_enabled(config)
+                status = "✅ Enabled" if is_enabled else "❌ Disabled"
+                
+                embed.add_field(
+                    name=f"{expr.icon} {expr.display_name}",
+                    value=f"{status}\n{expr.description}",
+                    inline=True
+                )
+            
             embed.add_field(
-                name="Reply Prompt",
-                value=f"```\n{prompt_preview}\n```",
+                name="💡 How to Configure",
+                value="Use `/config_expressions` to enable/disable and customize each expression system",
                 inline=False
             )
-            embed.set_footer(text="Use /config_reply to modify these settings")
-        
-        elif category == "reaction":
-            embed.add_field(
-                name="Reaction System Enabled",
-                value=f"`{config.get('enable_reaction_system', False)}`\nAllow AI to react to messages with emojis",
-                inline=False
-            )
-            prompt = config.get('reaction_prompt', '')
-            prompt_preview = prompt[:200] + "..." if len(prompt) > 200 else prompt
-            embed.add_field(
-                name="Reaction Prompt",
-                value=f"```\n{prompt_preview}\n```",
-                inline=False
-            )
-            embed.set_footer(text="Use /config_reaction to modify these settings")
+            
+            embed.set_footer(text="Use /config_expressions to modify expression settings")
         
         elif category == "tools":
             tool_config = config.get('tool_calling', {})
@@ -511,19 +517,30 @@ class ConfigViewCommands(commands.Cog):
             embed.set_footer(text="Use /config_sleep to modify these settings • Edit config/defaults.yml for wake-up patterns")
         
         elif category == "ignore":
+            # Legacy category - redirect to expressions
+            expr_registry = get_expression_registry()
+            ignore_expr = expr_registry.get('ignore')
+            
+            ignore_enabled = ignore_expr.is_enabled(config) if ignore_expr else False
             embed.add_field(
                 name="Ignore System Enabled",
-                value=f"`{config.get('enable_ignore_system', False)}`\nLLM decides during generation to skip responding",
+                value=f"`{ignore_enabled}`\nLLM decides during generation to skip responding",
                 inline=False
             )
+            
+            # Get sleep threshold from new structure
+            adv_expr = config.get('advanced_expressions', {})
+            ignore_config = adv_expr.get('ignore', {})
+            sleep_threshold = ignore_config.get('sleep_threshold', 3)
+            
             embed.add_field(
                 name="Sleep Threshold",
-                value=f"`{config.get('ignore_sleep_threshold', 3)}` ignores\nConsecutive ignores before sleep mode",
+                value=f"`{sleep_threshold}` ignores\nConsecutive ignores before sleep mode",
                 inline=False
             )
             
             # Show mutual exclusivity warning if both are enabled
-            if config.get('enable_ignore_system', False) and config.get('use_response_filter', False):
+            if ignore_enabled and config.get('use_response_filter', False):
                 embed.add_field(
                     name="⚠️ Warning",
                     value="Both ignore system and response filter are enabled! Only one should be active.",

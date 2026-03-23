@@ -7,7 +7,7 @@ eliminating code duplication across app.py, AI_utils.py, and regenerate_commands
 Key Features:
 - Supports bot mode and webhook mode
 - Handles line-by-line and chunked sending
-- Parses reply syntax automatically
+- Parses reply syntax automatically (via expressions system)
 - Efficient HTTP session management
 - Message splitting for Discord's 2000 char limit
 """
@@ -17,6 +17,9 @@ import aiohttp
 import discord
 from typing import List, Optional, Callable
 import logging
+
+from expressions import get_expression_registry
+from expressions.reply_expression import ReplyExpression
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +55,8 @@ class MessageSender:
         """
         Process reaction syntax and return clean text + list of reactions.
         
+        Uses the new expressions system to parse reactions.
+        
         Args:
             response_text: Response text with possible reaction syntax
             channel: Discord channel
@@ -61,23 +66,26 @@ class MessageSender:
             Tuple (clean_text, reactions_list)
             where reactions_list = [(message_id, emoji), ...]
         """
-        from utils.reaction_parser import ReactionParser
+        config = session.get("config", {})
+        registry = get_expression_registry()
+        
+        # Get reaction expression
+        reaction_expr = registry.get('reaction')
         
         # Check if system is enabled
-        enable_reaction_system = session.get("config", {}).get("enable_reaction_system", False)
-        
-        if not enable_reaction_system:
+        if not reaction_expr or not reaction_expr.is_enabled(config):
             return response_text, []
         
         # Check if there's reaction syntax
-        if not ReactionParser.has_reaction_syntax(response_text):
+        if not reaction_expr.has_syntax(response_text):
             return response_text, []
         
-        # Extract reactions
-        reactions = ReactionParser.parse_reactions(response_text)
+        # Parse reactions using expression system
+        expr_result = reaction_expr.parse(response_text, config)
+        reactions = expr_result.reactions
         
         # Remove syntax from text
-        clean_text = ReactionParser.remove_reaction_syntax(response_text)
+        clean_text = reaction_expr.remove_syntax(response_text)
         
         log.debug(f"Extracted {len(reactions)} reaction(s) from response")
         
@@ -138,11 +146,9 @@ class MessageSender:
         Returns:
             True if successful, False if failed
         """
-        from utils.reply_parser import ReplyParser
-        
         try:
-            # Fetch message (supports short IDs)
-            message = await ReplyParser.fetch_message_safe(
+            # Fetch message (supports short IDs) using ReplyExpression
+            message = await ReplyExpression.fetch_message_safe(
                 channel, message_id,
                 server_id=server_id,
                 ai_name=ai_name
@@ -201,7 +207,7 @@ class MessageSender:
         mode = session.get("mode", "webhook")
         is_line_by_line = session.get("config", {}).get("send_message_line_by_line", False)
         webhook_url = session.get("webhook_url")
-        enable_reply_system = session.get("config", {}).get("enable_reply_system", False)
+        config = session.get("config", {})
         
         # Extract context for short ID conversion
         server_id = session.get("server_id")
@@ -219,11 +225,13 @@ class MessageSender:
         
         discord_ids = []
         
-        # Parse reply syntax if enabled
+        # Parse reply syntax using expressions system
+        registry = get_expression_registry()
+        reply_expr = registry.get('reply')
+        
         reply_segments = [(None, response_text)]
-        if enable_reply_system:
-            from utils.reply_parser import ReplyParser
-            reply_segments = ReplyParser.parse_reply_syntax(response_text)
+        if reply_expr and reply_expr.is_enabled(config):
+            reply_segments = reply_expr.parse_reply_syntax(response_text)
         
         # Send each segment
         for segment_message_id, segment_text in reply_segments:
@@ -233,8 +241,7 @@ class MessageSender:
             # Get reference message if needed
             reference_message = None
             if segment_message_id:
-                from utils.reply_parser import ReplyParser
-                reference_message = await ReplyParser.fetch_message_safe(
+                reference_message = await ReplyExpression.fetch_message_safe(
                     channel, segment_message_id,
                     server_id=server_id,
                     ai_name=ai_name

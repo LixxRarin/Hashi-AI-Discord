@@ -359,8 +359,13 @@ class PresetCommands(commands.Cog):
         
         # System features
         systems_parts = []
-        if "enable_reply_system" in preset_config:
-            systems_parts.append(f"Reply {'✅' if preset_config['enable_reply_system'] else '❌'}")
+        
+        # Check advanced_expressions structure
+        adv_expr = preset_config.get("advanced_expressions", {})
+        if adv_expr:
+            reply_enabled = adv_expr.get("reply", {}).get("enabled", False)
+            systems_parts.append(f"Reply {'✅' if reply_enabled else '❌'}")
+        
         if "enable_memory_system" in preset_config:
             systems_parts.append(f"Memory {'✅' if preset_config['enable_memory_system'] else '❌'}")
         if "sleep_mode_enabled" in preset_config:

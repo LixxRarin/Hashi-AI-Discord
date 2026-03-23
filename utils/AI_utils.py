@@ -110,7 +110,7 @@ class discord_AI_bot:
                                     reason="Sync webhook info (cached)"
                                 )
                             
-                            func.log.info(
+                            func.log.debug(
                                 "Updated webhook for channel %s (no API call)",
                                 channel_id
                             )

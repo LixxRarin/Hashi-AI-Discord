@@ -142,7 +142,11 @@ def should_wake_from_sleep(
     config = session.get("config", {})
     
     # Check if ignore system and sleep mode are enabled
-    if not config.get("enable_ignore_system", False):
+    from expressions import get_expression_registry
+    registry = get_expression_registry()
+    ignore_expr = registry.get('ignore')
+    
+    if not ignore_expr or not ignore_expr.is_enabled(config):
         return (False, False)  # Not using sleep mode
     
     if not config.get("sleep_mode_enabled", False):

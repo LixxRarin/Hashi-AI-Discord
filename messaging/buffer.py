@@ -296,8 +296,8 @@ class MessageBuffer:
             preserved_count = state.get_count()
             
             log.debug(
-                "Cleared %d message(s) from buffer for AI %s (preserved: %d)",
-                cleared_count, ai_name, preserved_count
+                "Cleared %d message(s) from buffer (preserved: %d)",
+                cleared_count, preserved_count
             )
     
     async def remove_message_by_discord_id(

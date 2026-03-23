@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional
 from messaging.buffer import PendingMessage
 from messaging.short_id_manager import get_short_id_manager_sync
 from utils.media_processor import MediaProcessor
+from expressions import get_expression_registry
 
 log = logging.getLogger(__name__)
 
@@ -386,19 +387,18 @@ class MessageProcessor:
             system_message = self.process_cbs(system_message, session, message_author)
             api_messages.append({"role": "system", "content": system_message})
         
-        # 3. Add reply prompt (if enabled)
-        if config.get("enable_reply_system", False):
-            reply_prompt = config.get("reply_prompt")
-            if reply_prompt:
-                reply_prompt = self.process_cbs(reply_prompt, session, message_author)
-                api_messages.append({"role": "system", "content": reply_prompt})
+        # 3. Add expression prompts (Reply, Reaction, Ignore systems)
+        # Use the expressions registry to get all enabled expression prompts
+        expr_registry = get_expression_registry()
+        expression_prompts = expr_registry.get_prompts(config)
         
-        # 4. Add reaction prompt (if enabled)
-        if config.get("enable_reaction_system", False):
-            reaction_prompt = config.get("reaction_prompt")
-            if reaction_prompt:
-                reaction_prompt = self.process_cbs(reaction_prompt, session, message_author)
-                api_messages.append({"role": "system", "content": reaction_prompt})
+        # Add each enabled expression prompt
+        for expr_name in ['reply', 'reaction', 'ignore']:  # Order matters
+            if expr_name in expression_prompts:
+                prompt = expression_prompts[expr_name]
+                if prompt:
+                    processed_prompt = self.process_cbs(prompt, session, message_author)
+                    api_messages.append({"role": "system", "content": processed_prompt})
         
         # 5. Add conversation history
         api_messages.extend(conversation_history)
