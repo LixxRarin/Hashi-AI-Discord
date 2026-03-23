@@ -856,6 +856,210 @@ class DebugCommands(commands.Cog):
             
         except asyncio.TimeoutError:
             await confirm_msg.edit(content="⏱️ Timeout. Bot restart cancelled.")
+    
+    @app_commands.command(name="cache_stats", description="Display cache and rate limiting statistics")
+    @app_commands.default_permissions(administrator=True)
+    @app_commands.describe(channel_id="Optional: Show stats for a specific channel")
+    async def cache_stats(self, interaction: discord.Interaction, channel_id: str = None):
+        """Display comprehensive cache and rate limiting statistics."""
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            from utils.message_cache import get_all_stats, get_message_cache
+            
+            # Get all statistics
+            all_stats = get_all_stats()
+            
+            # Create embed
+            embed = discord.Embed(
+                title="📊 Cache & Rate Limiting Statistics",
+                description="Comprehensive view of the message caching and rate limiting systems",
+                color=discord.Color.blue(),
+                timestamp=datetime.now()
+            )
+            
+            # Cache Statistics
+            cache_stats = all_stats.get("cache", {})
+            hit_rate = cache_stats.get("hit_rate", "0.0%")
+            
+            cache_value = f"**Size:** {cache_stats.get('size', 0)}/{cache_stats.get('max_size', 0)}\n"
+            cache_value += f"**Hits:** {cache_stats.get('hits', 0)}\n"
+            cache_value += f"**Misses:** {cache_stats.get('misses', 0)}\n"
+            cache_value += f"**Hit Rate:** {hit_rate}\n"
+            cache_value += f"**Evictions:** {cache_stats.get('evictions', 0)}\n"
+            cache_value += f"**Expirations:** {cache_stats.get('expirations', 0)}\n"
+            cache_value += f"**Channels Tracked:** {cache_stats.get('channels_tracked', 0)}"
+            
+            embed.add_field(
+                name="💾 Message Cache",
+                value=cache_value,
+                inline=False
+            )
+            
+            # Request Deduplication Statistics
+            dedup_stats = all_stats.get("deduplicator", {})
+            dedup_value = f"**Pending Requests:** {dedup_stats.get('pending_requests', 0)}\n"
+            dedup_value += f"**Requests Saved:** {dedup_stats.get('dedup_saves', 0)}"
+            
+            if dedup_stats.get('dedup_saves', 0) > 0:
+                dedup_value += f"\n\n✅ **Prevented {dedup_stats.get('dedup_saves', 0)} duplicate API calls!**"
+            
+            embed.add_field(
+                name="🔄 Request Deduplication",
+                value=dedup_value,
+                inline=True
+            )
+            
+            # Semaphore Manager Statistics
+            sem_stats = all_stats.get("semaphore_manager", {})
+            sem_value = f"**Channels:** {sem_stats.get('total_channels', 0)}\n"
+            sem_value += f"**Max Concurrent/Channel:** {sem_stats.get('max_concurrent_per_channel', 1)}"
+            
+            embed.add_field(
+                name="🚦 Semaphore Manager",
+                value=sem_value,
+                inline=True
+            )
+            
+            # Channel Rate Limiter Statistics
+            limiter_stats = all_stats.get("channel_rate_limiter", {})
+            total_requests = limiter_stats.get('total_requests', 0)
+            total_429s = limiter_stats.get('total_429s', 0)
+            total_wait = limiter_stats.get('total_wait_time', 0)
+            avg_wait = limiter_stats.get('avg_wait_time', 0)
+            
+            limiter_value = f"**Total Requests:** {total_requests}\n"
+            limiter_value += f"**Rate Limits (429):** {total_429s}\n"
+            limiter_value += f"**Total Wait Time:** {total_wait:.2f}s\n"
+            limiter_value += f"**Avg Wait Time:** {avg_wait:.3f}s"
+            
+            if total_429s > 0:
+                rate_limit_rate = (total_429s / total_requests * 100) if total_requests > 0 else 0
+                limiter_value += f"\n\n⚠️ **Rate Limit Rate:** {rate_limit_rate:.2f}%"
+            else:
+                limiter_value += f"\n\n✅ **No rate limits!**"
+            
+            embed.add_field(
+                name="⏱️ Channel Rate Limiter",
+                value=limiter_value,
+                inline=False
+            )
+            
+            # Adaptive Backoff Statistics
+            backoff_stats = all_stats.get("adaptive_backoff", {})
+            channels_with_penalty = backoff_stats.get('channels_with_penalty', 0)
+            
+            if channels_with_penalty > 0:
+                backoff_value = f"**Channels with Penalty:** {channels_with_penalty}\n\n"
+                penalties = backoff_stats.get('penalties', {})
+                
+                # Show top 5 channels with highest penalties
+                sorted_penalties = sorted(
+                    penalties.items(),
+                    key=lambda x: x[1]['penalty'],
+                    reverse=True
+                )[:5]
+                
+                for channel_id_str, penalty_data in sorted_penalties:
+                    penalty = penalty_data.get('penalty', 0)
+                    last_429 = penalty_data.get('last_429', 0)
+                    
+                    if last_429 > 0:
+                        time_ago = int(time.time() - last_429)
+                        backoff_value += f"Channel `{channel_id_str}`: {penalty:.1f}s (<t:{int(last_429)}:R>)\n"
+                    else:
+                        backoff_value += f"Channel `{channel_id_str}`: {penalty:.1f}s\n"
+            else:
+                backoff_value = "✅ **No channels with penalties**"
+            
+            embed.add_field(
+                name="🎯 Adaptive Backoff",
+                value=backoff_value,
+                inline=True
+            )
+            
+            # Circuit Breaker Statistics
+            breaker_stats = all_stats.get("circuit_breaker", {})
+            open_circuits = breaker_stats.get('open_circuits', 0)
+            
+            if open_circuits > 0:
+                breaker_value = f"⚠️ **Open Circuits:** {open_circuits}\n\n"
+                circuits = breaker_stats.get('circuits', {})
+                
+                for channel_id_str, circuit_data in list(circuits.items())[:5]:
+                    failures = circuit_data.get('failures', 0)
+                    opened_at = circuit_data.get('opened_at')
+                    
+                    if opened_at:
+                        breaker_value += f"Channel `{channel_id_str}`: {failures} failures (opened <t:{int(opened_at)}:R>)\n"
+                    else:
+                        breaker_value += f"Channel `{channel_id_str}`: {failures} failures\n"
+            else:
+                breaker_value = "✅ **All circuits closed**"
+            
+            embed.add_field(
+                name="🔌 Circuit Breaker",
+                value=breaker_value,
+                inline=True
+            )
+            
+            # Per-channel statistics if requested
+            if channel_id:
+                try:
+                    cache = get_message_cache()
+                    channel_stats = cache.get_stats(channel_id)
+                    
+                    if channel_stats:
+                        channel_value = f"**Hits:** {channel_stats.get('hits', 0)}\n"
+                        channel_value += f"**Misses:** {channel_stats.get('misses', 0)}\n"
+                        channel_value += f"**API Requests:** {channel_stats.get('api_requests', 0)}\n"
+                        channel_value += f"**Hit Rate:** {channel_stats.get('hit_rate', '0.0%')}"
+                        
+                        embed.add_field(
+                            name=f"📍 Channel {channel_id}",
+                            value=channel_value,
+                            inline=False
+                        )
+                    else:
+                        embed.add_field(
+                            name=f"📍 Channel {channel_id}",
+                            value="No statistics available for this channel",
+                            inline=False
+                        )
+                except Exception as e:
+                    func.log.error(f"Error getting channel stats: {e}")
+            
+            # Performance Summary
+            if total_requests > 0:
+                api_requests = cache_stats.get('misses', 0)
+                dedup_saves = dedup_stats.get('dedup_saves', 0)
+                
+                # Calculate reduction
+                potential_requests = api_requests + dedup_saves
+                if potential_requests > 0:
+                    reduction = (dedup_saves / potential_requests * 100)
+                    
+                    summary = f"**Potential API Requests:** {potential_requests}\n"
+                    summary += f"**Actual API Requests:** {api_requests}\n"
+                    summary += f"**Reduction:** {reduction:.1f}%\n\n"
+                    summary += f"✅ **Saved {dedup_saves} API calls through deduplication!**"
+                    
+                    embed.add_field(
+                        name="📈 Performance Summary",
+                        value=summary,
+                        inline=False
+                    )
+            
+            embed.set_footer(text="Use /cache_stats channel_id:<id> for per-channel stats")
+            
+            await interaction.followup.send(embed=embed, ephemeral=True)
+            
+        except Exception as e:
+            func.log.error(f"Error displaying cache stats: {e}")
+            await interaction.followup.send(
+                f"❌ Error retrieving cache statistics: {e}",
+                ephemeral=True
+            )
 
 
 async def setup(bot):
