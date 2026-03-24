@@ -298,7 +298,7 @@ class MessagePipeline:
         if ignore_enabled and config.get("sleep_mode_enabled", False):
             from utils.sleep_mode_utils import should_wake_from_sleep
             
-            in_sleep, should_wake = should_wake_from_sleep(
+            in_sleep, should_wake = await should_wake_from_sleep(
                 server_id,
                 channel_id,
                 ai_name,
@@ -791,9 +791,20 @@ class MessagePipeline:
                             m.id == bot_user_id for m in msg.raw_message.mentions
                         )
                     
-                    # Verificar se mensagem é reply ao bot
                     if hasattr(msg.raw_message, 'reference') and msg.raw_message.reference:
-                        is_reply_to_bot = True
+                        try:
+                            from utils.message_cache import fetch_message_cached
+                            ref_msg_id = msg.raw_message.reference.message_id
+                            ref_msg = await fetch_message_cached(
+                                msg.raw_message.channel,
+                                str(ref_msg_id)
+                            )
+                            if ref_msg and ref_msg.author.id == bot_user_id:
+                                is_reply_to_bot = True
+                        except Exception as e:
+                            # This prevents false wake-ups from spam
+                            log.debug(f"Could not verify reply target: {e}")
+                            pass
         
         # Verificar se algum wake-up pattern corresponde
         should_wake = self._check_wakeup_patterns(

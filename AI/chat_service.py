@@ -411,13 +411,11 @@ class ChatService:
                     component_content = components.get(expr_key)
                     if component_content:
                         conv_messages.append({"role": "system", "content": component_content})
-                        func.log.debug(f"Injected context: {expr_key}")
             else:
                 # Add system component if it exists
                 component_content = components.get(component_name)
                 if component_content:
                     conv_messages.append({"role": "system", "content": component_content})
-                    func.log.debug(f"Injected context: {component_name}")
         
         # Get conversation history
         history = self.get_ai_history(server_id, channel_id, ai_name, chat_id)

@@ -156,7 +156,7 @@ class TimingController:
         if pending:
             from utils.sleep_mode_utils import should_wake_from_sleep
             
-            in_sleep, should_wake = should_wake_from_sleep(
+            in_sleep, should_wake = await should_wake_from_sleep(
                 server_id,
                 channel_id,
                 ai_name,

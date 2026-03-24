@@ -95,10 +95,12 @@ class RequestDeduplicator:
                 # Request already in progress
                 task = self._pending[key]
                 self._dedup_saves += 1
-                log.debug(
-                    f"[{context}] Request deduplication: waiting for existing fetch "
-                    f"(saves: {self._dedup_saves})"
-                )
+                # Reduced logging: only log every 10 deduplication saves
+                if self._dedup_saves % 10 == 0:
+                    log.debug(
+                        f"[{context}] Request deduplication active "
+                        f"(total saves: {self._dedup_saves})"
+                    )
         
         # If we found a pending request, wait for it outside the lock
         if key in self._pending:
@@ -118,7 +120,7 @@ class RequestDeduplicator:
                 # Create new fetch task
                 task = asyncio.create_task(fetch_func())
                 self._pending[key] = task
-                log.debug(f"[{context}] Starting new fetch for key: {key}")
+                # Reduced logging: removed verbose fetch start log
         
         try:
             result = await task
@@ -279,7 +281,7 @@ class MessageCache:
                 self._expirations += 1
                 self._misses += 1
                 self._update_channel_stats(channel_id, "misses")
-                log.debug(f"[Channel:{channel_id}] Cache expired for message {message_id}")
+                # Reduced logging: removed cache expiration log
                 return None
             
             # Move to end (most recently used)
@@ -288,10 +290,7 @@ class MessageCache:
             self._hits += 1
             self._update_channel_stats(channel_id, "hits")
             
-            log.debug(
-                f"[Channel:{channel_id}] Cache hit for message {message_id} "
-                f"(accessed {cached.access_count} times)"
-            )
+            # Reduced logging: removed cache hit log
             return cached.message
     
     async def set(
@@ -319,7 +318,7 @@ class MessageCache:
                     access_count=self._cache[key].access_count
                 )
                 self._cache.move_to_end(key)
-                log.debug(f"[Channel:{channel_id}] Updated cache for message {message_id}")
+                # Reduced logging: removed cache update log
                 return
             
             # Check if we need to evict
@@ -327,14 +326,14 @@ class MessageCache:
                 # Remove oldest (first item)
                 evicted_key, _ = self._cache.popitem(last=False)
                 self._evictions += 1
-                log.debug(f"Evicted oldest message from cache: {evicted_key}")
+                # Reduced logging: removed eviction log (tracked in stats)
             
             # Add new entry
             self._cache[key] = CachedMessage(
                 message=message,
                 cached_at=time.time()
             )
-            log.debug(f"[Channel:{channel_id}] Cached message {message_id}")
+            # Reduced logging: removed cache set log
     
     async def invalidate(
         self,
@@ -355,7 +354,7 @@ class MessageCache:
             key = self._make_key(channel_id, message_id)
             if key in self._cache:
                 self._cache.pop(key)
-                log.debug(f"[Channel:{channel_id}] Invalidated cache for message {message_id}")
+                # Reduced logging: removed cache invalidation log
                 return True
             return False
     
@@ -384,7 +383,8 @@ class MessageCache:
                 self._cache.pop(key)
                 self._expirations += 1
             
-            if expired_keys:
+            # Reduced logging: only log if significant cleanup
+            if len(expired_keys) > 10:
                 log.debug(f"Cleaned up {len(expired_keys)} expired messages")
             
             return len(expired_keys)
@@ -544,10 +544,7 @@ async def fetch_message_cached(
         semaphore = await semaphore_manager.get_semaphore(channel_id)
         
         async with semaphore:
-            log.debug(
-                f"[Channel:{channel_id}] Fetching message {message_id} from API "
-                f"(waited: {wait_time:.2f}s)"
-            )
+            # Reduced logging: removed verbose API fetch log
             
             try:
                 # Use exponential backoff for automatic retry on 429 errors
@@ -566,11 +563,11 @@ async def fetch_message_cached(
                 # Update channel stats
                 cache._update_channel_stats(channel_id, "api_requests")
                 
-                log.debug(f"[Channel:{channel_id}] Successfully fetched and cached message {message_id}")
+                # Reduced logging: removed success log
                 return message
                 
             except discord.NotFound:
-                log.debug(f"[Channel:{channel_id}] Message {message_id} not found")
+                # Reduced logging: removed not found log (expected behavior)
                 await channel_limiter.record_success(channel_id)  # Not a rate limit issue
                 return None
                 

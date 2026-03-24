@@ -99,7 +99,7 @@ def check_wakeup_patterns(
     return False
 
 
-def should_wake_from_sleep(
+async def should_wake_from_sleep(
     server_id: str,
     channel_id: str,
     ai_name: str,
@@ -182,7 +182,19 @@ def should_wake_from_sleep(
                 
                 # Check if message is a reply to bot
                 if hasattr(msg.raw_message, 'reference') and msg.raw_message.reference:
-                    is_reply_to_bot = True
+                    try:
+                        from utils.message_cache import fetch_message_cached
+                        ref_msg_id = msg.raw_message.reference.message_id
+                        ref_msg = await fetch_message_cached(
+                            msg.raw_message.channel,
+                            str(ref_msg_id)
+                        )
+                        if ref_msg and ref_msg.author.id == bot_user_id:
+                            is_reply_to_bot = True
+                    except Exception as e:
+                        # This prevents false wake-ups from spam
+                        log.debug(f"Could not verify reply target: {e}")
+                        pass
     
     # Check if any wake-up pattern matches
     should_wake = check_wakeup_patterns(
