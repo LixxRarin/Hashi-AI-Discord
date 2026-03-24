@@ -387,13 +387,15 @@ class MessageProcessor:
             system_message = self.process_cbs(system_message, session, message_author)
             api_messages.append({"role": "system", "content": system_message})
         
-        # 3. Add expression prompts (Reply, Reaction, Ignore systems)
+        # 3. Add expression prompts (All enabled expression systems)
         # Use the expressions registry to get all enabled expression prompts
         expr_registry = get_expression_registry()
         expression_prompts = expr_registry.get_prompts(config)
         
-        # Add each enabled expression prompt
-        for expr_name in ['reply', 'reaction', 'ignore']:  # Order matters
+        # Add each enabled expression prompt in processing order
+        # This ensures prompts are injected in the correct order
+        processing_order = expr_registry.get_processing_order()
+        for expr_name in processing_order:
             if expr_name in expression_prompts:
                 prompt = expression_prompts[expr_name]
                 if prompt:

@@ -38,7 +38,8 @@ class ToolExecutor:
             user_tools,
             channel_tools,
             server_tools,
-            memory_tools
+            memory_tools,
+            poll_tools
         )
         
         # Register message tools
@@ -62,6 +63,9 @@ class ToolExecutor:
         self.tools["update_memory"] = memory_tools.update_memory
         self.tools["remove_memory"] = memory_tools.remove_memory
         self.tools["search_memories"] = memory_tools.search_memories
+        
+        # Register poll tools
+        self.tools["get_poll_info"] = poll_tools.get_poll_info
         
         log.info(f"Registered {len(self.tools)} tools: {list(self.tools.keys())}")
     

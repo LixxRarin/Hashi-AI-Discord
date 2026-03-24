@@ -20,6 +20,9 @@ import logging
 
 from expressions import get_expression_registry
 from expressions.reply_expression import ReplyExpression
+from expressions.poll_expression import PollExpression
+from expressions.block_expression import BlockExpression
+from expressions.embed_expression import EmbedExpression
 
 log = logging.getLogger(__name__)
 
@@ -180,6 +183,213 @@ class MessageSender:
             log.error(f"Error adding reaction to message {message_id}: {e}")
             return False
     
+    async def _process_polls(
+        self,
+        response_text: str,
+        channel: discord.TextChannel,
+        session: dict
+    ) -> tuple[str, List[str]]:
+        """
+        Process poll syntax, create polls, and return clean text + poll message IDs.
+        
+        Returns:
+            Tuple (clean_text, poll_message_ids)
+        """
+        config = session.get("config", {})
+        registry = get_expression_registry()
+        
+        poll_expr = registry.get('poll')
+        
+        if not poll_expr or not poll_expr.is_enabled(config):
+            return response_text, []
+        
+        if not poll_expr.has_syntax(response_text):
+            return response_text, []
+        
+        # Parse polls
+        expr_result = poll_expr.parse(response_text, config)
+        polls = expr_result.metadata.get('polls', [])
+        
+        poll_message_ids = []
+        
+        # Create each poll
+        for poll_data in polls:
+            if not poll_data.get('valid', False):
+                log.warning(f"Skipping invalid poll: {poll_data.get('error')}")
+                continue
+            
+            try:
+                # Create Discord poll
+                poll_msg_id = await self._create_discord_poll(
+                    channel, poll_data
+                )
+                if poll_msg_id:
+                    poll_message_ids.append(poll_msg_id)
+            except Exception as e:
+                log.error(f"Error creating poll: {e}", exc_info=True)
+        
+        # Remove poll syntax from text
+        clean_text = poll_expr.remove_syntax(response_text)
+        
+        return clean_text, poll_message_ids
+    
+    async def _create_discord_poll(
+        self,
+        channel: discord.TextChannel,
+        poll_data: dict
+    ) -> Optional[str]:
+        """
+        Create a Discord poll and return its message ID.
+        """
+        try:
+            import datetime
+            
+            question = poll_data['question']
+            options = poll_data['options']
+            duration_hours = poll_data['duration_hours']
+            allow_multiple = poll_data['allow_multiple']
+            
+            # Create poll (discord.py 2.7+ API)
+            poll = discord.Poll(
+                question=question,
+                duration=datetime.timedelta(hours=duration_hours),
+                multiple=allow_multiple
+            )
+            
+            # Add answers using poll.add_answer()
+            for opt in options:
+                poll.add_answer(text=opt)
+            
+            # Send poll
+            message = await channel.send(poll=poll)
+            
+            log.info(f"Created poll '{question}' with {len(options)} options, {duration_hours}h duration")
+            
+            return str(message.id)
+            
+        except Exception as e:
+            log.error(f"Error creating Discord poll: {e}", exc_info=True)
+            return None
+    
+    async def _process_embeds(
+        self,
+        response_text: str,
+        channel: discord.TextChannel,
+        session: dict
+    ) -> tuple[str, List[str]]:
+        """
+        Process embed syntax, create embeds, and return clean text + embed message IDs.
+        
+        Returns:
+            Tuple (clean_text, embed_message_ids)
+        """
+        config = session.get("config", {})
+        registry = get_expression_registry()
+        
+        embed_expr = registry.get('embed')
+        
+        if not embed_expr or not embed_expr.is_enabled(config):
+            return response_text, []
+        
+        if not embed_expr.has_syntax(response_text):
+            return response_text, []
+        
+        # Parse embeds
+        expr_result = embed_expr.parse(response_text, config)
+        embeds = expr_result.metadata.get('embeds', [])
+        
+        embed_message_ids = []
+        
+        # Create each embed
+        for embed_data in embeds:
+            if not embed_data.get('valid', False):
+                log.warning(f"Skipping invalid embed: {embed_data.get('error')}")
+                continue
+            
+            try:
+                # Create Discord embed
+                embed_msg_id = await self._create_discord_embed(
+                    channel, embed_data['json_data']
+                )
+                if embed_msg_id:
+                    embed_message_ids.append(embed_msg_id)
+            except Exception as e:
+                log.error(f"Error creating embed: {e}", exc_info=True)
+        
+        # Remove embed syntax from text
+        clean_text = embed_expr.remove_syntax(response_text)
+        
+        return clean_text, embed_message_ids
+    
+    async def _create_discord_embed(
+        self,
+        channel: discord.TextChannel,
+        embed_data: dict
+    ) -> Optional[str]:
+        """
+        Create a Discord embed and return its message ID.
+        """
+        try:
+            embed = discord.Embed()
+            
+            # Set basic properties
+            if 'title' in embed_data:
+                embed.title = embed_data['title']
+            
+            if 'description' in embed_data:
+                embed.description = embed_data['description']
+            
+            if 'color' in embed_data:
+                embed.color = discord.Color(embed_data['color'])
+            
+            if 'url' in embed_data:
+                embed.url = embed_data['url']
+            
+            # Add fields
+            if 'fields' in embed_data:
+                for field in embed_data['fields']:
+                    embed.add_field(
+                        name=field['name'],
+                        value=field['value'],
+                        inline=field.get('inline', False)
+                    )
+            
+            # Set footer
+            if 'footer' in embed_data:
+                footer = embed_data['footer']
+                embed.set_footer(
+                    text=footer.get('text', ''),
+                    icon_url=footer.get('icon_url')
+                )
+            
+            # Set author
+            if 'author' in embed_data:
+                author = embed_data['author']
+                embed.set_author(
+                    name=author.get('name', ''),
+                    url=author.get('url'),
+                    icon_url=author.get('icon_url')
+                )
+            
+            # Set thumbnail
+            if 'thumbnail' in embed_data:
+                embed.set_thumbnail(url=embed_data['thumbnail']['url'])
+            
+            # Set image
+            if 'image' in embed_data:
+                embed.set_image(url=embed_data['image']['url'])
+            
+            # Send embed
+            message = await channel.send(embed=embed)
+            
+            log.info(f"Created embed: {embed_data.get('title', 'Untitled')}")
+            
+            return str(message.id)
+            
+        except Exception as e:
+            log.error(f"Error creating Discord embed: {e}", exc_info=True)
+            return None
+    
     async def send(
         self,
         response_text: str,
@@ -217,6 +427,12 @@ class MessageSender:
         # This extracts reaction syntax and returns clean text + reactions list
         response_text, reactions = await self._process_reactions(response_text, channel, session)
         
+        # Process polls (creates poll messages)
+        response_text, poll_ids = await self._process_polls(response_text, channel, session)
+        
+        # Process embeds (creates embed messages)
+        response_text, embed_ids = await self._process_embeds(response_text, channel, session)
+        
         # Convert @username mentions to proper Discord mentions
         response_text = await self._convert_username_mentions(response_text, channel)
         
@@ -224,6 +440,10 @@ class MessageSender:
         response_text = await self._convert_custom_emojis(response_text, channel)
         
         discord_ids = []
+        
+        # Add poll and embed message IDs to the list
+        discord_ids.extend(poll_ids)
+        discord_ids.extend(embed_ids)
         
         # Parse reply syntax using expressions system
         registry = get_expression_registry()
@@ -323,36 +543,88 @@ class MessageSender:
         ids = []
         
         if line_by_line:
-            for line in text.split('\n'):
-                stripped = line.strip()
-                if stripped:
-                    # Check if line exceeds Discord's 2000 char limit
-                    if len(line) > 2000:
-                        # Split long line into chunks
-                        line_chunks = self._split_message(line, split_fn)
-                        for chunk in line_chunks:
+            # Check for block expression
+            registry = get_expression_registry()
+            block_expr = registry.get('block')
+            
+            # Use block-aware splitting if blocks are present
+            if block_expr and block_expr.has_syntax(text):
+                # Get config to check if block system is enabled
+                # Note: We don't have direct access to config here, so we check syntax only
+                # The text should already have tags removed by this point if disabled
+                segments = block_expr.split_text_with_blocks(text, True)
+                
+                for segment_text, is_block in segments:
+                    if not segment_text or segment_text.isspace():
+                        continue
+                    
+                    if is_block:
+                        # Send block as single message (no line splitting)
+                        if len(segment_text) > 2000:
+                            # Even blocks need to respect Discord's limit
+                            chunks = self._split_message(segment_text, split_fn)
+                            for chunk in chunks:
+                                try:
+                                    sent_msg = await channel.send(chunk, reference=reference)
+                                    ids.append(str(sent_msg.id))
+                                    await asyncio.sleep(0)
+                                except Exception as e:
+                                    log.error(f"Error sending block chunk as bot: {e}")
+                        else:
                             try:
-                                sent_msg = await channel.send(chunk, reference=reference)
+                                sent_msg = await channel.send(segment_text, reference=reference)
                                 ids.append(str(sent_msg.id))
-                                # Yield control to event loop to prevent heartbeat blocking
                                 await asyncio.sleep(0)
                             except Exception as e:
-                                log.error(f"Error sending line chunk as bot: {e}")
+                                log.error(f"Error sending block as bot: {e}")
                     else:
-                        try:
-                            sent_msg = await channel.send(line, reference=reference)
-                            ids.append(str(sent_msg.id))
-                            # Yield control to event loop to prevent heartbeat blocking
-                            await asyncio.sleep(0)
-                        except Exception as e:
-                            log.error(f"Error sending line as bot: {e}")
+                        # Send non-block text line by line
+                        for line in segment_text.split('\n'):
+                            stripped = line.strip()
+                            if stripped:
+                                if len(line) > 2000:
+                                    line_chunks = self._split_message(line, split_fn)
+                                    for chunk in line_chunks:
+                                        try:
+                                            sent_msg = await channel.send(chunk, reference=reference)
+                                            ids.append(str(sent_msg.id))
+                                            await asyncio.sleep(0)
+                                        except Exception as e:
+                                            log.error(f"Error sending line chunk as bot: {e}")
+                                else:
+                                    try:
+                                        sent_msg = await channel.send(line, reference=reference)
+                                        ids.append(str(sent_msg.id))
+                                        await asyncio.sleep(0)
+                                    except Exception as e:
+                                        log.error(f"Error sending line as bot: {e}")
+            else:
+                # No blocks, use original line-by-line logic
+                for line in text.split('\n'):
+                    stripped = line.strip()
+                    if stripped:
+                        if len(line) > 2000:
+                            line_chunks = self._split_message(line, split_fn)
+                            for chunk in line_chunks:
+                                try:
+                                    sent_msg = await channel.send(chunk, reference=reference)
+                                    ids.append(str(sent_msg.id))
+                                    await asyncio.sleep(0)
+                                except Exception as e:
+                                    log.error(f"Error sending line chunk as bot: {e}")
+                        else:
+                            try:
+                                sent_msg = await channel.send(line, reference=reference)
+                                ids.append(str(sent_msg.id))
+                                await asyncio.sleep(0)
+                            except Exception as e:
+                                log.error(f"Error sending line as bot: {e}")
         else:
             chunks = self._split_message(text, split_fn)
             for chunk in chunks:
                 try:
                     sent_msg = await channel.send(chunk, reference=reference)
                     ids.append(str(sent_msg.id))
-                    # Yield control to event loop
                     await asyncio.sleep(0)
                 except Exception as e:
                     log.error(f"Error sending chunk as bot: {e}")
@@ -376,36 +648,84 @@ class MessageSender:
             webhook = discord.Webhook.from_url(webhook_url, session=http_session)
             
             if line_by_line:
-                for line in text.split('\n'):
-                    stripped = line.strip()
-                    if stripped:
-                        # Check if line exceeds Discord's 2000 char limit
-                        if len(line) > 2000:
-                            # Split long line into chunks
-                            line_chunks = self._split_message(line, split_fn)
-                            for chunk in line_chunks:
+                # Check for block expression
+                registry = get_expression_registry()
+                block_expr = registry.get('block')
+                
+                # Use block-aware splitting if blocks are present
+                if block_expr and block_expr.has_syntax(text):
+                    segments = block_expr.split_text_with_blocks(text, True)
+                    
+                    for segment_text, is_block in segments:
+                        if not segment_text or segment_text.isspace():
+                            continue
+                        
+                        if is_block:
+                            # Send block as single message
+                            if len(segment_text) > 2000:
+                                chunks = self._split_message(segment_text, split_fn)
+                                for chunk in chunks:
+                                    try:
+                                        sent_msg = await webhook.send(chunk, wait=True)
+                                        ids.append(str(sent_msg.id))
+                                        await asyncio.sleep(0)
+                                    except Exception as e:
+                                        log.error(f"Error sending block chunk as webhook: {e}")
+                            else:
                                 try:
-                                    sent_msg = await webhook.send(chunk, wait=True)
+                                    sent_msg = await webhook.send(segment_text, wait=True)
                                     ids.append(str(sent_msg.id))
-                                    # Yield control to event loop to prevent heartbeat blocking
                                     await asyncio.sleep(0)
                                 except Exception as e:
-                                    log.error(f"Error sending line chunk as webhook: {e}")
+                                    log.error(f"Error sending block as webhook: {e}")
                         else:
-                            try:
-                                sent_msg = await webhook.send(line, wait=True)
-                                ids.append(str(sent_msg.id))
-                                # Yield control to event loop to prevent heartbeat blocking
-                                await asyncio.sleep(0)
-                            except Exception as e:
-                                log.error(f"Error sending line as webhook: {e}")
+                            # Send non-block text line by line
+                            for line in segment_text.split('\n'):
+                                stripped = line.strip()
+                                if stripped:
+                                    if len(line) > 2000:
+                                        line_chunks = self._split_message(line, split_fn)
+                                        for chunk in line_chunks:
+                                            try:
+                                                sent_msg = await webhook.send(chunk, wait=True)
+                                                ids.append(str(sent_msg.id))
+                                                await asyncio.sleep(0)
+                                            except Exception as e:
+                                                log.error(f"Error sending line chunk as webhook: {e}")
+                                    else:
+                                        try:
+                                            sent_msg = await webhook.send(line, wait=True)
+                                            ids.append(str(sent_msg.id))
+                                            await asyncio.sleep(0)
+                                        except Exception as e:
+                                            log.error(f"Error sending line as webhook: {e}")
+                else:
+                    # No blocks, use original line-by-line logic
+                    for line in text.split('\n'):
+                        stripped = line.strip()
+                        if stripped:
+                            if len(line) > 2000:
+                                line_chunks = self._split_message(line, split_fn)
+                                for chunk in line_chunks:
+                                    try:
+                                        sent_msg = await webhook.send(chunk, wait=True)
+                                        ids.append(str(sent_msg.id))
+                                        await asyncio.sleep(0)
+                                    except Exception as e:
+                                        log.error(f"Error sending line chunk as webhook: {e}")
+                            else:
+                                try:
+                                    sent_msg = await webhook.send(line, wait=True)
+                                    ids.append(str(sent_msg.id))
+                                    await asyncio.sleep(0)
+                                except Exception as e:
+                                    log.error(f"Error sending line as webhook: {e}")
             else:
                 chunks = self._split_message(text, split_fn)
                 for chunk in chunks:
                     try:
                         sent_msg = await webhook.send(chunk, wait=True)
                         ids.append(str(sent_msg.id))
-                        # Yield control to event loop
                         await asyncio.sleep(0)
                     except Exception as e:
                         log.error(f"Error sending chunk as webhook: {e}")

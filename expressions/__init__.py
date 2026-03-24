@@ -35,6 +35,9 @@ from .registry import ExpressionRegistry, get_expression_registry
 from .reply_expression import ReplyExpression
 from .reaction_expression import ReactionExpression
 from .ignore_expression import IgnoreExpression
+from .poll_expression import PollExpression
+from .block_expression import BlockExpression
+from .embed_expression import EmbedExpression
 
 log = logging.getLogger(__name__)
 
@@ -46,9 +49,12 @@ __all__ = [
     'ReplyExpression',
     'ReactionExpression',
     'IgnoreExpression',
+    'PollExpression',
+    'BlockExpression',
+    'EmbedExpression',
 ]
 
-__version__ = '1.0.0'
+__version__ = '1.0.1'
 
 
 def _register_builtin_expressions():
@@ -58,23 +64,33 @@ def _register_builtin_expressions():
     This is called automatically when the module is imported.
     The processing order is important:
     1. Ignore - should be checked first (can skip entire message)
-    2. Reply - processes text segments
-    3. Reaction - adds reactions to messages
+    2. Poll - creates polls (needs to be before reply/block)
+    3. Block - processes content blocks
+    4. Embed - creates embeds
+    5. Reply - processes text segments
+    6. Reaction - adds reactions to messages
     """
     registry = get_expression_registry()
     
     # Register expressions
     ignore_expr = IgnoreExpression()
+    poll_expr = PollExpression()
+    block_expr = BlockExpression()
+    embed_expr = EmbedExpression()
     reply_expr = ReplyExpression()
     reaction_expr = ReactionExpression()
     
     registry.register(ignore_expr)
+    registry.register(poll_expr)
+    registry.register(block_expr)
+    registry.register(embed_expr)
     registry.register(reply_expr)
     registry.register(reaction_expr)
     
     # Set processing order (important!)
     # Ignore should be first because it can skip the entire message
-    registry.set_processing_order(['ignore', 'reply', 'reaction'])
+    # Poll, Block, Embed should be before Reply (they affect message structure)
+    registry.set_processing_order(['ignore', 'poll', 'block', 'embed', 'reply', 'reaction'])
     
     log.debug(
         f"Registered {len(registry)} built-in expressions: "

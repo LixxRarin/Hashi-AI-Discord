@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.8"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.9"
 # DEFAULT AI CONFIGURATION
     # This file contains all default configuration values for AI behavior.
     # Edit these values to change the default behavior for all new AIs.
@@ -238,6 +238,103 @@ advanced_expressions:
       
       When you decide not to respond, output ONLY: <IGNORE>
       Do not add any other text or explanation.
+  
+  poll:
+    enabled: false
+    prompt: |
+      Poll Syntax: <POLL:duration_hours:allow_multiple|question|option1|option2|...>
+      
+      Create polls to gather community opinions.
+      
+      PARAMETERS (YOU control these):
+      - duration_hours: 1-168 (1 hour to 7 days)
+      - allow_multiple: true/false (multiple choice?)
+      - question: Your poll question
+      - options: 2-10 options (Discord limit)
+      
+      EXAMPLES:
+      <POLL:24:false|Favorite language?|Python|JavaScript|Rust|Go>
+      <POLL:48:true|Interests? (pick multiple)|Tech|Art|Music|Sports>
+      <POLL:1:false|Lunch today?|Pizza|Burger|Salad>
+      
+      QUERYING RESULTS:
+      Use get_poll_info(message_id) to check results anytime.
+      Returns vote counts, status, and which option is winning.
+  
+  block:
+    enabled: false
+    prompt: |
+      Block Syntax: <BLOCK>content</BLOCK>
+      
+      Send content as a single message, ignoring line-by-line mode.
+      
+      WHEN TO USE:
+      - Code snippets that must stay together
+      - Formatted content (lists, tables)
+      - Long explanations as one message
+      
+      BEHAVIOR:
+      - Tags are REMOVED before sending to Discord (users don't see them)
+      - Tags are KEPT in conversation history (you remember them)
+      - Only works when line-by-line mode is enabled
+      
+      EXAMPLE:
+      Here's the code:
+      
+      <BLOCK>
+      ```python
+      def hello():
+          print("Hello!")
+      ```
+      </BLOCK>
+      
+      Hope this helps!
+      
+      Result: 3 messages sent, but tags invisible to users.
+  
+  embed:
+    enabled: false
+    prompt: |
+      Embed Syntax: <EMBED>{json}</EMBED>
+      
+      Create rich Discord embeds with full JSON control.
+      
+      STRUCTURE:
+      {
+        "title": "Title text",
+        "description": "Main content",
+        "color": 3447003,  // Decimal color code
+        "fields": [
+          {"name": "Field", "value": "Value", "inline": true}
+        ],
+        "footer": {"text": "Footer text"},
+        "thumbnail": {"url": "image_url"}
+      }
+      
+      COMMON COLORS (decimal):
+      - Blue: 3447003
+      - Green: 3066993
+      - Red: 15158332
+      - Yellow: 16776960
+      - Purple: 10181046
+      
+      EXAMPLES:
+      Simple:
+      <EMBED>
+      {"title": "Welcome!", "description": "Thanks for joining", "color": 3066993}
+      </EMBED>
+      
+      With fields:
+      <EMBED>
+      {
+        "title": "Server Stats",
+        "color": 3447003,
+        "fields": [
+          {"name": "Members", "value": "150", "inline": true},
+          {"name": "Online", "value": "45", "inline": true}
+        ]
+      }
+      </EMBED>
 
 # Sleep Mode, AI stops responding after too many refusals
 sleep_mode_enabled: false
@@ -342,9 +439,12 @@ context_order:
   - lorebook_entries
   - memory_prompt
   - tool_calling_prompt
+  - ignore_prompt
+  - poll_prompt
+  - block_prompt
+  - embed_prompt
   - reply_prompt
   - reaction_prompt
-  - ignore_prompt
   - conversation_history
   - user_message
   - system_message
@@ -367,7 +467,10 @@ ROLEPLAY_PRESET_OVERRIDES = {
     "advanced_expressions": {
         "reply": {"enabled": False},
         "reaction": {"enabled": False},
-        "ignore": {"enabled": False}
+        "ignore": {"enabled": False},
+        "poll": {"enabled": False},
+        "block": {"enabled": False},
+        "embed": {"enabled": False}
     },
     "send_message_line_by_line": False,
     "user_syntax_replacement": "display_name",
@@ -393,7 +496,10 @@ DISCORD_CHAT_PRESET_OVERRIDES = {
     "advanced_expressions": {
         "reply": {"enabled": True},
         "reaction": {"enabled": True},
-        "ignore": {"enabled": True}
+        "ignore": {"enabled": True},
+        "poll": {"enabled": True},
+        "block": {"enabled": True},
+        "embed": {"enabled": True}
     },
     "sleep_mode_enabled": True,
     "send_message_line_by_line": True,

@@ -573,10 +573,14 @@ class MessagePipeline:
             discord_ids = []
             await send_callback(response, discord_ids)
             
-            # Clean response for history (remove expression syntax)
+            # Prepare responses for different purposes:
+            # - Original response (with tags) goes to history so AI can see what it generated
+            # - Display response (without tags) goes to ResponseManager for regeneration UI
             response_without_syntax = registry.remove_all_syntax(response, config)
-            cleaned_response = self.processor.clean_response(response_without_syntax, session_with_context)
             display_response = self.processor.prepare_for_display(response_without_syntax, session_with_context)
+            
+            # Save original response with tags to history (AI needs to see what it generated)
+            history_response = self.processor.clean_response(response, session_with_context)
             
             # Reset ignore counter when AI responds normally (not <IGNORE>)
             # This should happen whenever ignore system is enabled, not just when sleep mode is enabled
@@ -626,7 +630,7 @@ class MessagePipeline:
                 server_id,
                 channel_id,
                 ai_name,
-                cleaned_response,
+                history_response,  # Save with tags so AI can see what it generated
                 discord_ids,
                 session_with_context.get("chat_id", "default"),
                 short_id=bot_short_id

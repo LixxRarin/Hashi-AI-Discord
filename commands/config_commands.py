@@ -795,7 +795,7 @@ class ConfigCommands(commands.Cog):
         
         await interaction.response.send_message(response, ephemeral=True)
     
-    @app_commands.command(name="config_expressions", description="Configure advanced expression systems (Reply, Reaction, Ignore)")
+    @app_commands.command(name="config_expressions", description="Configure advanced expression systems (Reply, Reaction, Ignore, Poll, Block, Embed)")
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
         ai_name="Name of the AI to configure",
@@ -807,7 +807,10 @@ class ConfigCommands(commands.Cog):
     @app_commands.choices(expression=[
         app_commands.Choice(name="💬 Reply System", value="reply"),
         app_commands.Choice(name="😊 Reaction System", value="reaction"),
-        app_commands.Choice(name="🚫 Ignore System", value="ignore")
+        app_commands.Choice(name="🚫 Ignore System", value="ignore"),
+        app_commands.Choice(name="🗳️ Poll System", value="poll"),
+        app_commands.Choice(name="📦 Block System", value="block"),
+        app_commands.Choice(name="💎 Embed System", value="embed")
     ])
     @app_commands.autocomplete(ai_name=ai_name_all_autocomplete)
     async def config_expressions(

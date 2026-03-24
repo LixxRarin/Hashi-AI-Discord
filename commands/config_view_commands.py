@@ -142,26 +142,42 @@ class ConfigViewCommands(commands.Cog):
         filter_status = "✅ Enabled" if filter_enabled else "❌ Disabled"
         embed.add_field(name="🔍 Response Filter", value=filter_status, inline=True)
         
-        # Advanced Expressions - use registry
+        # Advanced Expressions - unified view
         expr_registry = get_expression_registry()
+        expressions_status = []
         
-        # Reply System
+        # Get all expression systems
         reply_expr = expr_registry.get('reply')
         reply_enabled = reply_expr.is_enabled(config) if reply_expr else False
-        reply_status = "✅ Enabled" if reply_enabled else "❌ Disabled"
-        embed.add_field(name="💬 Reply System", value=reply_status, inline=True)
+        reply_status = "✅" if reply_enabled else "❌"
+        expressions_status.append(f"• Reply: `{reply_status}`")
         
-        # Reaction System
         reaction_expr = expr_registry.get('reaction')
         reaction_enabled = reaction_expr.is_enabled(config) if reaction_expr else False
-        reaction_status = "✅ Enabled" if reaction_enabled else "❌ Disabled"
-        embed.add_field(name="😊 Reaction System", value=reaction_status, inline=True)
+        reaction_status = "✅" if reaction_enabled else "❌"
+        expressions_status.append(f"• Reaction: `{reaction_status}`")
         
-        # Ignore System
         ignore_expr = expr_registry.get('ignore')
         ignore_enabled = ignore_expr.is_enabled(config) if ignore_expr else False
-        ignore_status = "✅ Enabled" if ignore_enabled else "❌ Disabled"
-        embed.add_field(name="🚫 Ignore System", value=ignore_status, inline=True)
+        ignore_status = "✅" if ignore_enabled else "❌"
+        expressions_status.append(f"• Ignore: `{ignore_status}`")
+        
+        poll_expr = expr_registry.get('poll')
+        poll_enabled = poll_expr.is_enabled(config) if poll_expr else False
+        poll_status = "✅" if poll_enabled else "❌"
+        expressions_status.append(f"• Poll: `{poll_status}`")
+        
+        block_expr = expr_registry.get('block')
+        block_enabled = block_expr.is_enabled(config) if block_expr else False
+        block_status = "✅" if block_enabled else "❌"
+        expressions_status.append(f"• Block: `{block_status}`")
+        
+        embed_expr = expr_registry.get('embed')
+        embed_enabled = embed_expr.is_enabled(config) if embed_expr else False
+        embed_status = "✅" if embed_enabled else "❌"
+        expressions_status.append(f"• Embed: `{embed_status}`")
+        
+        embed.add_field(name="📋 Advanced Expressions", value="\n".join(expressions_status), inline=True)
         
         # Tool Calling
         tool_config = config.get('tool_calling', {})

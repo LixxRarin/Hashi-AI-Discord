@@ -256,6 +256,23 @@ TOOL_DEFINITIONS = [
                 "required": ["query"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_poll_info",
+            "description": "Check poll results when users ask about votes or poll status. Returns real-time vote counts, winning options, and poll information directly from Discord.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Discord message ID of the poll (short ID #N or full Discord ID)"
+                    }
+                },
+                "required": ["message_id"]
+            }
+        }
     }
 ]
 
