@@ -261,7 +261,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_poll_info",
-            "description": "Check poll results when users ask about votes or poll status. Returns real-time vote counts, winning options, and poll information directly from Discord.",
+            "description": "Check poll results when users ask about votes or poll status. Returns real-time vote counts, voter lists (who voted for each option), winning options, and poll information directly from Discord.",
             "parameters": {
                 "type": "object",
                 "properties": {

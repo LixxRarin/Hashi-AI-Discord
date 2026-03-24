@@ -1,12 +1,12 @@
 """
-Poll Tools - Discord Poll Query Functions
+Poll Tools - Discord Poll Query and Voting Functions
 
-This module provides tools for querying Discord poll information.
-The LLM can use these tools to check poll results, status, and details.
+This module provides tools for querying Discord poll information and voting.
+The LLM can use these tools to check poll results, status, details, and vote in polls.
 """
 
 import logging
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import discord
 
 log = logging.getLogger(__name__)
@@ -115,7 +115,7 @@ async def get_poll_info(
             # Get poll question
             question = poll.question.text if hasattr(poll.question, 'text') else str(poll.question)
             
-            # Get poll options with vote counts
+            # Get poll options with vote counts and voters
             options = []
             total_votes = 0
             
@@ -126,11 +126,37 @@ async def get_poll_info(
                 # Get vote count
                 vote_count = answer.vote_count if hasattr(answer, 'vote_count') else 0
                 
-                options.append({
+                option_data = {
                     "text": answer_text,
                     "votes": vote_count
-                })
+                }
                 
+                # Fetch voters for this answer
+                try:
+                    voters = []
+                    voter_limit = 50  # Limit to prevent huge responses
+                    
+                    # answer.voters() returns an async iterator
+                    async for user in answer.voters():
+                        if len(voters) >= voter_limit:
+                            option_data["voters_truncated"] = True
+                            option_data["voters_shown"] = voter_limit
+                            break
+                        
+                        voters.append({
+                            "id": str(user.id),
+                            "name": user.name,
+                            "display_name": user.display_name if hasattr(user, 'display_name') else user.name
+                        })
+                    
+                    option_data["voters"] = voters
+                    
+                except Exception as e:
+                    log.warning(f"Failed to fetch voters for option '{answer_text}': {e}")
+                    option_data["voters"] = []
+                    option_data["voters_error"] = "Failed to fetch voters"
+                
+                options.append(option_data)
                 total_votes += vote_count
             
             # Get poll status

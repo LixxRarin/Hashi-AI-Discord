@@ -159,7 +159,8 @@ Returns vote counts, status, and which option is winning."""
                 question = match.group(3).strip()
                 
                 # Extract options (everything after question, split by |)
-                options_part = match.group(0).split('|', 3)[3]  # Skip duration:multiple|question|
+                # Split at most 2 times to get: <POLL:duration:multiple | question | all_options>
+                options_part = match.group(0).split('|', 2)[2]  # Get everything after question
                 options_part = options_part.rstrip('>')  # Remove closing >
                 options = [opt.strip() for opt in options_part.split('|') if opt.strip()]
                 
