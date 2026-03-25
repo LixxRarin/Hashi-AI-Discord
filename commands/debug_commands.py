@@ -167,7 +167,7 @@ class DebugCommands(commands.Cog):
                 await channel.send(embed=test_embed)
                 
                 # Log a test message
-                func.log.info(f"Debug channel configured: {channel.name} (Level: {level_name})")
+                func.log.info(f"Debug channel configured: {channel.id} (Level: {level_name})")
                 
             except discord.Forbidden:
                 await interaction.followup.send(
@@ -846,7 +846,7 @@ class DebugCommands(commands.Cog):
             # User confirmed with ✅
             await confirm_msg.edit(content="🔄 Restarting bot...")
             
-            func.log.warning(f"Bot restart initiated by {interaction.user.name}")
+            func.log.warning(f"Bot restart initiated by user {interaction.user.id}")
             
             # Wait a moment for the message to send
             await asyncio.sleep(1)

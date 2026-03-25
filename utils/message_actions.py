@@ -634,9 +634,9 @@ class MessageActionsView(ui.View):
             # Debug: Log state before regeneration
             info = state.get_info()
             log.info(
-                f"Starting regeneration for AI {self.ai_name}: "
+                f"Starting regeneration: "
                 f"current_gen={info['current_number']}/{info['total_count']}, "
-                f"user_message={state.user_message[:50] if state.user_message else 'None'}..."
+                f"user_message_length={len(state.user_message) if state.user_message else 0}"
             )
             
             if not current_gen:

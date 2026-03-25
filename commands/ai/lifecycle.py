@@ -297,7 +297,7 @@ class AILifecycle(commands.Cog):
             
             avatar_file_path = card_cache_path
             card_name_registered = card_name
-            func.log.info(f"Successfully loaded registered card: {character_card.name}")
+            func.log.info("Successfully loaded registered card")
         
         # Option 2: Load from Discord attachment
         elif card_attachment:
@@ -382,7 +382,7 @@ class AILifecycle(commands.Cog):
             result = await download_card(card_url)
             if result:
                 character_card, card_cache_path = result
-                func.log.info(f"Successfully loaded character card: {character_card.name}")
+                func.log.info("Successfully loaded character card")
                 avatar_file_path = card_cache_path
                 
                 # Register card (non-blocking)
@@ -421,7 +421,7 @@ class AILifecycle(commands.Cog):
             if result:
                 character_card, card_cache_path = result
                 avatar_file_path = card_cache_path
-                func.log.info(f"Successfully loaded default card: {character_card.name}")
+                func.log.info("Successfully loaded default card")
                 
                 # Register default card (optional)
                 try:

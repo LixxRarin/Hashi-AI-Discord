@@ -510,7 +510,7 @@ def convert_v2_to_v3(v2_card: Dict[str, Any]) -> Optional[CharacterCardV3]:
                 "ext": "png"
             }]
         
-        log.info(f"Converted V2 card '{card.name}' to V3 format")
+        log.info("Converted V2 card to V3 format")
         return card
         
     except Exception as e:

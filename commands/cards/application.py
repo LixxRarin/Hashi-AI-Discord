@@ -274,7 +274,7 @@ class CardApplication(commands.Cog):
                     return
                 
                 character_card, cache_path = result
-                func.log.info(f"Successfully loaded default card: {character_card.name}")
+                func.log.info("Successfully loaded default card")
                 
                 # Check if already registered
                 cards = func.list_character_cards(server_id)
@@ -497,7 +497,7 @@ class CardApplication(commands.Cog):
                     display_name = card_data.get("nickname") or card_data.get("name", ai_name)
                     await self.webhook_utils.update_name(webhook_url, display_name)
                     name_updated = True
-                    func.log.info(f"Updated display name for AI to '{display_name}'")
+                    func.log.info("Updated display name for AI")
                 except Exception as e:
                     func.log.warning(f"Failed to update display name: {e}")
         
@@ -509,7 +509,7 @@ class CardApplication(commands.Cog):
                     me = interaction.guild.me
                     await me.edit(nick=display_name)
                     name_updated = True
-                    func.log.info(f"Updated bot nickname to '{display_name}' in guild {interaction.guild.id}")
+                    func.log.info(f"Updated bot nickname in guild {interaction.guild.id}")
                 except Exception as e:
                     func.log.warning(f"Failed to update bot nickname: {e}")
             

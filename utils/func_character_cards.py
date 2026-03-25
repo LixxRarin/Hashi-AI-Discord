@@ -288,12 +288,12 @@ async def delete_server_character_cards(server_id: str) -> Dict[str, Any]:
                 file_path = Path(cache_path)
                 if file_path.exists():
                     file_path.unlink()
-                    log.info(f"Deleted character card file: {cache_path}")
+                    log.info("Deleted character card file")
                     results["files_deleted"] += 1
                 else:
-                    log.warning(f"Character card file not found: {cache_path}")
+                    log.warning("Character card file not found")
             except Exception as e:
-                log.error(f"Error deleting character card file {cache_path}: {e}")
+                log.error(f"Error deleting character card file: {e}")
                 results["success"] = False
         
         # Remove server entry from registry

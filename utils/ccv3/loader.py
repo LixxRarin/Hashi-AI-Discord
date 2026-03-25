@@ -120,7 +120,7 @@ class CharacterCardLoader:
                 f.write(card_data)
             
             log.info(f"Saved valid card: {filename} ({len(card_data)} bytes)")
-            log.info(f"Successfully loaded card: {card.name}")
+            log.info("Successfully loaded card")
             return card, str(file_path)
             
         except Exception as e:
@@ -315,7 +315,7 @@ async def load_local_card(file_path: str) -> Optional[Tuple[CharacterCardV3, str
             log.error(f"Failed to parse character card from: {file_path}")
             return None
         
-        log.info(f"Successfully loaded local card: {card.name}")
+        log.info("Successfully loaded local card")
         return card, str(path)
         
     except Exception as e:

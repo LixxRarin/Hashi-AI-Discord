@@ -202,8 +202,8 @@ class TimingController:
                     should_respond_time = time_since_last >= config.delay_for_generation
                     if should_respond_time:
                         log.debug(
-                            "AI %s responding (cooldown active, time-based): time=%.1fs",
-                            ai_name, time_since_last
+                            "AI responding (cooldown active, time-based): time=%.1fs",
+                            time_since_last
                         )
                     return should_respond_time
                 else:
@@ -223,8 +223,8 @@ class TimingController:
         
         if should_respond_time or should_respond_count or should_respond_engaged:
             log.debug(
-                "AI %s responding: time=%.1fs/%ds, count=%d/%d, engaged=%s",
-                ai_name, time_since_last, int(config.delay_for_generation),
+                "AI responding: time=%.1fs/%ds, count=%d/%d, engaged=%s",
+                time_since_last, int(config.delay_for_generation),
                 message_count, config.cache_count_threshold, should_respond_engaged
             )
             return True

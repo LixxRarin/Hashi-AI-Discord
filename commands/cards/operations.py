@@ -160,7 +160,7 @@ class AIOperations(commands.Cog):
                     reason=f"Copied from AI '{ai_name}'"
                 )
                 new_session["webhook_url"] = webhook_obj.url
-                func.log.info(f"Created webhook for copied AI '{new_ai_name}'")
+                func.log.info("Created webhook for copied AI")
             except Exception as e:
                 await interaction.followup.send(
                     f"❌ Failed to create webhook: {e}",
@@ -194,7 +194,7 @@ class AIOperations(commands.Cog):
                 # Copy history to new AI
                 new_history = copy.deepcopy(source_history)
                 await service.set_ai_history(server_id, target_channel_id, new_ai_name, new_history, new_chat_id)
-                func.log.info(f"Copied {len(source_history)} messages to new AI '{new_ai_name}'")
+                func.log.info(f"Copied {len(source_history)} messages to new AI")
         else:
             # Clear history for new AI
             await service.clear_ai_history(server_id, target_channel_id, new_ai_name, new_chat_id, keep_greeting=False)

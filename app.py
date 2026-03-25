@@ -698,7 +698,7 @@ async def on_guild_remove(guild: discord.Guild):
     server_name = guild.name
     
     func.log.warning(
-        f"Bot removed from server: {server_name} (ID: {server_id})"
+        f"Bot removed from server (ID: {server_id})"
     )
     
     try:
@@ -709,7 +709,7 @@ async def on_guild_remove(guild: discord.Guild):
         if results["success"]:
             card_info = results.get("character_cards", {})
             func.log.info(
-                f"Successfully cleaned up data for server '{server_name}'!\n")
+                "Successfully cleaned up data for server!\n")
             
             # Log skipped character cards if any
             if card_info.get('skipped_reasons'):
