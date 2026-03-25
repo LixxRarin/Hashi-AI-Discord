@@ -433,6 +433,7 @@ class MessageSender:
         # Process embeds (creates embed messages)
         response_text, embed_ids = await self._process_embeds(response_text, channel, session)
         
+        
         # Convert @username mentions to proper Discord mentions
         response_text = await self._convert_username_mentions(response_text, channel)
         
@@ -445,45 +446,160 @@ class MessageSender:
         discord_ids.extend(poll_ids)
         discord_ids.extend(embed_ids)
         
-        # Parse reply syntax using expressions system
+        # Process BLOCK tags BEFORE reply parsing
+        # This prevents reply parsing from splitting BLOCK tags across segments
         registry = get_expression_registry()
-        reply_expr = registry.get('reply')
+        block_expr = registry.get('block')
         
-        reply_segments = [(None, response_text)]
-        if reply_expr and reply_expr.is_enabled(config):
-            reply_segments = reply_expr.parse_reply_syntax(response_text)
+        block_segments = []  # List of (text, is_block, needs_reply_parsing)
         
-        # Send each segment
-        for segment_message_id, segment_text in reply_segments:
+        if block_expr and block_expr.has_syntax(response_text):
+            if is_line_by_line:
+                # Split by BLOCK boundaries, tags are removed by split_text_with_blocks
+                raw_segments = block_expr.split_text_with_blocks(response_text, is_line_by_line)
+                for segment_text, is_block in raw_segments:
+                    # BLOCK segments: no reply parsing
+                    # Non-BLOCK segments: need reply parsing
+                    block_segments.append((segment_text, is_block, not is_block))
+                log.debug(f"Split text into {len(block_segments)} BLOCK segments")
+            else:
+                # line_by_line disabled: just remove BLOCK tags
+                response_text = block_expr.remove_syntax(response_text)
+                block_segments.append((response_text, False, True))
+                log.debug("Removed BLOCK tags (line_by_line=False)")
+        else:
+            # No BLOCK tags: process normally
+            block_segments.append((response_text, False, True))
+        
+        # Process each BLOCK segment
+        # First pass: detect REPLY tags before BLOCK segments and merge them
+        processed_segments = []
+        skip_next = False
+        
+        for i, (segment_text, is_block, needs_reply_parsing) in enumerate(block_segments):
+            # Skip if marked from previous iteration
+            if skip_next:
+                skip_next = False
+                continue
+                
             if not segment_text or segment_text.isspace():
                 continue
             
-            # Get reference message if needed
-            reference_message = None
-            if segment_message_id:
-                reference_message = await ReplyExpression.fetch_message_safe(
-                    channel, segment_message_id,
-                    server_id=server_id,
-                    ai_name=ai_name
-                )
+            # Check if this is a non-BLOCK segment with only REPLY tag(s)
+            if not is_block and needs_reply_parsing:
+                reply_expr = registry.get('reply')
+                if reply_expr and reply_expr.has_syntax(segment_text):
+                    # Check if text after removing REPLY is empty/whitespace
+                    text_without_reply = reply_expr.remove_syntax(segment_text)
+                    if not text_without_reply or text_without_reply.isspace():
+                        # This segment is ONLY reply tags
+                        # Check if next segment is BLOCK BEFORE parsing (to avoid warnings)
+                        has_block_following = False
+                        if i + 1 < len(block_segments):
+                            next_segment = block_segments[i + 1]
+                            has_block_following = next_segment[1]  # next is a BLOCK
+                        
+                        if has_block_following:
+                            # Transfer REPLY to the BLOCK segment
+                            # Extract reply ID using regex to avoid parse warnings
+                            import re
+                            reply_match = re.search(r'<REPLY:(\d+)>', segment_text)
+                            if reply_match:
+                                reply_id = reply_match.group(1)
+                                # Add BLOCK with reply info
+                                processed_segments.append((block_segments[i + 1][0], True, False, reply_id))
+                                # Skip the next segment since we already processed it
+                                skip_next = True
+                                log.debug(f"Merged REPLY:{reply_id} with following BLOCK segment")
+                                continue
+                        
+                        # REPLY-only segment with no BLOCK following - skip it silently
+                        # (LLM probably made a mistake - wanted to reply but provided no content)
+                        log.debug(f"Skipping REPLY-only segment with no content and no following BLOCK")
+                        continue
             
-            # Send based on mode (without view for now)
-            if mode == "bot":
-                ids = await self._send_as_bot(
-                    segment_text, channel, reference_message,
-                    is_line_by_line, split_message_fn, view=None
-                )
-                discord_ids.extend(ids)
+            processed_segments.append((segment_text, is_block, needs_reply_parsing, None))
+        
+        # Second pass: send messages
+        for segment_text, is_block, needs_reply_parsing, reply_id_for_block in processed_segments:
+            if not segment_text or segment_text.isspace():
+                continue
+            
+            if needs_reply_parsing:
+                # Parse reply syntax for non-BLOCK segments
+                reply_expr = registry.get('reply')
+                reply_segments = [(None, segment_text)]
+                if reply_expr and reply_expr.is_enabled(config):
+                    reply_segments = reply_expr.parse_reply_syntax(segment_text)
+                
+                # Send each reply segment
+                for segment_message_id, segment_reply_text in reply_segments:
+                    if not segment_reply_text or segment_reply_text.isspace():
+                        continue
+                    
+                    # Get reference message if needed
+                    reference_message = None
+                    if segment_message_id:
+                        reference_message = await ReplyExpression.fetch_message_safe(
+                            channel, segment_message_id,
+                            server_id=server_id,
+                            ai_name=ai_name
+                        )
+                    
+                    # Send based on mode
+                    if mode == "bot":
+                        ids = await self._send_as_bot(
+                            segment_reply_text, channel, reference_message,
+                            is_line_by_line, split_message_fn, view=None
+                        )
+                        discord_ids.extend(ids)
+                    else:
+                        # Webhook mode
+                        if webhook_url:
+                            ids = await self._send_as_webhook(
+                                segment_reply_text, webhook_url, reference_message,
+                                is_line_by_line, split_message_fn, view=None
+                            )
+                            discord_ids.extend(ids)
+                        else:
+                            log.warning("Webhook mode selected but no webhook_url configured")
             else:
-                # Webhook mode
-                if webhook_url:
-                    ids = await self._send_as_webhook(
-                        segment_text, webhook_url, reference_message,
-                        is_line_by_line, split_message_fn, view=None
+                # BLOCK segment: send directly without reply parsing or line splitting
+                # Remove any REPLY tags that might be inside BLOCK segments
+                # (BLOCK segments don't support reply functionality inside them)
+                reply_expr = registry.get('reply')
+                clean_segment_text = segment_text
+                if reply_expr and reply_expr.has_syntax(segment_text):
+                    clean_segment_text = reply_expr.remove_syntax(segment_text)
+                    log.debug("Removed REPLY tags from inside BLOCK segment")
+                
+                # Check if this BLOCK should be sent as a reply (from preceding REPLY tag)
+                reference_message = None
+                if reply_id_for_block:
+                    reference_message = await ReplyExpression.fetch_message_safe(
+                        channel, reply_id_for_block,
+                        server_id=server_id,
+                        ai_name=ai_name
+                    )
+                    log.debug(f"BLOCK segment will reply to message {reply_id_for_block}")
+                
+                # Send based on mode
+                if mode == "bot":
+                    ids = await self._send_as_bot(
+                        clean_segment_text, channel, reference_message,
+                        False, split_message_fn, view=None  # Force line_by_line=False for blocks
                     )
                     discord_ids.extend(ids)
                 else:
-                    log.warning("Webhook mode selected but no webhook_url configured")
+                    # Webhook mode
+                    if webhook_url:
+                        ids = await self._send_as_webhook(
+                            clean_segment_text, webhook_url, reference_message,
+                            False, split_message_fn, view=None  # Force line_by_line=False for blocks
+                        )
+                        discord_ids.extend(ids)
+                    else:
+                        log.warning("Webhook mode selected but no webhook_url configured")
         
         # Create and attach view to the last message if buttons are enabled
         view = None
@@ -539,87 +655,36 @@ class MessageSender:
         split_fn: Optional[Callable[[str], List[str]]],
         view: Optional[discord.ui.View] = None
     ) -> List[str]:
-        """Send message as bot. View is attached to last message only."""
+        """
+        Send message as bot. View is attached to last message only.
+        
+        Note: BLOCK processing is now handled in send() before this method is called.
+        """
         ids = []
         
         if line_by_line:
-            # Check for block expression
-            registry = get_expression_registry()
-            block_expr = registry.get('block')
-            
-            # Use block-aware splitting if blocks are present
-            if block_expr and block_expr.has_syntax(text):
-                # Get config to check if block system is enabled
-                # Note: We don't have direct access to config here, so we check syntax only
-                # The text should already have tags removed by this point if disabled
-                segments = block_expr.split_text_with_blocks(text, True)
-                
-                for segment_text, is_block in segments:
-                    if not segment_text or segment_text.isspace():
-                        continue
-                    
-                    if is_block:
-                        # Send block as single message (no line splitting)
-                        if len(segment_text) > 2000:
-                            # Even blocks need to respect Discord's limit
-                            chunks = self._split_message(segment_text, split_fn)
-                            for chunk in chunks:
-                                try:
-                                    sent_msg = await channel.send(chunk, reference=reference)
-                                    ids.append(str(sent_msg.id))
-                                    await asyncio.sleep(0)
-                                except Exception as e:
-                                    log.error(f"Error sending block chunk as bot: {e}")
-                        else:
+            # Send line by line
+            for line in text.split('\n'):
+                stripped = line.strip()
+                if stripped:
+                    if len(line) > 2000:
+                        line_chunks = self._split_message(line, split_fn)
+                        for chunk in line_chunks:
                             try:
-                                sent_msg = await channel.send(segment_text, reference=reference)
+                                sent_msg = await channel.send(chunk, reference=reference)
                                 ids.append(str(sent_msg.id))
                                 await asyncio.sleep(0)
                             except Exception as e:
-                                log.error(f"Error sending block as bot: {e}")
+                                log.error(f"Error sending line chunk as bot: {e}")
                     else:
-                        # Send non-block text line by line
-                        for line in segment_text.split('\n'):
-                            stripped = line.strip()
-                            if stripped:
-                                if len(line) > 2000:
-                                    line_chunks = self._split_message(line, split_fn)
-                                    for chunk in line_chunks:
-                                        try:
-                                            sent_msg = await channel.send(chunk, reference=reference)
-                                            ids.append(str(sent_msg.id))
-                                            await asyncio.sleep(0)
-                                        except Exception as e:
-                                            log.error(f"Error sending line chunk as bot: {e}")
-                                else:
-                                    try:
-                                        sent_msg = await channel.send(line, reference=reference)
-                                        ids.append(str(sent_msg.id))
-                                        await asyncio.sleep(0)
-                                    except Exception as e:
-                                        log.error(f"Error sending line as bot: {e}")
-            else:
-                # No blocks, use original line-by-line logic
-                for line in text.split('\n'):
-                    stripped = line.strip()
-                    if stripped:
-                        if len(line) > 2000:
-                            line_chunks = self._split_message(line, split_fn)
-                            for chunk in line_chunks:
-                                try:
-                                    sent_msg = await channel.send(chunk, reference=reference)
-                                    ids.append(str(sent_msg.id))
-                                    await asyncio.sleep(0)
-                                except Exception as e:
-                                    log.error(f"Error sending line chunk as bot: {e}")
-                        else:
-                            try:
-                                sent_msg = await channel.send(line, reference=reference)
-                                ids.append(str(sent_msg.id))
-                                await asyncio.sleep(0)
-                            except Exception as e:
-                                log.error(f"Error sending line as bot: {e}")
+                        try:
+                            sent_msg = await channel.send(line, reference=reference)
+                            ids.append(str(sent_msg.id))
+                            await asyncio.sleep(0)
+                        except Exception as e:
+                            log.error(f"Error sending line as bot: {e}")
         else:
+            # Send as chunks
             chunks = self._split_message(text, split_fn)
             for chunk in chunks:
                 try:
@@ -640,7 +705,11 @@ class MessageSender:
         split_fn: Optional[Callable[[str], List[str]]],
         view: Optional[discord.ui.View] = None
     ) -> List[str]:
-        """Send message as webhook (reuses single HTTP session). View is attached to last message only."""
+        """
+        Send message as webhook (reuses single HTTP session). View is attached to last message only.
+        
+        Note: BLOCK processing is now handled in send() before this method is called.
+        """
         ids = []
         
         # Reuse single HTTP session for all messages
@@ -648,79 +717,28 @@ class MessageSender:
             webhook = discord.Webhook.from_url(webhook_url, session=http_session)
             
             if line_by_line:
-                # Check for block expression
-                registry = get_expression_registry()
-                block_expr = registry.get('block')
-                
-                # Use block-aware splitting if blocks are present
-                if block_expr and block_expr.has_syntax(text):
-                    segments = block_expr.split_text_with_blocks(text, True)
-                    
-                    for segment_text, is_block in segments:
-                        if not segment_text or segment_text.isspace():
-                            continue
-                        
-                        if is_block:
-                            # Send block as single message
-                            if len(segment_text) > 2000:
-                                chunks = self._split_message(segment_text, split_fn)
-                                for chunk in chunks:
-                                    try:
-                                        sent_msg = await webhook.send(chunk, wait=True)
-                                        ids.append(str(sent_msg.id))
-                                        await asyncio.sleep(0)
-                                    except Exception as e:
-                                        log.error(f"Error sending block chunk as webhook: {e}")
-                            else:
+                # Send line by line
+                for line in text.split('\n'):
+                    stripped = line.strip()
+                    if stripped:
+                        if len(line) > 2000:
+                            line_chunks = self._split_message(line, split_fn)
+                            for chunk in line_chunks:
                                 try:
-                                    sent_msg = await webhook.send(segment_text, wait=True)
+                                    sent_msg = await webhook.send(chunk, wait=True)
                                     ids.append(str(sent_msg.id))
                                     await asyncio.sleep(0)
                                 except Exception as e:
-                                    log.error(f"Error sending block as webhook: {e}")
+                                    log.error(f"Error sending line chunk as webhook: {e}")
                         else:
-                            # Send non-block text line by line
-                            for line in segment_text.split('\n'):
-                                stripped = line.strip()
-                                if stripped:
-                                    if len(line) > 2000:
-                                        line_chunks = self._split_message(line, split_fn)
-                                        for chunk in line_chunks:
-                                            try:
-                                                sent_msg = await webhook.send(chunk, wait=True)
-                                                ids.append(str(sent_msg.id))
-                                                await asyncio.sleep(0)
-                                            except Exception as e:
-                                                log.error(f"Error sending line chunk as webhook: {e}")
-                                    else:
-                                        try:
-                                            sent_msg = await webhook.send(line, wait=True)
-                                            ids.append(str(sent_msg.id))
-                                            await asyncio.sleep(0)
-                                        except Exception as e:
-                                            log.error(f"Error sending line as webhook: {e}")
-                else:
-                    # No blocks, use original line-by-line logic
-                    for line in text.split('\n'):
-                        stripped = line.strip()
-                        if stripped:
-                            if len(line) > 2000:
-                                line_chunks = self._split_message(line, split_fn)
-                                for chunk in line_chunks:
-                                    try:
-                                        sent_msg = await webhook.send(chunk, wait=True)
-                                        ids.append(str(sent_msg.id))
-                                        await asyncio.sleep(0)
-                                    except Exception as e:
-                                        log.error(f"Error sending line chunk as webhook: {e}")
-                            else:
-                                try:
-                                    sent_msg = await webhook.send(line, wait=True)
-                                    ids.append(str(sent_msg.id))
-                                    await asyncio.sleep(0)
-                                except Exception as e:
-                                    log.error(f"Error sending line as webhook: {e}")
+                            try:
+                                sent_msg = await webhook.send(line, wait=True)
+                                ids.append(str(sent_msg.id))
+                                await asyncio.sleep(0)
+                            except Exception as e:
+                                log.error(f"Error sending line as webhook: {e}")
             else:
+                # Send as chunks
                 chunks = self._split_message(text, split_fn)
                 for chunk in chunks:
                     try:
@@ -778,6 +796,12 @@ class MessageSender:
         
         # Remove reply tags (can't change reply reference when editing)
         clean_text = remove_reply_tags(text)
+        
+        # Remove BLOCK tags (tags should never be visible in Discord)
+        registry = get_expression_registry()
+        block_expr = registry.get('block')
+        if block_expr and block_expr.has_syntax(clean_text):
+            clean_text = block_expr.remove_syntax(clean_text)
         
         return clean_text
     

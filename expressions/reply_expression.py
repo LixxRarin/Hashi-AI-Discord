@@ -218,12 +218,13 @@ EXAMPLES:
                     if line:
                         segments.append((None, line))
         
-        # If no valid segments found, return original text without reply
+        # If no valid segments found, return cleaned text without reply tags
         if not segments:
-            log.warning("No valid reply segments found, returning original text")
+            log.warning("No valid reply segments found, returning cleaned text")
             # Remove invalid reply syntax
             cleaned_text = self.remove_syntax(text)
-            return [(None, cleaned_text if cleaned_text else text)]
+            # Return cleaned text even if empty (will be filtered out by message_sender)
+            return [(None, cleaned_text)]
         
         return segments
     

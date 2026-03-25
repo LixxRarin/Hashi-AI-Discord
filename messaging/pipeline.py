@@ -570,6 +570,8 @@ class MessagePipeline:
             
 
     
+            # Send response to Discord (with block tags preserved for processing)
+            # Block tags will be handled by message_sender's split_text_with_blocks()
             discord_ids = []
             await send_callback(response, discord_ids)
             
