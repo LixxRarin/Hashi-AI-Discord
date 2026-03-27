@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.1.0"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.1.1"
 # DEFAULT AI CONFIGURATION
     # This file contains all default configuration values for AI behavior.
     # Edit these values to change the default behavior for all new AIs.
@@ -247,8 +247,11 @@ advanced_expressions:
       - A complement to the user's previous sentence that does not need to be responded to (e.g., emoji)
       - Context makes it clear you shouldn't respond
       
-      When you decide not to respond, output ONLY: <IGNORE>
+      IMPORTANT: When you decide not to respond, output ONLY: <IGNORE>
       Do not add any other text or explanation.
+      
+      If you add text after <IGNORE>, the tag will be stripped and your message will be sent normally.
+      Example: "<IGNORE> Sorry" will send "Sorry" to the channel.
   
   poll:
     enabled: false

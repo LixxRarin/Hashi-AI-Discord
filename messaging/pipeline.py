@@ -535,13 +535,18 @@ class MessagePipeline:
                 )
                 return None
             
-            # Process advanced expressions (Reply, Reaction, Ignore systems)
-            registry = get_expression_registry()
-            expr_result = registry.process_text(response, config)
+            # Prepare display response FIRST (remove thinking tags if hide_thinking_tags=True)
+            # This must be done BEFORE processing expressions so that reply segments don't contain thinking tags
+            display_response = self.processor.prepare_for_display(response, session_with_context)
             
-            # Handle ignore expression (should_skip = True means <IGNORE> was detected)
+            # Process advanced expressions (Reply, Reaction, Ignore systems)
+            # Use display_response so expressions don't see thinking tags
+            registry = get_expression_registry()
+            expr_result = registry.process_text(display_response, config)
+            
+            # Handle ignore expression (should_skip = True means pure <IGNORE> was detected)
             if expr_result.should_skip:
-                log.debug("Expression system: AI sent <IGNORE>, skipping message")
+                log.debug("Expression system: AI sent pure <IGNORE>, skipping message")
                 
                 await self.processor.short_id_manager.skip_next_id(
                     server_id, channel_id, ai_name
@@ -566,14 +571,6 @@ class MessagePipeline:
                     server_id, channel_id, ai_name, processing_message_ids
                 )
                 return None
-            
-
-            
-
-    
-            # Prepare display response (remove thinking tags if hide_thinking_tags=True)
-            # But keep block tags for message_sender to process
-            display_response = self.processor.prepare_for_display(response, session_with_context)
             
             # Send display response to Discord (thinking tags removed if configured)
             discord_ids = []

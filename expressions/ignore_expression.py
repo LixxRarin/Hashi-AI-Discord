@@ -10,12 +10,17 @@ When the LLM detects that a conversation is not directed at it or has nothing
 useful to contribute, it can output ONLY the <IGNORE> tag, and no message
 will be sent to Discord.
 
-Example:
+Correct usage (pure ignore):
     <IGNORE>
+    <thinking>...</thinking>\n\n<IGNORE>  # Thinking tags are stripped
     
-Invalid examples (will be treated as normal messages):
-    <IGNORE> Sorry, I can't help with that
-    I think <IGNORE> would be best here
+Incorrect usage (impure ignore - tag will be stripped, rest sent normally):
+    <IGNORE> Sorry, I can't help with that  # Sends: "Sorry, I can't help with that"
+    I think <IGNORE> would be best here     # Sends: "I think would be best here"
+
+Behavior:
+- Pure ignore: Not sent to Discord, saved to history as <IGNORE>
+- Impure ignore: <IGNORE> tag stripped, rest of content sent normally
 
 Migrated from: utils/ignore_parser.py
 """
@@ -37,8 +42,12 @@ class IgnoreExpression(BaseExpression):
     should not send a message. This is useful for natural conversation flow
     where the AI recognizes it shouldn't respond.
     
-    Important: The <IGNORE> tag must be ALONE (pure ignore) to work.
-    If there's any other text, it will be treated as a normal message.
+    Behavior:
+    - Pure ignore (<IGNORE> only): Not sent to Discord, saved to history
+    - Impure ignore (<IGNORE> + content): Tag stripped, rest sent normally
+    
+    Thinking tags (<thinking>, <think>, etc.) are stripped before checking,
+    so "<thinking>...</thinking>\n\n<IGNORE>" is treated as pure ignore.
     """
     
     # Regex pattern to detect <IGNORE> tag (case-insensitive)
@@ -81,32 +90,50 @@ class IgnoreExpression(BaseExpression):
         """
         Parse ignore syntax and determine if message should be skipped.
         
+        - Pure ignore: message is skipped (not sent to Discord, saved to history as <IGNORE>)
+        - Impure ignore: <IGNORE> tag is stripped, rest of content is sent normally
+        
         Args:
             text: Text to check for ignore tag
             config: AI configuration (not used for ignore parsing)
             
         Returns:
-            ExpressionResult with should_skip=True if pure ignore detected
+            ExpressionResult with should_skip=True only for pure ignore
         """
         is_pure = self.is_pure_ignore(text)
+        has_ignore = self.has_syntax(text)
         
         if is_pure:
             log.debug("Detected pure <IGNORE> tag - message will be skipped")
             return ExpressionResult(
                 should_skip=True,
-                metadata={"expression": "ignore", "reason": "Pure ignore tag detected"}
+                metadata={
+                    "expression": "ignore",
+                    "ignore_type": "pure",
+                    "reason": "Pure ignore tag detected"
+                }
             )
         
-        # If ignore tag is present but not pure, log warning
-        if self.has_syntax(text):
+        if has_ignore:
+            # Impure ignore: has <IGNORE> but with additional content
+            # Strip the tag and send the rest normally
             log.warning(
-                "Found <IGNORE> tag with additional content - treating as normal message. "
+                "Found <IGNORE> tag with additional content - "
+                "stripping tag and sending rest of content. "
                 "Use ONLY <IGNORE> to skip responding."
+            )
+            return ExpressionResult(
+                should_skip=False,
+                metadata={
+                    "expression": "ignore",
+                    "ignore_type": "impure",
+                    "reason": "Impure ignore tag detected (has additional content)"
+                }
             )
         
         return ExpressionResult(
             should_skip=False,
-            metadata={"expression": "ignore", "reason": "No pure ignore tag"}
+            metadata={"expression": "ignore", "reason": "No ignore tag"}
         )
     
     def remove_syntax(self, text: str) -> str:
@@ -133,12 +160,21 @@ When to use <IGNORE>:
 - A complement to the user's previous sentence that does not need to be responded to (e.g., emoji)
 - Context makes it clear you shouldn't respond
 
-When you decide not to respond, output ONLY: <IGNORE>
-Do not add any other text or explanation."""
+IMPORTANT: When you decide not to respond, output ONLY: <IGNORE>
+Do not add any other text or explanation.
+
+If you add text after <IGNORE>, the tag will be stripped and your message will be sent normally.
+Example: "<IGNORE> Sorry" will send "Sorry" to the channel."""
     
     def is_pure_ignore(self, text: str) -> bool:
         """
         Check if text is ONLY the <IGNORE> tag (with optional whitespace).
+        
+        Thinking tags are stripped before checking, so:
+        - "<IGNORE>" → True
+        - "<thinking>...</thinking>\n\n<IGNORE>" → True (thinking stripped)
+        - "<IGNORE> Sorry" → False
+        - "<thinking>...</thinking>\n\n<IGNORE> Sorry" → False
         
         This is the strict validation used to determine if the LLM wants
         to skip sending a message.
@@ -157,6 +193,8 @@ Do not add any other text or explanation."""
             True
             >>> expr.is_pure_ignore("<IGNORE>\\n")
             True
+            >>> expr.is_pure_ignore("<thinking>...</thinking>\\n\\n<IGNORE>")
+            True
             >>> expr.is_pure_ignore("<IGNORE> Sorry")
             False
             >>> expr.is_pure_ignore("I think <IGNORE>")
@@ -165,13 +203,19 @@ Do not add any other text or explanation."""
         if not text:
             return False
         
+        # Import here to avoid circular dependency
+        from utils.text_processor import remove_thinking_tags
+        
+        # Strip thinking tags first (they don't count as "content")
+        text_without_thinking = remove_thinking_tags(text)
+        
         # Check if it matches the pure ignore pattern
-        is_pure = bool(self.PURE_IGNORE_PATTERN.match(text))
+        is_pure = bool(self.PURE_IGNORE_PATTERN.match(text_without_thinking))
         
         if is_pure:
             log.debug("Detected pure <IGNORE> tag in response")
         elif self.has_syntax(text):
-            log.warning("Found <IGNORE> tag with additional content - treating as normal message!")
+            log.warning("Found <IGNORE> tag with additional content - treating as impure!")
         
         return is_pure
     
