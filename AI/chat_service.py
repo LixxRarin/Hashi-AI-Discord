@@ -647,23 +647,20 @@ class ChatService:
             display_msg, history_msg = self._handle_llm_error(error, session)
             return ("__ERROR__", display_msg, history_msg)
         
-        cleaned_response = text_processor.clean_ai_response(
-            raw_response,
-            thinking_patterns=llm_params.get("thinking_tag_patterns", [
-                r'<think>.*?</think>',
-                r'<thinking>.*?</thinking>',
-                r'<thought>.*?</thought>',
-                r'<reasoning>.*?</reasoning>'
-            ]),
-            remove_emojis=config.get("remove_ai_emoji", False),
-            custom_patterns=config.get("remove_ai_text_from", []),
-            remove_reply_syntax=False
-        )
+        # Prepare response for history - only remove thinking if save_thinking_in_history=False
+        save_thinking = llm_params.get("save_thinking_in_history", True)
         
-        # Apply display cleaning based on settings
-        display_response = raw_response
-        if llm_params.get("hide_thinking_tags", True):
-            display_response = text_processor.clean_ai_response(
+        if save_thinking:
+            # Keep thinking tags in history, but apply other cleaning
+            cleaned_response = raw_response
+            if config.get("remove_ai_emoji", False):
+                cleaned_response = text_processor.remove_emoji(cleaned_response)
+            custom_patterns = config.get("remove_ai_text_from", [])
+            if custom_patterns:
+                cleaned_response = text_processor.apply_custom_patterns(cleaned_response, custom_patterns)
+        else:
+            # Remove thinking tags from history
+            cleaned_response = text_processor.clean_ai_response(
                 raw_response,
                 thinking_patterns=llm_params.get("thinking_tag_patterns", [
                     r'<think>.*?</think>',
@@ -675,13 +672,8 @@ class ChatService:
                 custom_patterns=config.get("remove_ai_text_from", []),
                 remove_reply_syntax=False
             )
-        else:
-            if config.get("remove_ai_emoji", False):
-                display_response = text_processor.remove_emoji(display_response)
-            custom_patterns = config.get("remove_ai_text_from", [])
-            display_response = text_processor.apply_custom_patterns(display_response, custom_patterns)
         
-        return display_response
+        return raw_response
     
     async def new_chat_id(
         self,

@@ -190,13 +190,7 @@ class ClaudeClient(BaseAIClient):
         model = self.resolve_model(session, server_id, "claude-sonnet-4-5")
         llm_params = self.get_llm_params(session, server_id)
         
-        # Add beta header for interleaved thinking if using tools with thinking
-        extra_headers = None
-        think_switch = llm_params.get("think_switch", False)
-        if tools and think_switch:
-            extra_headers = {"anthropic-beta": "interleaved-thinking-2025-05-14"}
-        
-        client = self.create_client(session, server_id, extra_headers)
+        client = self.create_client(session, server_id, extra_headers=None)
         
         try:
             # Extract system message (Claude requires it separate)
@@ -214,28 +208,43 @@ class ClaudeClient(BaseAIClient):
             if system_message:
                 api_params["system"] = system_message
             
-            # Add thinking if enabled
+            # Add thinking if enabled (without beta header - may be stable now)
             think_switch = llm_params.get("think_switch", False)
+            thinking_enabled = False
+            
             if think_switch:
-                think_depth = llm_params.get("think_depth", 3)
-                
-                # Try adaptive thinking first (for Opus 4.6+), fallback to manual mode
-                # The API will handle compatibility , if adaptive isn't supported, it will error
-                # and we can catch it, but for now we'll use manual mode universally
-                # since it works across all thinking-capable models
-                budget_tokens = min(
-                    think_depth * 2000,  # 2000 tokens per level
-                    api_params["max_tokens"]  # Don't exceed max_tokens
-                )
-                
-                api_params["thinking"] = {
-                    "type": "enabled",
-                    "budget_tokens": budget_tokens
-                }
-                
-                # Remove temperature when thinking is enabled (not compatible)
-                if "temperature" in api_params:
-                    del api_params["temperature"]
+                try:
+                    think_depth = llm_params.get("think_depth", 3)
+                    budget_tokens = min(
+                        think_depth * 2000,  # 2000 tokens per level
+                        api_params["max_tokens"]  # Don't exceed max_tokens
+                    )
+                    
+                    # Configure thinking with explicit redaction control
+                    # save_thinking_in_history controls if we want readable thinking
+                    save_thinking = llm_params.get("save_thinking_in_history", True)
+                    
+                    api_params["thinking"] = {
+                        "type": "enabled",
+                        "budget_tokens": budget_tokens
+                    }
+                    
+                    # Request non-redacted thinking if save_thinking_in_history is True
+                    # This allows the thinking content to be readable and saved in history
+                    if save_thinking:
+                        # Try to request non-redacted thinking (API may still redact for safety)
+                        api_params["thinking"]["redact"] = False
+                    
+                    thinking_enabled = True
+                    
+                    # Remove temperature when thinking is enabled (may not be compatible)
+                    if "temperature" in api_params:
+                        del api_params["temperature"]
+                    
+                    func.log.debug(f"Extended thinking enabled with budget_tokens={budget_tokens}")
+                except Exception as e:
+                    func.log.warning(f"Failed to configure thinking parameters: {e}")
+                    thinking_enabled = False
             
             # Merge custom_extra_body if provided
             custom_extra = llm_params.get("custom_extra_body")
@@ -250,12 +259,40 @@ class ClaudeClient(BaseAIClient):
             async def make_request():
                 return await client.messages.create(**api_params)
             
-            response = await self.retry_with_backoff(
-                make_request,
-                max_retries=2,
-                base_delay=2,
-                circuit_breaker_key="claude_api"
-            )
+            # Try to make the request, with fallback if thinking causes issues
+            try:
+                response = await self.retry_with_backoff(
+                    make_request,
+                    max_retries=2,
+                    base_delay=2,
+                    circuit_breaker_key="claude_api"
+                )
+            except APIError as e:
+                # If thinking was enabled and we got an API error, try without thinking
+                error_msg = str(e).lower()
+                if thinking_enabled and ("improperly formed" in error_msg or "invalid" in error_msg):
+                    func.log.warning(
+                        f"API request failed with thinking enabled: {e}. "
+                        f"Retrying without thinking parameter..."
+                    )
+                    
+                    # Remove thinking parameter and restore temperature
+                    if "thinking" in api_params:
+                        del api_params["thinking"]
+                    if "temperature" not in api_params:
+                        api_params["temperature"] = llm_params.get("temperature", 0.7)
+                    
+                    # Retry without thinking
+                    response = await self.retry_with_backoff(
+                        make_request,
+                        max_retries=2,
+                        base_delay=2,
+                        circuit_breaker_key="claude_api"
+                    )
+                    func.log.info("Successfully completed request without thinking parameter")
+                else:
+                    # Re-raise if not thinking-related
+                    raise
             
             # Handle tool calls if present
             if tools and response.stop_reason == "tool_use":
@@ -279,16 +316,21 @@ class ClaudeClient(BaseAIClient):
                     ai_response += content_block.text
                 elif content_block.type == "thinking":
                     thinking_content += content_block.thinking
+                    func.log.info(f"Response contains thinking block ({len(content_block.thinking)} chars)")
                 elif content_block.type == "redacted_thinking":
                     # Redacted thinking blocks contain encrypted content
                     # Don't try to display them, but note their presence
                     has_redacted = True
-                    func.log.debug("Response contains redacted thinking blocks (encrypted for safety)")
+                    func.log.info("Response contains redacted thinking blocks (encrypted for safety)")
             
             hide_tags = llm_params.get("hide_thinking_tags", True)
+            save_thinking = llm_params.get("save_thinking_in_history", True)
             
-            # If has thinking and should not hide, add to content
-            if thinking_content and not hide_tags:
+            # Include thinking in response if either:
+            # 1. Should show to user (hide_tags=False)
+            # 2. Should save in history (save_thinking=True)
+            # Downstream components will strip it for display/history as needed
+            if thinking_content and (not hide_tags or save_thinking):
                 ai_response = f"<thinking>\n{thinking_content}\n</thinking>\n\n{ai_response}"
             
             # Log if redacted thinking was present
@@ -317,7 +359,21 @@ class ClaudeClient(BaseAIClient):
             return self.create_error_response(e)
             
         except APIError as e:
-            func.log.error(f"Claude API error: {e}")
+            # Enhanced error logging with request details for debugging
+            error_details = f"Claude API error: {e}"
+            if thinking_enabled:
+                error_details += " (Note: thinking was enabled in this request)"
+            
+            # Log sanitized API params for debugging (without sensitive data)
+            debug_params = {
+                "model": api_params.get("model"),
+                "max_tokens": api_params.get("max_tokens"),
+                "has_system": bool(api_params.get("system")),
+                "has_tools": bool(api_params.get("tools")),
+                "has_thinking": bool(api_params.get("thinking")),
+                "message_count": len(api_params.get("messages", []))
+            }
+            func.log.error(f"{error_details}. Request params: {debug_params}")
             return self.create_error_response(e)
             
         except Exception as e:

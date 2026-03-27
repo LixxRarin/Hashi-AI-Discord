@@ -571,17 +571,19 @@ class MessagePipeline:
             
 
     
-            # Send response to Discord (with block tags preserved for processing)
-            # Block tags will be handled by message_sender's split_text_with_blocks()
+            # Prepare display response (remove thinking tags if hide_thinking_tags=True)
+            # But keep block tags for message_sender to process
+            display_response = self.processor.prepare_for_display(response, session_with_context)
+            
+            # Send display response to Discord (thinking tags removed if configured)
             discord_ids = []
-            await send_callback(response, discord_ids)
+            await send_callback(display_response, discord_ids)
             
             # Prepare responses for different purposes:
             # - Original response (with tags) goes to history so AI can see what it generated
-            # - Display response (without tags) goes to ResponseManager for regeneration UI
+            # - Display response (without thinking tags) already prepared above
             # - Raw response (without any syntax) for accurate edit tracking
             response_without_syntax = registry.remove_all_syntax(response, config)
-            display_response = self.processor.prepare_for_display(response_without_syntax, session_with_context)
             
             # Save original response with tags to history (AI needs to see what it generated)
             history_response = self.processor.clean_response(response, session_with_context)
