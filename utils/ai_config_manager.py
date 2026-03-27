@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.0.9"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.1.0"
 # DEFAULT AI CONFIGURATION
     # This file contains all default configuration values for AI behavior.
     # Edit these values to change the default behavior for all new AIs.
@@ -102,11 +102,19 @@ user_reply_format_syntax: "{quote}[{time}] {name} (@{username}) #{short_id} → 
 attachment_format: "[Attachment: {filename}]"  # Format for each attachment
 sticker_format: "[Sticker: {name}]"  # Format for each sticker
 
+# Message Edit/Delete Tracking - How edited/deleted messages appear in LLM history
+edit_marker_text: "(edited)"           # Marker text for edited messages
+delete_marker_text: "(deleted)"        # Marker text for deleted messages
+show_original_on_edit: true            # Show original content alongside edited content
+edit_format: "Original: {original} -> Edited: {edited}"  # Format template when showing both
+enable_delete_tracking: true           # Keep deleted messages in history (false = remove completely)
+show_content_on_delete: true           # Show deleted message content (requires enable_delete_tracking: true)
+
 # Available variables for customization:
 # - {time}: Message time (HH:MM format)
 # - {username}: Discord username (use for mentions)
 # - {name}: Display name
-# - {message}: User message content
+# - {message}: User message content (dynamic based on edit/delete state)
 # - {message_id}: Full Discord message ID (17-20 digits)
 # - {short_id}: Short message ID (1-16 digits), use for replies (save tokens)
 # - {attachments}: Formatted list of attachments (uses attachment_format template)
@@ -117,6 +125,9 @@ sticker_format: "[Sticker: {name}]"  # Format for each sticker
 # - {reply_message}: Original message being replied to
 # - {reply_message_id}: Original message ID (17-20 digits)
 # - {reply_short_id}: Reply target short ID (1-16 digits)
+# - {edit_marker}: Edit marker (empty if not edited)
+# - {delete_marker}: Delete marker (empty if not deleted)
+# - {status}: Combined status marker (edited/deleted/empty)
 
 # Attachment format variables:
 # - {filename}: Name of the file
@@ -488,7 +499,11 @@ ROLEPLAY_PRESET_OVERRIDES = {
     "tool_calling": {
         "enabled": False,
         "allowed_tools": []
-    }
+    },
+    # Edit/Delete tracking - disabled for clean roleplay experience
+    "edit_marker_text": "",           # No edit marker
+    "show_original_on_edit": False,   # Only show edited content
+    "enable_delete_tracking": False   # Remove deleted messages completely
 }
 
 # Discord Chat Preset. Natural casual behavior like a real server member
@@ -499,7 +514,9 @@ DISCORD_CHAT_PRESET_OVERRIDES = {
         "ignore": {"enabled": True},
         "poll": {"enabled": True},
         "block": {"enabled": True},
-        "embed": {"enabled": True}
+        "embed": {"enabled": True},
+        "edit": {"enabled": True},
+        "delete": {"enabled": True}
     },
     "sleep_mode_enabled": True,
     "send_message_line_by_line": True,
@@ -510,7 +527,11 @@ DISCORD_CHAT_PRESET_OVERRIDES = {
     "tool_calling": {
         "enabled": True,
         "allowed_tools": ["all"]
-    }
+    },
+    # Edit/Delete tracking - enabled for natural Discord chat awareness
+    "enable_delete_tracking": True,   # Keep deleted messages in history
+    "show_content_on_delete": True,   # Show deleted message content
+    "show_original_on_edit": True     # Show both original and edited content
 }
 
 # Builtin presets metadata

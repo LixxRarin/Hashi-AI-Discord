@@ -195,7 +195,7 @@ class MessagePipeline:
                 metadata.server_id,
                 metadata.channel_id,
                 ai_name,
-                formatted_content,  # Already formatted
+                formatted_content,  # Formatted content (with timestamps, etc.)
                 metadata.message_id,
                 session_with_context.get("chat_id", "default"),
                 author_id=metadata.author_id,
@@ -208,7 +208,8 @@ class MessagePipeline:
                 reply_to_short_id=reply_to_short_id,
                 reply_to_content=metadata.reply_to_content,
                 reply_to_author=metadata.reply_to_author_name,
-                reply_to_is_bot=metadata.reply_to_is_bot
+                reply_to_is_bot=metadata.reply_to_is_bot,
+                raw_content=metadata.content  # Raw Discord message content (for accurate edit tracking)
             )
         
         return True
@@ -578,11 +579,15 @@ class MessagePipeline:
             # Prepare responses for different purposes:
             # - Original response (with tags) goes to history so AI can see what it generated
             # - Display response (without tags) goes to ResponseManager for regeneration UI
+            # - Raw response (without any syntax) for accurate edit tracking
             response_without_syntax = registry.remove_all_syntax(response, config)
             display_response = self.processor.prepare_for_display(response_without_syntax, session_with_context)
             
             # Save original response with tags to history (AI needs to see what it generated)
             history_response = self.processor.clean_response(response, session_with_context)
+            
+            # Raw response for edit tracking (no tags, no formatting)
+            raw_response = response_without_syntax
             
             # Reset ignore counter when AI responds normally (not <IGNORE>)
             # This should happen whenever ignore system is enabled, not just when sleep mode is enabled
@@ -635,7 +640,8 @@ class MessagePipeline:
                 history_response,  # Save with tags so AI can see what it generated
                 discord_ids,
                 session_with_context.get("chat_id", "default"),
-                short_id=bot_short_id
+                short_id=bot_short_id,
+                raw_content=raw_response  # Raw content for accurate edit tracking
             )
             
             self.response_manager.add_response(

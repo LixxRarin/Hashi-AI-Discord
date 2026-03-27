@@ -52,6 +52,14 @@ class Message:
     reply_to_author: Optional[str] = None  # Display name of reply target author
     reply_to_is_bot: bool = False  # True if replying to a bot message
     
+    # Edit/Delete tracking
+    is_edited: bool = False  # True if message was edited
+    is_deleted: bool = False  # True if message was deleted
+    original_content: Optional[str] = None  # Original content before edit
+    edit_timestamp: Optional[float] = None  # Timestamp of last edit
+    delete_timestamp: Optional[float] = None  # Timestamp of deletion
+    raw_content: Optional[str] = None  # Unformatted message content (for accurate edit tracking)
+    
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
         result = {
@@ -90,6 +98,20 @@ class Message:
             result["reply_to_author"] = self.reply_to_author
         if self.reply_to_is_bot:
             result["reply_to_is_bot"] = self.reply_to_is_bot
+        
+        # Add edit/delete tracking fields
+        if self.is_edited:
+            result["is_edited"] = self.is_edited
+        if self.is_deleted:
+            result["is_deleted"] = self.is_deleted
+        if self.original_content:
+            result["original_content"] = self.original_content
+        if self.edit_timestamp:
+            result["edit_timestamp"] = self.edit_timestamp
+        if self.delete_timestamp:
+            result["delete_timestamp"] = self.delete_timestamp
+        if self.raw_content is not None:
+            result["raw_content"] = self.raw_content
             
         return result
     
@@ -114,7 +136,13 @@ class Message:
             reply_to_short_id=data.get("reply_to_short_id"),
             reply_to_content=data.get("reply_to_content"),
             reply_to_author=data.get("reply_to_author"),
-            reply_to_is_bot=data.get("reply_to_is_bot", False)
+            reply_to_is_bot=data.get("reply_to_is_bot", False),
+            is_edited=data.get("is_edited", False),
+            is_deleted=data.get("is_deleted", False),
+            original_content=data.get("original_content"),
+            edit_timestamp=data.get("edit_timestamp"),
+            delete_timestamp=data.get("delete_timestamp"),
+            raw_content=data.get("raw_content")
         )
 
 
@@ -500,7 +528,8 @@ class ConversationStore:
         reply_to_short_id: Optional[int] = None,
         reply_to_content: Optional[str] = None,
         reply_to_author: Optional[str] = None,
-        reply_to_is_bot: bool = False
+        reply_to_is_bot: bool = False,
+        raw_content: Optional[str] = None
     ) -> str:
         """
         Add a user message to the conversation.
@@ -509,7 +538,7 @@ class ConversationStore:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
-            content: Message content
+            content: Message content (formatted)
             discord_id: Discord message ID
             chat_id: Chat ID
             author_id: Author's Discord ID
@@ -523,6 +552,7 @@ class ConversationStore:
             reply_to_content: Content of replied message (truncated)
             reply_to_author: Display name of reply target author
             reply_to_is_bot: True if replying to bot message
+            raw_content: Unformatted message content (for accurate edit tracking)
             
         Returns:
             Message ID
@@ -546,7 +576,8 @@ class ConversationStore:
                 reply_to_short_id=reply_to_short_id,
                 reply_to_content=reply_to_content,
                 reply_to_author=reply_to_author,
-                reply_to_is_bot=reply_to_is_bot
+                reply_to_is_bot=reply_to_is_bot,
+                raw_content=raw_content
             )
             
             chat.add_message(message)
@@ -563,7 +594,8 @@ class ConversationStore:
         content: str,
         discord_ids: List[str],
         chat_id: str = "default",
-        short_id: Optional[int] = None
+        short_id: Optional[int] = None,
+        raw_content: Optional[str] = None
     ) -> str:
         """
         Add an assistant message to the conversation.
@@ -572,10 +604,11 @@ class ConversationStore:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
-            content: Message content
+            content: Message content (formatted with tags)
             discord_ids: List of Discord message IDs
             chat_id: Chat ID
             short_id: Short ID for this message (for reply references)
+            raw_content: Unformatted message content (for accurate edit tracking)
             
         Returns:
             Message ID
@@ -589,7 +622,8 @@ class ConversationStore:
                 content=content,
                 timestamp=time.time(),
                 discord_ids=discord_ids,
-                short_id=short_id
+                short_id=short_id,
+                raw_content=raw_content
             )
             
             chat.add_message(message)
@@ -810,6 +844,51 @@ class ConversationStore:
                 log.error("Error removing last exchange: %s", e)
                 return False
     
+    async def mark_message_as_deleted(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        discord_id: str,
+        chat_id: str = "default"
+    ) -> bool:
+        """
+        Mark a message as deleted without removing it from history.
+        
+        This preserves the message for LLM context while indicating deletion.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            discord_id: Discord message ID
+            chat_id: Chat ID
+            
+        Returns:
+            True if marked successfully
+        """
+        async with self._lock:
+            try:
+                chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
+                msg_index = self._find_message_index_by_discord_id(chat.messages, discord_id)
+                
+                if msg_index is None:
+                    log.debug(f"Message {discord_id} not found for AI {ai_name}")
+                    return False
+                
+                # Mark as deleted
+                chat.messages[msg_index].is_deleted = True
+                chat.messages[msg_index].delete_timestamp = time.time()
+                chat.metadata.updated_at = time.time()
+                
+                self.schedule_save()
+                log.debug(f"Marked message {discord_id} as deleted for AI {ai_name}")
+                return True
+                
+            except Exception as e:
+                log.error(f"Error marking message as deleted: {e}")
+                return False
+    
     async def get_message_by_short_id(
         self,
         server_id: str,
@@ -843,6 +922,46 @@ class ConversationStore:
                     return msg
             
             return None
+    
+    async def get_message_by_discord_id(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str,
+        discord_id: str,
+        chat_id: str = "default"
+    ) -> Optional[Message]:
+        """
+        Get a message from history by discord_id.
+        
+        This is used for edit tracking to retrieve the stored message
+        with edit/delete state before reformatting.
+        
+        Args:
+            server_id: Server ID
+            channel_id: Channel ID
+            ai_name: AI name
+            discord_id: Discord message ID to find
+            chat_id: Chat ID
+            
+        Returns:
+            Message object if found, None otherwise
+        """
+        async with self._lock:
+            try:
+                chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
+                
+                # Find message index
+                msg_index = self._find_message_index_by_discord_id(chat.messages, discord_id)
+                
+                if msg_index is None:
+                    return None
+                
+                return chat.messages[msg_index]
+                
+            except Exception as e:
+                log.error(f"Error getting message by discord_id {discord_id}: {e}")
+                return None
     
     async def get_message_content_by_short_id(
         self,
@@ -1146,14 +1265,17 @@ class ConversationStore:
         ai_name: str,
         discord_id: str,
         new_content: str,
-        chat_id: str = "default"
+        chat_id: str = "default",
+        mark_as_edited: bool = False,
+        new_raw_content: Optional[str] = None
     ) -> bool:
         """
         Update the content of a message by discord_id.
         
         Behavior:
         - Searches in user messages (discord_id) and bot messages (discord_ids)
-        - Updates ONLY the 'content' field
+        - Updates the 'content' field and optionally 'raw_content'
+        - Optionally marks as edited and preserves original content
         - Preserves: timestamp, author, short_id, attachments, etc.
         - Updates metadata.updated_at
         - Schedules automatic save
@@ -1165,6 +1287,8 @@ class ConversationStore:
             discord_id: Discord message ID to update
             new_content: New formatted content
             chat_id: Chat ID (default: "default")
+            mark_as_edited: Mark as edited and preserve original content
+            new_raw_content: New unformatted content (for accurate edit tracking)
             
         Returns:
             True if found and updated, False otherwise
@@ -1188,9 +1312,23 @@ class ConversationStore:
                     )
                     return False
                 
-                # Update only the content
+                # Preserve original content on first edit (use raw_content if available)
+                if mark_as_edited and not chat.messages[msg_index].is_edited:
+                    # Store the ORIGINAL raw content (not formatted!)
+                    chat.messages[msg_index].original_content = (
+                        chat.messages[msg_index].raw_content or
+                        chat.messages[msg_index].content
+                    )
+                    chat.messages[msg_index].is_edited = True
+                    chat.messages[msg_index].edit_timestamp = time.time()
+                
+                # Update formatted content
                 old_content = chat.messages[msg_index].content
                 chat.messages[msg_index].content = new_content
+                
+                # Update raw content if provided
+                if new_raw_content is not None:
+                    chat.messages[msg_index].raw_content = new_raw_content
                 
                 # Update metadata
                 chat.metadata.updated_at = time.time()
@@ -1200,7 +1338,8 @@ class ConversationStore:
                 
                 log.debug(
                     f"Updated message {discord_id} for AI {ai_name} "
-                    f"(index: {msg_index}, old length: {len(old_content)}, new length: {len(new_content)})"
+                    f"(index: {msg_index}, edited: {mark_as_edited}, "
+                    f"old length: {len(old_content)}, new length: {len(new_content)})"
                 )
                 
                 return True

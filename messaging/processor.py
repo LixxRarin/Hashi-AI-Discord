@@ -7,11 +7,14 @@ application and CBS processing.
 
 import logging
 import datetime
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from messaging.buffer import PendingMessage
 from messaging.short_id_manager import get_short_id_manager_sync
 from utils.media_processor import MediaProcessor
 from expressions import get_expression_registry
+
+if TYPE_CHECKING:
+    from messaging.store import Message
 
 log = logging.getLogger(__name__)
 
@@ -42,7 +45,8 @@ class MessageProcessor:
         template: str,
         message: PendingMessage,
         session: Dict[str, Any],
-        reply_message: Optional[PendingMessage] = None
+        reply_message: Optional[PendingMessage] = None,
+        stored_message: Optional['Message'] = None
     ) -> str:
         """
         Apply formatting template to a message.
@@ -52,6 +56,7 @@ class MessageProcessor:
             message: Message to format
             session: AI session (for server/channel/ai_name context)
             reply_message: Optional reply message
+            stored_message: Optional stored message with edit/delete flags
             
         Returns:
             Formatted message string
@@ -115,16 +120,79 @@ class MessageProcessor:
             if sticker_parts:
                 stickers_formatted = "\n" + "\n".join(sticker_parts)
         
+        # Process edit/delete state
+        message_content = message.content
+        edit_marker = ""
+        delete_marker = ""
+        status_marker = ""
+        
+        if stored_message:
+            edit_marker_text = config.get("edit_marker_text", "(edited)")
+            delete_marker_text = config.get("delete_marker_text", "(deleted)")
+            
+            # Handle DELETED messages
+            if stored_message.is_deleted:
+                delete_marker = delete_marker_text
+                status_marker = delete_marker_text
+                
+                # Check if should hide content
+                show_content = config.get("show_content_on_delete", True)
+                if not show_content:
+                    # Hide content, show only marker
+                    message_content = delete_marker_text
+                else:
+                    # Show content with delete marker appended
+                    message_content = f"{message.content} {delete_marker_text}"
+            
+            # Handle EDITED messages
+            elif stored_message.is_edited:
+                # Message is marked as edited
+                edit_marker = edit_marker_text
+                status_marker = edit_marker_text
+                
+                # Check if should show original
+                show_original = config.get("show_original_on_edit", True)
+                if show_original:
+                    # Use original_content (preserved on first edit)
+                    # Note: original_content should already be raw (not formatted) after our fix
+                    original_raw = stored_message.original_content or ""
+                    
+                    # If original_raw is still formatted (legacy data without raw_content), try to extract
+                    if original_raw and (original_raw.startswith('[') or original_raw.startswith('>')):
+                        # Legacy data - extract using simple fallback method
+                        last_colon_pos = original_raw.rfind(': ')
+                        if last_colon_pos != -1:
+                            original_raw = original_raw[last_colon_pos + 2:].strip()
+                            # Remove attachment/sticker markers if present
+                            import re
+                            original_raw = re.sub(r'\[Attachment:.*?\]\(.*?\)', '', original_raw)
+                            original_raw = re.sub(r'\[Sticker:.*?\]\(.*?\)', '', original_raw)
+                            original_raw = original_raw.strip()
+                    
+                    # Format with both original and edited content
+                    edit_format = config.get("edit_format", "Original: {original} -> Edited: {edited}")
+                    try:
+                        message_content = edit_format.format(
+                            original=original_raw,
+                            edited=message.content
+                        )
+                    except KeyError as e:
+                        log.warning(f"Edit format error: {e}")
+                        message_content = f"{original_raw} -> {message.content}"
+        
         # Prepare template variables
         syntax = {
             "time": datetime.datetime.fromtimestamp(message.timestamp).strftime("%H:%M"),
             "username": message.author_name,  # @lixxrarin (for mentions)
             "name": message.author_display_name,  # Rarin (display name)
-            "message": message.content,  # Text content only
+            "message": message_content,  # Dynamic content based on edit/delete state
             "attachments": attachments_formatted,  # Formatted attachments
             "stickers": stickers_formatted,  # Formatted stickers
             "message_id": message.message_id,  # Full Discord ID (17-20 digits)
-            "short_id": short_id  # Short ID (sequential integer)
+            "short_id": short_id,  # Short ID (sequential integer)
+            "edit_marker": edit_marker,  # Edit marker (empty if not edited)
+            "delete_marker": delete_marker,  # Delete marker (empty if not deleted)
+            "status": status_marker  # Combined status marker
         }
         
         # Add reply information if available
@@ -171,7 +239,8 @@ class MessageProcessor:
         self,
         message: PendingMessage,
         session: Dict[str, Any],
-        reply_message: Optional[PendingMessage] = None
+        reply_message: Optional[PendingMessage] = None,
+        stored_message: Optional['Message'] = None
     ) -> str:
         """
         Format a single message using session configuration.
@@ -180,6 +249,7 @@ class MessageProcessor:
             message: Message to format
             session: AI session configuration
             reply_message: Optional reply message
+            stored_message: Optional stored message with edit/delete tracking
             
         Returns:
             Formatted message string
@@ -199,7 +269,7 @@ class MessageProcessor:
                 "[{time}] @{username} ({name}) [ID: {message_id}]: {message}"
             )
         
-        return await self._apply_template(template, message, session, reply_message)
+        return await self._apply_template(template, message, session, reply_message, stored_message)
     
     async def process_message_images(
         self,

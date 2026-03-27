@@ -435,9 +435,9 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
     """
     Handle message deletions and update conversation histories.
     
-    When a user deletes a message, this removes it from:
-    - MessageBuffer (if not yet processed)
-    - ConversationStore (all AIs in the channel)
+    Behavior depends on enable_delete_tracking configuration:
+    - If true: marks message as deleted (keeps in history)
+    - If false: removes message completely from history
     """
     try:
         from utils.message_cache import get_message_cache
@@ -463,11 +463,16 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
         
         # Track how many histories were updated
         removed_from_buffer = 0
+        marked_deleted = 0
         removed_from_history = 0
         
         # Process for each AI in the channel
         for ai_name, session in session_data.items():
             chat_id = session.get("chat_id", "default")
+            config = session.get("config", {})
+            
+            # Check if delete tracking is enabled
+            track_deletes = config.get("enable_delete_tracking", True)
             
             # Try to remove from buffer (if message not yet processed)
             if await bot.message_pipeline.buffer.remove_message_by_discord_id(
@@ -478,23 +483,100 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
                     f"Removed message {message_id} from buffer for AI {ai_name}"
                 )
             
-            # Try to remove from conversation history
+            # Handle conversation history based on tracking setting
             from messaging.store import get_store
             store = get_store()
             
-            if await store.delete_message_by_discord_id(
-                server_id, channel_id, ai_name, message_id, chat_id
-            ):
-                removed_from_history += 1
-                func.log.debug(
-                    f"Removed message {message_id} from history for AI {ai_name}"
-                )
+            if track_deletes:
+                # Mark as deleted (keep in history)
+                if await store.mark_message_as_deleted(
+                    server_id, channel_id, ai_name, message_id, chat_id
+                ):
+                    marked_deleted += 1
+                    
+                    # Reformat the message with delete marker
+                    stored_message = await store.get_message_by_discord_id(
+                        server_id, channel_id, ai_name, message_id, chat_id
+                    )
+                    
+                    if stored_message:
+                        # Ensure session has context for MessageProcessor
+                        session_with_context = session.copy()
+                        session_with_context["server_id"] = server_id
+                        session_with_context["channel_id"] = channel_id
+                        session_with_context["ai_name"] = ai_name
+                        
+                        # Create pending message for formatting from stored data
+                        from messaging.buffer import PendingMessage
+                        
+                        msg_to_format = PendingMessage(
+                            content=stored_message.raw_content or stored_message.content,
+                            author_id=stored_message.author_id or "",
+                            author_name=stored_message.author_username or "Unknown",
+                            author_display_name=stored_message.author_display_name or "Unknown",
+                            timestamp=stored_message.timestamp,
+                            message_id=message_id,
+                            reply_to=stored_message.reply_to_id,
+                            attachments=stored_message.attachments,
+                            stickers=stored_message.stickers,
+                            raw_message=None
+                        )
+                        
+                        # Handle reply if present
+                        reply_msg = None
+                        if stored_message.reply_to_id and stored_message.reply_to_content:
+                            reply_author_name = stored_message.reply_to_author or "Unknown"
+                            
+                            reply_msg = PendingMessage(
+                                content=stored_message.reply_to_content,
+                                author_id="",
+                                author_name=reply_author_name,
+                                author_display_name=reply_author_name,
+                                timestamp=stored_message.timestamp,
+                                message_id=stored_message.reply_to_id,
+                                reply_to=None,
+                                raw_message=None
+                            )
+                        
+                        # Format with delete marker (stored_message has is_deleted=True)
+                        formatted_content = await bot.message_pipeline.processor.format_single_message(
+                            msg_to_format,
+                            session_with_context,
+                            reply_msg,
+                            stored_message  # Has is_deleted=True, formatter will apply marker
+                        )
+                        
+                        # Update formatted content in store (without changing delete state)
+                        await store.update_message_by_discord_id(
+                            server_id, channel_id, ai_name, message_id, formatted_content, chat_id,
+                            mark_as_edited=False  # Don't change edit state
+                        )
+                        
+                        func.log.debug(
+                            f"Marked message {message_id} as deleted and reformatted for AI {ai_name} "
+                            f"(new length: {len(formatted_content)})"
+                        )
+                    else:
+                        func.log.debug(
+                            f"Marked message {message_id} as deleted for AI {ai_name} "
+                            f"(could not reformat - message not found in store)"
+                        )
+            else:
+                # Remove completely (old behavior)
+                if await store.delete_message_by_discord_id(
+                    server_id, channel_id, ai_name, message_id, chat_id
+                ):
+                    removed_from_history += 1
+                    func.log.debug(
+                        f"Removed message {message_id} from history for AI {ai_name}"
+                    )
         
         # Log summary if any updates were made
-        if removed_from_buffer > 0 or removed_from_history > 0:
+        if removed_from_buffer > 0 or marked_deleted > 0 or removed_from_history > 0:
             func.log.info(
-                f"Message {message_id} deleted - removed from {removed_from_buffer} buffer(s) "
-                f"and {removed_from_history} history(ies)"
+                f"Message {message_id} deleted - removed from {removed_from_buffer} buffer(s), "
+                f"marked deleted in {marked_deleted} history(ies), "
+                f"removed from {removed_from_history} history(ies)"
             )
         
     except Exception as e:
@@ -528,7 +610,11 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             func.log.warning(f"Channel {channel_id} not found for message edit")
             return
         
-        # Fetch the updated message using cache (reduces API calls for recent messages)
+        # Invalidate cache first to ensure we get the latest version from Discord
+        cache = get_message_cache()
+        await cache.invalidate(channel_id, message_id)
+        
+        # Fetch the updated message (will fetch fresh from Discord API)
         try:
             message = await fetch_message_cached(channel, message_id)
         except discord.NotFound:
@@ -613,24 +699,55 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
                     raw_message=None
                 )
             
-            # Format the message
-            formatted_content = await bot.message_pipeline.processor.format_single_message(
-                msg_to_format,
-                session_with_context,
-                reply_msg
-            )
-            
-            # Update in conversation history
+            # Retrieve stored message to get edit tracking info
             from messaging.store import get_store
             store = get_store()
             
+            stored_message = await store.get_message_by_discord_id(
+                server_id, channel_id, ai_name, message_id, chat_id
+            )
+            
+            # Pre-detect edit state for formatting
+            # This ensures the formatter sees is_edited=True on first edit
+            formatting_stored_message = stored_message
+            
+            if stored_message:
+                # Check if content actually changed
+                old_raw_content = stored_message.raw_content or ""
+                new_raw_content = metadata.content
+                
+                if old_raw_content != new_raw_content:
+                    # Content changed - check if this is the first edit
+                    if not stored_message.is_edited:
+                        # First edit: create a modified copy for formatting
+                        # This ensures the formatter sees is_edited=True and applies edit markers
+                        from copy import copy
+                        formatting_stored_message = copy(stored_message)
+                        formatting_stored_message.is_edited = True
+                        formatting_stored_message.original_content = old_raw_content
+                        func.log.debug(
+                            f"Pre-detected first edit for message {message_id} "
+                            f"(old: '{old_raw_content[:50]}...', new: '{new_raw_content[:50]}...')"
+                        )
+            
+            # Format the message WITH stored message for edit tracking
+            formatted_content = await bot.message_pipeline.processor.format_single_message(
+                msg_to_format,
+                session_with_context,
+                reply_msg,
+                formatting_stored_message  # Pass prepared message with edit state
+            )
+            
+            # Update in conversation history
             if await store.update_message_by_discord_id(
-                server_id, channel_id, ai_name, message_id, formatted_content, chat_id
+                server_id, channel_id, ai_name, message_id, formatted_content, chat_id,
+                mark_as_edited=True,  # Mark as edited and preserve original content
+                new_raw_content=metadata.content  # Update raw content with edited version
             ):
                 updated_count += 1
                 func.log.debug(
                     f"Updated message {message_id} in history for AI {ai_name} "
-                    f"(new length: {len(formatted_content)})"
+                    f"(marked as edited, new length: {len(formatted_content)})"
                 )
         
         # Log summary if any updates were made
