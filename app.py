@@ -262,42 +262,54 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
             except Exception as e:
                 func.log.error(f"Error deleting control panel message: {e}")
         
-        # Callback to send response to Discord using centralized MessageSender
-        async def send_callback(response_text, ids_list):
-            """Send response to Discord and populate ids_list."""
-            from utils.message_sender import get_message_sender
-            sender = get_message_sender()
-            
-            # Ensure session has server_id and ai_name for short ID conversion
-            session_with_context = session.copy()
-            session_with_context["server_id"] = server_id
-            session_with_context["ai_name"] = ai_name
-            
-            discord_ids, view = await sender.send(
-                response_text=response_text,
-                channel=channel,
-                session=session_with_context,
-                split_message_fn=AI._split_message,
-                bot=bot,
-                attach_buttons=False
-            )
-            ids_list.extend(discord_ids)
+        # Helper function to keep typing indicator active
+        async def _keep_typing(channel):
+            """Keep typing indicator active by triggering it periodically."""
+            try:
+                while True:
+                    await channel.trigger_typing()
+                    await asyncio.sleep(5)  # Discord typing lasts ~10 seconds
+            except asyncio.CancelledError:
+                # Task was cancelled, typing stops immediately
+                pass
         
-        # Generate response using pipeline (with or without typing indicator)
+        # Start typing task in background if needed
+        typing_task = None
         if should_show:
-            # Show typing indicator while generating response
-            async with channel.typing():
-                result = await bot.message_pipeline.generate_response(
-                    server_id,
-                    channel_id,
-                    ai_name,
-                    session,
-                    chat_service,
-                    send_callback,
-                    bot_user_id=bot.user.id
+            typing_task = asyncio.create_task(_keep_typing(channel))
+        
+        try:
+            # Callback to send response to Discord using centralized MessageSender
+            async def send_callback(response_text, ids_list):
+                """Send response to Discord and populate ids_list."""
+                nonlocal typing_task
+                from utils.message_sender import get_message_sender
+                sender = get_message_sender()
+                
+                # Ensure session has server_id and ai_name for short ID conversion
+                session_with_context = session.copy()
+                session_with_context["server_id"] = server_id
+                session_with_context["ai_name"] = ai_name
+                
+                discord_ids, view = await sender.send(
+                    response_text=response_text,
+                    channel=channel,
+                    session=session_with_context,
+                    split_message_fn=AI._split_message,
+                    bot=bot,
+                    attach_buttons=False
                 )
-        else:
-            # Don't show typing indicator (AI in sleep mode without wake-up patterns)
+                ids_list.extend(discord_ids)
+                
+                # Cancel typing task immediately after sending message
+                if typing_task and not typing_task.done():
+                    typing_task.cancel()
+                    try:
+                        await typing_task
+                    except asyncio.CancelledError:
+                        pass
+            
+            # Generate response (typing continues in background until message is sent)
             result = await bot.message_pipeline.generate_response(
                 server_id,
                 channel_id,
@@ -307,6 +319,14 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
                 send_callback,
                 bot_user_id=bot.user.id
             )
+        finally:
+            # Ensure typing task is cancelled even if an error occurs
+            if typing_task and not typing_task.done():
+                typing_task.cancel()
+                try:
+                    await typing_task
+                except asyncio.CancelledError:
+                    pass
         
         if result:
             response, discord_ids = result
