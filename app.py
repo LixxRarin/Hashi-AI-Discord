@@ -267,15 +267,18 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
             """Keep typing indicator active by triggering it periodically."""
             try:
                 while True:
-                    await channel.trigger_typing()
+                    await channel._state.http.send_typing(channel.id)
                     await asyncio.sleep(5)  # Discord typing lasts ~10 seconds
             except asyncio.CancelledError:
                 # Task was cancelled, typing stops immediately
                 pass
         
-        # Start typing task in background if needed
+        # Start typing indicator immediately if needed
         typing_task = None
         if should_show:
+            # Trigger typing immediately so it appears right away
+            await channel._state.http.send_typing(channel.id)
+            # Then start background task to keep it alive
             typing_task = asyncio.create_task(_keep_typing(channel))
         
         try:
