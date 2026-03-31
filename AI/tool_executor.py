@@ -32,7 +32,7 @@ class ToolExecutor:
     
     def _register_tools(self):
         """Register all available tools."""
-        from AI.tools import discord_tools, memory_tools, bash_tool
+        from AI.tools import discord_tools, memory_tools, bash_tool, attachment_tools
         
         # Register unified Discord query tool
         self.tools["discord_query"] = discord_tools.discord_query
@@ -42,6 +42,9 @@ class ToolExecutor:
         
         # Register bash tool
         self.tools["bash_tool"] = bash_tool.bash_tool
+        
+        # Register attachment query tool
+        self.tools["attachment_query"] = attachment_tools.get_attachment_content
         
         log.info(f"Registered {len(self.tools)} tools: {list(self.tools.keys())}")
     
@@ -158,6 +161,15 @@ class ToolExecutor:
                 # Execute the tool
                 result = await self.execute_tool(tool_name, arguments, context)
                 
+                # Extract images from result BEFORE truncation (for vision support)
+                extracted_images = []
+                if isinstance(result, dict):
+                    extracted_images = self._extract_images_from_result(result)
+                    if extracted_images:
+                        # Remove base64 from result to reduce size
+                        result = self._remove_base64_from_result(result)
+                        log.info(f"Extracted {len(extracted_images)} image(s) from tool result before truncation")
+                
                 # Format result for OpenAI API
                 # Convert result to JSON string
                 result_str = json.dumps(result, ensure_ascii=False)
@@ -193,12 +205,18 @@ class ToolExecutor:
                     truncate_at = truncation_limit - 100
                     result_str = result_str[:truncate_at] + f"\n\n... [truncated: {len(result_str) - truncate_at} chars / ~{actual_tokens} tokens removed]"
                 
-                results.append({
+                tool_result = {
                     "tool_call_id": tool_id,
                     "role": "tool",
                     "name": tool_name,
                     "content": result_str
-                })
+                }
+                
+                # Attach extracted images (if any) for vision processing
+                if extracted_images:
+                    tool_result["_extracted_images"] = extracted_images
+                
+                results.append(tool_result)
                 
             except Exception as e:
                 log.error(f"Error processing tool call: {e}", exc_info=True)
@@ -212,23 +230,25 @@ class ToolExecutor:
         
         return results
     
-    def _count_tokens(self, text: str, model: str = "gpt-4") -> int:
+    def _count_tokens(self, text: str, model: str = "gpt-4", provider: str = None) -> int:
         """
         Count tokens in text using tiktoken.
         
         Args:
             text: Text to count tokens for
             model: Model name for encoding (default: gpt-4)
+            provider: Provider name (e.g., "claude", "openai", "deepseek")
             
         Returns:
             int: Number of tokens
         """
         try:
-            # Get encoding for model
-            encoding = tiktoken.encoding_for_model(model)
+            from AI.base_client import BaseAIClient
+            # Get appropriate encoding for model/provider
+            encoding = BaseAIClient.get_tiktoken_encoding(model, provider)
             return len(encoding.encode(text))
         except Exception as e:
-            log.warning(f"Failed to count tokens with tiktoken for model '{model}': {e}")
+            log.debug(f"Using fallback token estimation for model '{model}': {e}")
             # Fallback to character estimation (4 chars per token)
             return len(text) // 4
     
@@ -248,9 +268,10 @@ class ToolExecutor:
         config = session.get("config", {})
         tool_config = config.get("tool_calling", {})
         
-        # Get context_size and model - try API connection first
+        # Get context_size, model, and provider - try API connection first
         context_size = 4096  # Default fallback
         model = "gpt-4"  # Default model for tiktoken
+        provider = None  # Provider for encoding resolution
         connection_name = session.get("api_connection")
         
         if connection_name:
@@ -263,6 +284,7 @@ class ToolExecutor:
                     if connection:
                         context_size = connection.get("context_size", 4096)
                         model = connection.get("model", "gpt-4")
+                        provider = connection.get("provider")
                     else:
                         context_size = config.get("context_size", 4096)
                 else:
@@ -285,13 +307,14 @@ class ToolExecutor:
         # Convert token limit to character limit using tiktoken
         # Sample text to estimate chars per token for this model
         try:
-            encoding = tiktoken.encoding_for_model(model)
+            from AI.base_client import BaseAIClient
+            encoding = BaseAIClient.get_tiktoken_encoding(model, provider)
             # Use a representative sample to estimate chars/token ratio
             sample = "The quick brown fox jumps over the lazy dog. " * 10
             sample_tokens = len(encoding.encode(sample))
             chars_per_token = len(sample) / sample_tokens if sample_tokens > 0 else 4
         except Exception as e:
-            log.warning(f"Failed to estimate chars_per_token with tiktoken for model '{model}': {e}")
+            log.debug(f"Using default chars_per_token for model '{model}': {e}")
             chars_per_token = 4  # Fallback
         
         # Calculate character limit
@@ -363,6 +386,73 @@ class ToolExecutor:
             "memory_max_tokens": memory_max_tokens,
             "session": session
         }
+    
+    def _extract_images_from_result(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """
+        Extract images from tool result for vision processing.
+        
+        Args:
+            result: Tool result dictionary
+            
+        Returns:
+            List of extracted image dicts with base64, format, detail, etc.
+        """
+        extracted_images = []
+        
+        try:
+            # Case 1: Direct URL processing (attachment_query with url parameter)
+            if result.get("source") == "direct_url":
+                attachment = result.get("attachment", {})
+                if attachment.get("_vision_image") and attachment.get("base64"):
+                    extracted_images.append({
+                        "base64": attachment["base64"],
+                        "format": attachment.get("format", "image/png"),
+                        "detail": attachment.get("detail", "auto"),
+                        "url": result.get("url", ""),
+                        "filename": attachment.get("filename", "image")
+                    })
+            
+            # Case 2: Message attachments (attachment_query with message_id)
+            elif "attachments" in result:
+                for att in result.get("attachments", []):
+                    if att.get("_vision_image") and att.get("base64"):
+                        extracted_images.append({
+                            "base64": att["base64"],
+                            "format": att.get("format", "image/png"),
+                            "detail": att.get("detail", "auto"),
+                            "url": att.get("url", ""),
+                            "filename": att.get("filename", "image")
+                        })
+        
+        except Exception as e:
+            log.error(f"Error extracting images from tool result: {e}", exc_info=True)
+        
+        return extracted_images
+    
+    def _remove_base64_from_result(self, result: Any) -> Any:
+        """
+        Recursively remove base64 fields from result to save space.
+        
+        Args:
+            result: Result data structure
+            
+        Returns:
+            Cleaned result structure
+        """
+        if isinstance(result, dict):
+            cleaned = {}
+            for key, value in result.items():
+                if key == "base64":
+                    cleaned[key] = "[Image data attached separately for vision analysis]"
+                elif key == "_vision_image":
+                    continue  # Remove marker
+                else:
+                    cleaned[key] = self._remove_base64_from_result(value)
+            return cleaned
+        elif isinstance(result, list):
+            return [self._remove_base64_from_result(item) for item in result]
+        else:
+            return result
 
 
 # Global executor instance

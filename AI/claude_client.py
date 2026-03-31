@@ -497,14 +497,57 @@ class ClaudeClient(BaseAIClient):
                     "content": assistant_content
                 })
                 
-                # Build user message with tool results
+                # Extract images from tool results for vision processing
+                cleaned_tool_results, extracted_images = self._extract_images_from_tool_results(tool_results)
+                
+                # Build user message with cleaned tool results
                 tool_result_content = []
-                for result in tool_results:
+                for result in cleaned_tool_results:
                     tool_result_content.append({
                         "type": "tool_result",
                         "tool_use_id": result["tool_call_id"],
                         "content": result["content"]
                     })
+                
+                # If images were extracted and vision is supported, add them to content
+                if extracted_images and self.supports_vision():
+                    try:
+                        # Get vision config from tool_context
+                        from utils.ai_config_manager import get_vision_config
+                        session = tool_context.get("session", {})
+                        server_id = tool_context.get("server_id")
+                        
+                        if session and server_id:
+                            vision_config = get_vision_config(session, server_id)
+                            
+                            if vision_config.get('vision_enabled', False):
+                                # Add text block explaining images
+                                tool_result_content.append({
+                                    "type": "text",
+                                    "text": f"[System: {len(extracted_images)} image(s) from tool results attached for visual analysis]"
+                                })
+                                
+                                # Add image blocks in Claude format
+                                for img in extracted_images:
+                                    # Extract media type from format (e.g., "image/png" -> "image/png")
+                                    media_type = img.get("format", "image/png")
+                                    
+                                    tool_result_content.append({
+                                        "type": "image",
+                                        "source": {
+                                            "type": "base64",
+                                            "media_type": media_type,
+                                            "data": img["base64"]
+                                        }
+                                    })
+                                
+                                func.log.info(f"Injected {len(extracted_images)} image(s) from tool results for Claude vision analysis")
+                            else:
+                                func.log.debug("Images extracted but vision_enabled=False, skipping injection")
+                        else:
+                            func.log.warning("Cannot inject images: missing session or server_id in tool_context")
+                    except Exception as e:
+                        func.log.error(f"Error injecting images from tool results: {e}", exc_info=True)
                 
                 current_messages.append({
                     "role": "user",

@@ -152,6 +152,39 @@ TOOL_DEFINITIONS = [
                 "required": ["command"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "attachment_query",
+            "description": "Access and read attachments from Discord messages or direct URLs. Supports text files (txt, md, json, xml, csv, yaml, py, js, html, css), images (jpg, png, gif, webp), PDFs (text extraction), DOCX (text extraction), and other files (metadata only). Use message ID to retrieve attachments from a message, or provide a direct URL to process files like stickers, attachment links, etc. Always use this when users ask to read, view, or analyze files. Examples: attachment_query(message_id='123456789'), attachment_query(url='https://cdn.discordapp.com/stickers/123.png'), attachment_query(message_id='5', filename='data.json'), attachment_query(message_id='10', attachment_index=0)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message_id": {
+                        "type": "string",
+                        "description": "Discord message ID or short ID (#N format) containing the attachment. Examples: '123456789' or '#5'. Either message_id or url must be provided, but not both."
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "Direct URL to a file (e.g., sticker URL, attachment URL from Discord CDN). Use this to process files directly without needing a message ID. Examples: 'https://cdn.discordapp.com/stickers/123.png', 'https://cdn.discordapp.com/attachments/123/456/file.pdf'. Either message_id or url must be provided, but not both."
+                    },
+                    "attachment_index": {
+                        "type": "integer",
+                        "description": "Index of the attachment to retrieve (0-based). Only used with message_id. Use this when you know which attachment to get. If not specified, returns all attachments from the message."
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Filename to search for (alternative to attachment_index). Only used with message_id. Use this when you know the filename. Case-insensitive search."
+                    },
+                    "include_content": {
+                        "type": "boolean",
+                        "description": "Whether to include file content (default: true). Set to false to get only metadata (filename, size, type, URL) without downloading/processing the file."
+                    }
+                },
+                "required": []
+            }
+        }
     }
 ]
 

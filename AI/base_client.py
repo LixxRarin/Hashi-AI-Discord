@@ -549,6 +549,82 @@ class BaseAIClient(ABC):
         return error.to_string()
     
     @staticmethod
+    def get_tiktoken_encoding(model: str, provider: str = None):
+        """
+        Get the appropriate tiktoken encoding for a model/provider.
+        
+        This method resolves the correct tiktoken encoding to use for token counting,
+        handling models from different providers (OpenAI, Claude, DeepSeek, Ollama).
+        
+        Resolution order:
+        1. Try tiktoken.encoding_for_model() (works for OpenAI models)
+        2. Match model name against known patterns
+        3. Use provider-specific default encoding
+        4. Fallback to cl100k_base
+        
+        Args:
+            model: Model name (e.g., "claude-sonnet-4-5", "gpt-4", "deepseek-chat")
+            provider: Provider name (e.g., "claude", "openai", "deepseek", "ollama")
+            
+        Returns:
+            tiktoken.Encoding: The appropriate encoding for the model
+            
+        Raises:
+            Exception: If tiktoken cannot be imported or no encoding can be found
+        """
+        import tiktoken
+        import re
+        
+        # Model pattern to encoding mapping
+        # Patterns are checked in order, first match wins
+        MODEL_ENCODING_MAP = {
+            r"^gpt-4o": "o200k_base",           # GPT-4o uses newer encoding
+            r"^gpt-4": "cl100k_base",           # GPT-4 and variants
+            r"^gpt-3\.5": "cl100k_base",        # GPT-3.5-turbo
+            r"^claude-": "cl100k_base",         # Claude models (similar tokenizer)
+            r"^deepseek-": "cl100k_base",       # DeepSeek (OpenAI-compatible)
+            r"^text-davinci-": "p50k_base",     # Older OpenAI models
+            r"^code-": "p50k_base",             # Codex models
+        }
+        
+        # Provider to default encoding mapping
+        PROVIDER_ENCODING_MAP = {
+            "claude": "cl100k_base",
+            "anthropic": "cl100k_base",
+            "deepseek": "cl100k_base",
+            "ollama": "cl100k_base",
+            "openai": "cl100k_base",
+        }
+        
+        # 1. Try native tiktoken model lookup (works for OpenAI models)
+        try:
+            return tiktoken.encoding_for_model(model)
+        except KeyError:
+            pass  # Expected for non-OpenAI models
+        
+        # 2. Try pattern matching on model name
+        if model:
+            for pattern, encoding_name in MODEL_ENCODING_MAP.items():
+                if re.match(pattern, model, re.IGNORECASE):
+                    try:
+                        return tiktoken.get_encoding(encoding_name)
+                    except Exception:
+                        pass  # Continue to next fallback
+        
+        # 3. Try provider-based fallback
+        if provider:
+            provider_lower = provider.lower()
+            if provider_lower in PROVIDER_ENCODING_MAP:
+                encoding_name = PROVIDER_ENCODING_MAP[provider_lower]
+                try:
+                    return tiktoken.get_encoding(encoding_name)
+                except Exception:
+                    pass  # Continue to final fallback
+        
+        # 4. Final fallback to cl100k_base (most common modern encoding)
+        return tiktoken.get_encoding("cl100k_base")
+    
+    @staticmethod
     def count_tokens_with_tiktoken(text: str, model: str) -> int:
         """
         Count tokens using tiktoken (for OpenAI-compatible models).
@@ -829,14 +905,51 @@ class BaseAIClient(ABC):
                 }
                 current_messages.append(assistant_message)
                 
-                # Add tool results
-                for result in tool_results:
+                # Extract images from tool results for vision processing
+                cleaned_tool_results, extracted_images = self._extract_images_from_tool_results(tool_results)
+                
+                # Add cleaned tool results (base64 removed to save tokens)
+                for result in cleaned_tool_results:
                     current_messages.append({
                         "role": "tool",
                         "tool_call_id": result["tool_call_id"],
                         "name": result["name"],
                         "content": result["content"]
                     })
+                
+                # If images were extracted and vision is supported, inject them
+                if extracted_images and self.supports_vision():
+                    try:
+                        # Get vision config from tool_context
+                        from utils.ai_config_manager import get_vision_config
+                        session = tool_context.get("session", {})
+                        server_id = tool_context.get("server_id")
+                        
+                        if session and server_id:
+                            vision_config = get_vision_config(session, server_id)
+                            
+                            if vision_config.get('vision_enabled', False):
+                                # Create multimodal message with extracted images
+                                image_context_text = f"[System: {len(extracted_images)} image(s) from tool results attached for visual analysis]"
+                                
+                                # Use prepare_multimodal_content to format properly
+                                multimodal_content = self.prepare_multimodal_content(
+                                    image_context_text, extracted_images
+                                )
+                                
+                                # Add as user message so LLM can "see" the images
+                                current_messages.append({
+                                    "role": "user",
+                                    "content": multimodal_content
+                                })
+                                
+                                log.info(f"Injected {len(extracted_images)} image(s) from tool results for vision analysis")
+                            else:
+                                log.debug("Images extracted but vision_enabled=False, skipping injection")
+                        else:
+                            log.warning("Cannot inject images: missing session or server_id in tool_context")
+                    except Exception as e:
+                        log.error(f"Error injecting images from tool results: {e}", exc_info=True)
                 
                 log.debug(f"Prepared {len(current_messages)} messages (including tool results from round {round_num + 1})")
                 
@@ -882,3 +995,68 @@ class BaseAIClient(ABC):
         except Exception as e:
             log.error(f"Error handling tool calls: {e}", exc_info=True)
             return None
+    
+    def _extract_images_from_tool_results(
+        self,
+        tool_results: List[Dict[str, Any]]
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """
+        Extract images from tool results for vision processing.
+        
+        Images are already extracted by ToolExecutor and attached in _extracted_images field.
+        This method just collects them and removes the field from results.
+        
+        Args:
+            tool_results: List of tool result messages
+            
+        Returns:
+            Tuple of (cleaned_tool_results, extracted_images)
+        """
+        extracted_images = []
+        cleaned_results = []
+        
+        for result in tool_results:
+            # Check if tool result has pre-extracted images
+            if "_extracted_images" in result:
+                images = result.get("_extracted_images", [])
+                if images:
+                    extracted_images.extend(images)
+                    log.info(f"Found {len(images)} pre-extracted image(s) from tool result")
+                
+                # Remove the field and add cleaned result
+                cleaned_result = result.copy()
+                del cleaned_result["_extracted_images"]
+                cleaned_results.append(cleaned_result)
+            else:
+                # No images, keep as is
+                cleaned_results.append(result)
+        
+        return cleaned_results, extracted_images
+    
+    def _remove_base64_from_data(self, data: Any) -> Any:
+        """
+        Recursively remove base64 fields from data structure.
+        
+        Replaces base64 strings with a placeholder to save tokens while
+        keeping the structure intact for the LLM to understand.
+        
+        Args:
+            data: Data structure (dict, list, or primitive)
+            
+        Returns:
+            Cleaned data structure
+        """
+        if isinstance(data, dict):
+            cleaned = {}
+            for key, value in data.items():
+                if key == "base64":
+                    cleaned[key] = "[Image data attached separately for vision analysis]"
+                elif key == "_vision_image":
+                    continue  # Remove marker
+                else:
+                    cleaned[key] = self._remove_base64_from_data(value)
+            return cleaned
+        elif isinstance(data, list):
+            return [self._remove_base64_from_data(item) for item in data]
+        else:
+            return data
