@@ -13,3 +13,4 @@ psutil
 ollama
 anthropic
 discord-rpc
+docker>=7.0.0

@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.1.1"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.1.3"
 # DEFAULT AI CONFIGURATION
     # This file contains all default configuration values for AI behavior.
     # Edit these values to change the default behavior for all new AIs.
@@ -99,8 +99,8 @@ user_reply_format_syntax: "{quote}[{time}] {name} (@{username}) #{short_id} → 
 # These control how attachments and stickers are displayed in the message context
 # Note: When vision is enabled, images are sent as actual image data to the API
 # These templates only affect the TEXT representation in the context
-attachment_format: "[Attachment: {filename}]"  # Format for each attachment
-sticker_format: "[Sticker: {name}]"  # Format for each sticker
+attachment_format: "[Attachment: {filename}]({url})"  # Format for each attachment
+sticker_format: "[Sticker: {name}]({url})"  # Format for each sticker
 
 # Message Edit/Delete Tracking - How edited/deleted messages appear in LLM history
 edit_marker_text: "(edited)"           # Marker text for edited messages
@@ -376,6 +376,10 @@ sleep_wakeup_patterns:
 tool_calling:
   enabled: false
   allowed_tools: ["all"]
+  # Tool result truncation settings (prevents context overflow)
+  tool_result_max_percentage: 35  # Max % of context_size for tool results (conservative)
+  tool_result_min_chars: 500      # Minimum characters allowed (safety floor)
+  tool_result_max_chars: 50000    # Maximum characters allowed (safety ceiling)
 
 # Memory System. Persistent memory across conversations
 # Allows the AI to save, read, update, and remove information using memory tools

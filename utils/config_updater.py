@@ -12,7 +12,7 @@ yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
 # Default configuration content
-DEFAULT_CONFIG_CONTENT = r"""version: "1.4.1" # Don't touch here
+DEFAULT_CONFIG_CONTENT = r"""version: "1.4.2" # Don't touch here
 
 # Discord Bot Configuration
 Discord:
@@ -154,6 +154,63 @@ RichPresence:
   # How often to update the Rich Presence (in seconds).
   # Updates dynamic variables like server count and AI count.
   # Minimum recommended: 15 seconds to avoid rate limits.
+
+# Bash Tool Configuration
+# Allows LLM to execute bash commands in isolated Docker containers
+bash_tool:
+  
+  enabled: true
+  # Enable or disable the bash_tool.
+  # When disabled, the LLM cannot execute bash commands.
+  
+  default_mode: "persistent"
+  # Default execution mode: "persistent" or "ephemeral"
+  # - persistent: Maintains container state between commands (recommended)
+  # - ephemeral: Creates fresh container for each command
+  
+  # Resource Limits
+  cpu_limit: "1.0"
+  # CPU limit (1.0 = 1 core, 2.0 = 2 cores, etc.)
+  
+  memory_limit: "512m"
+  # RAM limit (e.g., "512m", "1g", "2g")
+  
+  disk_limit: "1g"
+  # Disk space limit (e.g., "1g", "2g", "5g")
+  
+  # Timeouts
+  command_timeout: 1800
+  # Maximum time for a single command execution (in seconds)
+  # Default: 1800 (30 minutes)
+  # Set to 0 for no timeout (not recommended)
+  
+  # Security Settings
+  network_enabled: true
+  # Allow containers to access the network
+  # Enable this to allow apt-get, curl, wget, etc.
+  
+  allow_privileged: false
+  # Allow privileged containers (NOT RECOMMENDED)
+  # Keep this false for security
+  
+  blocked_commands: []
+  # List of regex patterns for blocked commands
+  # Example: ["rm -rf /", ":(){ :|:& };:"]
+  # Leave empty to allow all commands
+  
+  # Container Configuration
+  image: "ubuntu:22.04"
+  # Docker image to use for containers
+  # Options: "ubuntu:22.04", "alpine:latest", "python:3.11", etc.
+  
+  shell: "/bin/bash"
+  # Shell to use for command execution
+  # Options: "/bin/bash", "/bin/sh"
+  
+  # Automatic Cleanup
+  auto_cleanup_on_shutdown: false
+  # Automatically cleanup all containers when bot shuts down
+  # Recommended: true (keeps your system clean)
 """
 
 

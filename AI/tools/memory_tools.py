@@ -199,6 +199,89 @@ def _get_next_id(entries: List[Dict]) -> int:
     return max(entry.get("id", 0) for entry in entries) + 1
 
 
+async def memory(
+    action: str,
+    content: Optional[str] = None,
+    memory_id: Optional[int] = None,
+    query: Optional[str] = None,
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Unified memory handler - action-based routing.
+    
+    This is the main entry point for all memory operations.
+    Routes to appropriate specialized functions based on action.
+    
+    Args:
+        action: Memory operation ("list", "add", "update", "remove", "search")
+        content: Memory content (required for "add" and "update")
+        memory_id: Memory ID (required for "update" and "remove")
+        query: Search query (required for "search")
+        context: Context information
+        
+    Returns:
+        Dict with operation result or error
+    """
+    if context is None:
+        return {"error": "No context provided"}
+    
+    log.info(f"Memory operation: action={action}")
+    
+    try:
+        if action == "list":
+            return await list_memories(context)
+        
+        elif action == "add":
+            if not content:
+                return {
+                    "error": "Parameter 'content' is required for action 'add'",
+                    "example": "memory(action='add', content='User prefers dark mode')"
+                }
+            return await add_memory(content, context)
+        
+        elif action == "update":
+            if memory_id is None:
+                return {
+                    "error": "Parameter 'memory_id' is required for action 'update'",
+                    "example": "memory(action='update', memory_id=3, content='Updated info')"
+                }
+            if not content:
+                return {
+                    "error": "Parameter 'content' is required for action 'update'",
+                    "example": "memory(action='update', memory_id=3, content='Updated info')"
+                }
+            return await update_memory(memory_id, content, context)
+        
+        elif action == "remove":
+            if memory_id is None:
+                return {
+                    "error": "Parameter 'memory_id' is required for action 'remove'",
+                    "example": "memory(action='remove', memory_id=3)"
+                }
+            return await remove_memory(memory_id, context)
+        
+        elif action == "search":
+            if not query:
+                return {
+                    "error": "Parameter 'query' is required for action 'search'",
+                    "example": "memory(action='search', query='dark mode')"
+                }
+            return await search_memories(query, context)
+        
+        else:
+            return {
+                "error": f"Unknown action: {action}",
+                "valid_actions": ["list", "add", "update", "remove", "search"]
+            }
+    
+    except Exception as e:
+        log.error(f"Error in memory operation (action={action}): {e}", exc_info=True)
+        return {
+            "error": f"Failed to execute memory operation: {str(e)}",
+            "action": action
+        }
+
+
 async def list_memories(context: Dict[str, Any]) -> Dict[str, Any]:
     """
     List all memory entries.

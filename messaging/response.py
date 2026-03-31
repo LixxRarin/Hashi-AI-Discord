@@ -295,7 +295,51 @@ class ResponseManager:
         
         state.add_generation(response_text, discord_ids, group_id)
         
-
+        # Cleanup ephemeral containers when LLM finishes responding
+        self._cleanup_ephemeral_containers(server_id, channel_id, ai_name)
+    
+    def _cleanup_ephemeral_containers(
+        self,
+        server_id: str,
+        channel_id: str,
+        ai_name: str
+    ):
+        """Cleanup ephemeral containers for this session."""
+        try:
+            from utils.container_manager import get_container_manager
+            import utils.func as func
+            
+            # Get session to get bash_tool config
+            channel_data = func.get_session_data(server_id, channel_id)
+            if not channel_data:
+                return
+            
+            session = channel_data.get(ai_name)
+            if not session:
+                return
+            
+            config = session.get("config", {})
+            bash_config = config.get("bash_tool", {})
+            
+            # Get container manager
+            manager = get_container_manager(bash_config)
+            
+            # Cleanup ephemeral containers (async, don't wait)
+            import asyncio
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    asyncio.create_task(
+                        manager.cleanup_ephemeral_for_session(
+                            server_id, channel_id, ai_name
+                        )
+                    )
+                    log.debug(f"Scheduled ephemeral container cleanup for {server_id}:{channel_id}:{ai_name}")
+            except Exception as e:
+                log.warning(f"Failed to schedule ephemeral cleanup: {e}")
+                
+        except Exception as e:
+            log.warning(f"Error cleaning up ephemeral containers: {e}")
     
     def get_current(
         self,

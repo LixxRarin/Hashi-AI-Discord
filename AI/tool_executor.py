@@ -8,9 +8,9 @@ including validation, context preparation, and result formatting.
 import json
 import logging
 from typing import Dict, Any, List, Optional, Callable
+import tiktoken
 
 log = logging.getLogger(__name__)
-
 
 class ToolExecutor:
     """
@@ -32,40 +32,16 @@ class ToolExecutor:
     
     def _register_tools(self):
         """Register all available tools."""
-        from AI.tools import (
-            message_tools,
-            emoji_tools,
-            user_tools,
-            channel_tools,
-            server_tools,
-            memory_tools,
-            poll_tools
-        )
+        from AI.tools import discord_tools, memory_tools, bash_tool
         
-        # Register message tools
-        self.tools["get_message_info"] = message_tools.get_message_info
+        # Register unified Discord query tool
+        self.tools["discord_query"] = discord_tools.discord_query
         
-        # Register emoji tools
-        self.tools["get_emoji_info"] = emoji_tools.get_emoji_info
+        # Register unified memory tool
+        self.tools["memory"] = memory_tools.memory
         
-        # Register user tools
-        self.tools["get_user_info"] = user_tools.get_user_info
-        
-        # Register channel tools
-        self.tools["get_channel_info"] = channel_tools.get_channel_info
-        
-        # Register server tools
-        self.tools["get_server_info"] = server_tools.get_server_info
-        
-        # Register memory tools
-        self.tools["list_memories"] = memory_tools.list_memories
-        self.tools["add_memory"] = memory_tools.add_memory
-        self.tools["update_memory"] = memory_tools.update_memory
-        self.tools["remove_memory"] = memory_tools.remove_memory
-        self.tools["search_memories"] = memory_tools.search_memories
-        
-        # Register poll tools
-        self.tools["get_poll_info"] = poll_tools.get_poll_info
+        # Register bash tool
+        self.tools["bash_tool"] = bash_tool.bash_tool
         
         log.info(f"Registered {len(self.tools)} tools: {list(self.tools.keys())}")
     
@@ -188,18 +164,34 @@ class ToolExecutor:
                 
                 # Truncate if too long (dynamic limit based on context_size)
                 if len(result_str) > truncation_limit:
-                    # Calculate approximate tokens for logging
-                    chars_per_token = context.get("session", {}).get("config", {}).get("tool_calling", {}).get("chars_per_token", 4)
-                    approx_tokens = len(result_str) // chars_per_token
+                    # Count actual tokens using tiktoken
+                    try:
+                        # Get model from context
+                        model = "gpt-4"
+                        session = context.get("session", {})
+                        connection_name = session.get("api_connection")
+                        if connection_name:
+                            server_id = context.get("server_id")
+                            if server_id:
+                                from utils import func
+                                connection = func.get_api_connection(server_id, connection_name)
+                                if connection:
+                                    model = connection.get("model", "gpt-4")
+                        
+                        # Count tokens
+                        actual_tokens = self._count_tokens(result_str, model)
+                    except Exception as e:
+                        log.warning(f"Failed to count tokens: {e}")
+                        actual_tokens = len(result_str) // 4  # Fallback estimate
                     
                     log.warning(
-                        f"Tool result too long ({len(result_str)} chars / ~{approx_tokens} tokens), "
+                        f"Tool result too long ({len(result_str)} chars / {actual_tokens} tokens), "
                         f"truncating to {truncation_limit} chars"
                     )
                     
                     # Truncate with buffer for truncation message
                     truncate_at = truncation_limit - 100
-                    result_str = result_str[:truncate_at] + f"\n\n... [truncated: {len(result_str) - truncate_at} chars removed]"
+                    result_str = result_str[:truncate_at] + f"\n\n... [truncated: {len(result_str) - truncate_at} chars / ~{actual_tokens} tokens removed]"
                 
                 results.append({
                     "tool_call_id": tool_id,
@@ -220,9 +212,30 @@ class ToolExecutor:
         
         return results
     
+    def _count_tokens(self, text: str, model: str = "gpt-4") -> int:
+        """
+        Count tokens in text using tiktoken.
+        
+        Args:
+            text: Text to count tokens for
+            model: Model name for encoding (default: gpt-4)
+            
+        Returns:
+            int: Number of tokens
+        """
+        try:
+            # Get encoding for model
+            encoding = tiktoken.encoding_for_model(model)
+            return len(encoding.encode(text))
+        except Exception as e:
+            log.warning(f"Failed to count tokens with tiktoken for model '{model}': {e}")
+            # Fallback to character estimation (4 chars per token)
+            return len(text) // 4
+    
     def _calculate_truncation_limit(self, context: Dict[str, Any]) -> int:
         """
         Calculate dynamic truncation limit for tool results based on context_size.
+        Uses tiktoken for accurate token-to-character conversion.
         
         Args:
             context: Context information containing session data
@@ -235,8 +248,9 @@ class ToolExecutor:
         config = session.get("config", {})
         tool_config = config.get("tool_calling", {})
         
-        # Get context_size - try API connection first, then config
+        # Get context_size and model - try API connection first
         context_size = 4096  # Default fallback
+        model = "gpt-4"  # Default model for tiktoken
         connection_name = session.get("api_connection")
         
         if connection_name:
@@ -248,6 +262,7 @@ class ToolExecutor:
                     connection = func.get_api_connection(server_id, connection_name)
                     if connection:
                         context_size = connection.get("context_size", 4096)
+                        model = connection.get("model", "gpt-4")
                     else:
                         context_size = config.get("context_size", 4096)
                 else:
@@ -260,21 +275,36 @@ class ToolExecutor:
             context_size = config.get("context_size", 4096)
         
         # Get configuration parameters with defaults
-        percentage = tool_config.get("tool_result_max_percentage", 15)
-        min_chars = tool_config.get("tool_result_min_chars", 1000)
-        max_chars = tool_config.get("tool_result_max_chars", 100000)
-        chars_per_token = tool_config.get("chars_per_token", 4)
+        percentage = tool_config.get("tool_result_max_percentage", 35)
+        min_chars = tool_config.get("tool_result_min_chars", 500)
+        max_chars = tool_config.get("tool_result_max_chars", 50000)
         
-        # Calculate dynamic limit: (context_size * percentage / 100) * chars_per_token
-        calculated_limit = int((context_size * percentage / 100) * chars_per_token)
+        # Calculate token limit: context_size * percentage / 100
+        token_limit = int(context_size * percentage / 100)
+        
+        # Convert token limit to character limit using tiktoken
+        # Sample text to estimate chars per token for this model
+        try:
+            encoding = tiktoken.encoding_for_model(model)
+            # Use a representative sample to estimate chars/token ratio
+            sample = "The quick brown fox jumps over the lazy dog. " * 10
+            sample_tokens = len(encoding.encode(sample))
+            chars_per_token = len(sample) / sample_tokens if sample_tokens > 0 else 4
+        except Exception as e:
+            log.warning(f"Failed to estimate chars_per_token with tiktoken for model '{model}': {e}")
+            chars_per_token = 4  # Fallback
+        
+        # Calculate character limit
+        calculated_limit = int(token_limit * chars_per_token)
         
         # Apply safety bounds
         truncation_limit = max(min_chars, min(calculated_limit, max_chars))
         
         log.debug(
             f"Tool result truncation limit: {truncation_limit} chars "
-            f"(context: {context_size} tokens, {percentage}% allocation, "
-            f"calculated: {calculated_limit}, bounds: {min_chars}-{max_chars})"
+            f"(context: {context_size} tokens, {percentage}% = {token_limit} tokens, "
+            f"~{chars_per_token:.2f} chars/token, model: {model}, "
+            f"bounds: {min_chars}-{max_chars})"
         )
         
         return truncation_limit

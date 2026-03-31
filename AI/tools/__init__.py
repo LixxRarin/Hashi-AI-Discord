@@ -3,6 +3,10 @@ Tool Calling System - Tool Definitions
 
 This module defines all available tools for LLM function calling.
 Each tool follows OpenAI's function calling schema format.
+
+Unified Tools (2):
+- discord_query: Query Discord information (messages, users, channels, server, emojis, polls)
+- memory: Manage persistent memory (list, add, update, remove, search)
 """
 
 # Tool definitions for LLM function calling
@@ -10,267 +14,142 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "get_message_info",
-            "description": "Automatically retrieve message details when you see: #N format (e.g., #5, #123), Discord message IDs (18-19 digits), or references to 'previous/last/recent messages'. Always use this to get accurate message content - never guess or rely on memory alone.",
+            "name": "discord_query",
+            "description": "Query Discord information: messages (#N or IDs), users (@mentions or names), channels, server stats, emojis/stickers, and polls. Always use this to get accurate Discord data - never guess. Examples: discord_query(resource='message', action='get', query={'short_id': 5}), discord_query(resource='user', action='search', query={'name': 'john'}), discord_query(resource='emoji', action='list', query={'limit': 10})",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query_type": {
+                    "resource": {
                         "type": "string",
-                        "enum": ["by_short_id", "by_discord_id", "recent", "range"],
-                        "description": "How to query messages: 'by_short_id' for #N format, 'by_discord_id' for full Discord ID, 'recent' for last N messages, 'range' for a range of messages"
+                        "enum": ["message", "user", "channel", "server", "emoji", "poll"],
+                        "description": "Type of Discord resource to query: 'message' (for #N or message IDs), 'user' (for @mentions or usernames), 'channel' (for channel info), 'server' (for guild/server info), 'emoji' (for emojis/stickers), 'poll' (for poll results)"
                     },
-                    "short_id": {
-                        "type": "integer",
-                        "description": "Short ID of the message when query_type is 'by_short_id'"
-                    },
-                    "discord_id": {
+                    "action": {
                         "type": "string",
-                        "description": "Full Discord message ID when query_type is 'by_discord_id'"
+                        "enum": ["get", "search", "list"],
+                        "description": "Action to perform: 'get' (retrieve specific item by ID), 'search' (find items matching criteria), 'list' (show all or recent items)"
                     },
-                    "count": {
-                        "type": "integer",
-                        "description": "Number of recent messages to retrieve when query_type is 'recent'"
-                    },
-                    "start_index": {
-                        "type": "integer",
-                        "description": "Start index for range query (0-based, negative for from end)"
-                    },
-                    "end_index": {
-                        "type": "integer",
-                        "description": "End index for range query"
-                    },
-                    "include_fields": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": ["content", "author", "timestamp", "reply_info", "ids", "all"]
-                        },
-                        "description": "Which fields to include in the response. Use 'all' for complete information."
+                    "query": {
+                        "type": "object",
+                        "description": "Query parameters (flexible based on resource and action). Common parameters: 'id' or 'short_id' (for get), 'name' or 'search_term' (for search), 'limit' (for list), 'include_fields' (fields to include)",
+                        "properties": {
+                            "id": {
+                                "type": "string",
+                                "description": "Discord ID or short ID (#N format)"
+                            },
+                            "short_id": {
+                                "type": "integer",
+                                "description": "Short message ID (e.g., 5 for #5)"
+                            },
+                            "discord_id": {
+                                "type": "string",
+                                "description": "Full Discord ID (18-19 digits)"
+                            },
+                            "name": {
+                                "type": "string",
+                                "description": "Name to search for (username, channel name, etc.)"
+                            },
+                            "query_type": {
+                                "type": "string",
+                                "description": "Specific query type for the resource (e.g., 'search_any', 'by_id', 'basic_info', 'statistics', 'roles', 'list_server_emojis', 'search_emoji')"
+                            },
+                            "search_term": {
+                                "type": "string",
+                                "description": "Search term for emojis/stickers"
+                            },
+                            "count": {
+                                "type": "integer",
+                                "description": "Number of items to retrieve (for messages)"
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Maximum results to return (default: 10)"
+                            },
+                            "include_fields": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "Fields to include in response: ['all'] for everything, ['basic'] for minimal, ['profile', 'roles', 'activity'] for specific fields"
+                            },
+                            "include_bots": {
+                                "type": "boolean",
+                                "description": "Include bot users in results (default: true)"
+                            },
+                            "start_index": {
+                                "type": "integer",
+                                "description": "Start index for range queries (0-based, negative for from end)"
+                            },
+                            "end_index": {
+                                "type": "integer",
+                                "description": "End index for range queries"
+                            }
+                        }
                     }
                 },
-                "required": ["query_type"]
+                "required": ["resource", "action"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "get_emoji_info",
-            "description": "Automatically check emojis/stickers when you see: :emoji_name: syntax, mentions of 'emoji', 'sticker', or when suggesting reactions. Use 'search_emoji' for specific names, 'list_server_emojis' to show all available, 'list_server_stickers' for stickers.",
+            "name": "memory",
+            "description": "Manage persistent memory across conversations. Use to remember user preferences, facts, and important information. Always check memories before answering questions about past conversations. Examples: memory(action='list'), memory(action='add', content='User prefers dark mode'), memory(action='search', query='dark mode'), memory(action='update', memory_id=3, content='Updated info'), memory(action='remove', memory_id=3)",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query_type": {
+                    "action": {
                         "type": "string",
-                        "enum": ["list_server_emojis", "list_server_stickers", "list_recent_emojis", "search_emoji", "search_sticker"],
-                        "description": "Type of query: 'list_server_emojis' for all server emojis, 'list_server_stickers' for all server stickers, 'list_recent_emojis' for recently created emojis, 'search_emoji' to search emoji by name, 'search_sticker' to search sticker by name"
-                    },
-                    "search_term": {
-                        "type": "string",
-                        "description": "Search term for emoji/sticker name when query_type is 'search_emoji' or 'search_sticker'"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return (default: 10)"
-                    }
-                },
-                "required": ["query_type"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_user_info",
-            "description": "Automatically retrieve user details when you see: <@ID> mentions, user names referenced, or questions about users. For <@ID> or detailed info (roles, join date), ALWAYS use query_type='by_id' with include_fields=['all']. For name searches, use 'search_any'. Never guess user details - always fetch them.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "user_identifier": {
-                        "type": "string",
-                        "description": "User ID, @mention, username, or search term. Not required for 'list_all' query type."
-                    },
-                    "query_type": {
-                        "type": "string",
-                        "enum": ["by_id", "by_exact_name", "search_username", "search_display_name", "search_any", "list_all"],
-                        "description": "Query type: 'by_id' (for mentions <@ID> or detailed user info), 'by_exact_name' (exact username), 'search_username' (partial username), 'search_display_name' (partial display name), 'search_any' (search all fields), 'list_all' (list all members - basic info only)"
-                    },
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of results to return (default: 10 for searches, 50 for list_all; max: 50 for searches, 100 for list_all)"
-                    },
-                    "include_bots": {
-                        "type": "boolean",
-                        "description": "Include bot users in list_all results (default: true). Only applies to 'list_all' query type."
-                    },
-                    "include_fields": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": ["profile", "roles", "activity", "join_date", "all"]
-                        },
-                        "description": "Fields to include. Use ['all'] for complete info including roles and join date. Use ['roles'] for just roles. Not used for 'list_all'."
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_channel_info",
-            "description": "Automatically fetch channel info when you see: #channel-name mentions, 'this channel', 'current channel', or questions about channel permissions/settings. Use 'current_channel' for the active channel, 'by_name' for specific channels.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query_type": {
-                        "type": "string",
-                        "enum": ["current_channel", "by_id", "by_name", "list_all", "list_threads"],
-                        "description": "Type of channel query: 'current_channel' for current channel info, 'by_id' to get channel by ID, 'by_name' to search by name, 'list_all' to list all channels, 'list_threads' to list threads in current channel"
-                    },
-                    "channel_identifier": {
-                        "type": "string",
-                        "description": "Channel ID or name (required for 'by_id' and 'by_name' query types)"
-                    },
-                    "include_fields": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": ["basic", "permissions", "settings", "threads", "all"]
-                        },
-                        "description": "Which fields to include in the response. Use 'all' for complete information."
-                    }
-                },
-                "required": ["query_type"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_server_info",
-            "description": "Automatically fetch server data when discussing: member counts, server features, roles, boost status, or server-wide topics. Use 'statistics' for counts, 'roles' for role lists, 'features' for server capabilities.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query_type": {
-                        "type": "string",
-                        "enum": ["basic_info", "statistics", "features", "roles", "boost_status"],
-                        "description": "Type of server query: 'basic_info' for server profile, 'statistics' for member/channel counts, 'features' for server features and boost level, 'roles' to list all roles, 'boost_status' for boost information"
-                    },
-                    "include_fields": {
-                        "type": "array",
-                        "items": {
-                            "type": "string",
-                            "enum": ["profile", "stats", "features", "roles", "all"]
-                        },
-                        "description": "Which fields to include in the response. Use 'all' for complete information."
-                    }
-                },
-                "required": ["query_type"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_memories",
-            "description": "Check your saved memories before answering questions about past conversations, user preferences, or when asked 'do you remember...'. Use proactively to provide accurate, personalized responses.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "add_memory",
-            "description": "IMMEDIATELY save important info when user shares: preferences, personal facts, corrections, or anything they want you to remember. Don't wait - save it right away so you can recall it later.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "The information to remember. Be concise but clear."
-                    }
-                },
-                "required": ["content"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_memory",
-            "description": "Update memories when user corrects previous information or when details change. First use list_memories to find the memory_id, then update it with new content.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "memory_id": {
-                        "type": "integer",
-                        "description": "ID of the memory to update (from list_memories)"
+                        "enum": ["list", "add", "update", "remove", "search"],
+                        "description": "Memory operation: 'list' (show all memories), 'add' (save new memory), 'update' (modify existing memory), 'remove' (delete memory), 'search' (find memories by keyword)"
                     },
                     "content": {
                         "type": "string",
-                        "description": "New content for the memory"
-                    }
-                },
-                "required": ["memory_id", "content"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "remove_memory",
-            "description": "Delete memories that are outdated, incorrect, or when user asks you to forget something. First use list_memories to find the memory_id, then remove it.",
-            "parameters": {
-                "type": "object",
-                "properties": {
+                        "description": "Memory content to save or update (required for 'add' and 'update' actions). Be concise but clear."
+                    },
                     "memory_id": {
                         "type": "integer",
-                        "description": "ID of the memory to remove (from list_memories)"
-                    }
-                },
-                "required": ["memory_id"]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "search_memories",
-            "description": "Search your memories by keyword before answering questions about user preferences, past topics, or when you need to recall specific information. More targeted than list_memories.",
-            "parameters": {
-                "type": "object",
-                "properties": {
+                        "description": "ID of the memory to update or remove (required for 'update' and 'remove' actions). Get this from list_memories or search_memories."
+                    },
                     "query": {
                         "type": "string",
-                        "description": "Search term or keyword to look for in your memories"
+                        "description": "Search term or keyword to look for in memories (required for 'search' action)"
                     }
                 },
-                "required": ["query"]
+                "required": ["action"]
             }
         }
     },
     {
         "type": "function",
         "function": {
-            "name": "get_poll_info",
-            "description": "Check poll results when users ask about votes or poll status. Returns real-time vote counts, voter lists (who voted for each option), winning options, and poll information directly from Discord.",
+            "name": "bash_tool",
+            "description": "Execute bash commands in an isolated Docker container. Supports persistent containers (maintains state between commands) and ephemeral mode (one-time execution). Use this to run scripts, install packages, process data, compile code, or perform any bash operations. The container has network access and can install packages via apt-get. Examples: bash_tool(command='echo Hello'), bash_tool(command='apt-get update && apt-get install -y python3'), bash_tool(command='python3 script.py'), bash_tool(command='ls', reset=True)",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "message_id": {
+                    "command": {
                         "type": "string",
-                        "description": "Discord message ID of the poll (short ID #N or full Discord ID)"
+                        "description": "Bash command to execute. Can be a single command or multiple commands chained with && or ;. The command runs in /workspace directory by default."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["persistent", "ephemeral"],
+                        "description": "Execution mode: 'persistent' (default) maintains container state between commands, allowing you to install packages and create files that persist. 'ephemeral' creates a fresh container for each command."
+                    },
+                    "reset": {
+                        "type": "boolean",
+                        "description": "Reset the container before executing (persistent mode only). Use this to start with a clean environment. Default: false"
+                    },
+                    "timeout": {
+                        "type": "integer",
+                        "description": "Command timeout in seconds. Default: 1800 (30 minutes). Use for long-running operations like large downloads or compilations."
+                    },
+                    "working_dir": {
+                        "type": "string",
+                        "description": "Working directory for command execution. Default: /workspace"
                     }
                 },
-                "required": ["message_id"]
+                "required": ["command"]
             }
         }
     }
