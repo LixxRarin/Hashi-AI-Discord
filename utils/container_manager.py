@@ -6,9 +6,12 @@ in isolated Docker environments. Supports persistent and ephemeral modes.
 """
 
 import asyncio
+import io
 import logging
+import os
+import tarfile
 import time
-from typing import Dict, Optional, Any, List, Tuple
+from typing import Dict, Optional, Any, List, Tuple, Union
 from dataclasses import dataclass, field
 from datetime import datetime
 
@@ -452,9 +455,10 @@ class ContainerManager:
                 pass  # Ignore if already exists
             
             # Execute the actual command (run in thread to avoid blocking event loop)
+            # Use array format to avoid shell quote escaping issues
             exec_result = await asyncio.to_thread(
                 container.exec_run,
-                f"bash -c 'cd {working_dir} && {command}'",
+                ["bash", "-c", f"cd {working_dir} && {command}"],
                 demux=True,
                 user="root"
             )
@@ -706,6 +710,457 @@ class ContainerManager:
                 for info in self.containers.values()
             ]
         }
+    
+    def _validate_container_path(self, path: str, allowed_base: str = "/workspace") -> bool:
+        """
+        Validate if path is within allowed directory (security check).
+        
+        Args:
+            path: Path to validate
+            allowed_base: Base directory that must contain the path
+            
+        Returns:
+            True if path is safe, False otherwise
+        """
+        # Normalize path to resolve .. and .
+        normalized = os.path.normpath(path)
+        
+        # Ensure it starts with allowed base
+        # Also prevent absolute paths outside workspace
+        if not normalized.startswith(allowed_base):
+            return False
+        
+        # Additional check: no .. after normalization
+        if ".." in normalized:
+            return False
+        
+        return True
+    
+    async def list_files(
+        self,
+        chat_id: str,
+        path: str = "/workspace",
+        recursive: bool = False,
+        pattern: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        List files in container directory.
+        
+        Args:
+            chat_id: Chat session ID
+            path: Directory path to list
+            recursive: List recursively
+            pattern: Optional filename pattern (e.g., "*.py")
+            
+        Returns:
+            Dict with file list and metadata
+        """
+        await self.initialize()
+        
+        # Validate path
+        if not self._validate_container_path(path):
+            return {
+                "error": f"Invalid path: {path}. Must be within /workspace",
+                "files": []
+            }
+        
+        try:
+            # Get container
+            container_info = self.containers.get(chat_id)
+            if not container_info:
+                return {
+                    "error": f"No container found for chat_id: {chat_id}",
+                    "files": []
+                }
+            
+            container = await asyncio.to_thread(
+                self.docker_client.containers.get,
+                container_info.container_id
+            )
+            
+            # Build find command
+            if recursive:
+                if pattern:
+                    cmd = f"find {path} -type f -name '{pattern}' 2>/dev/null || true"
+                else:
+                    cmd = f"find {path} -type f 2>/dev/null || true"
+            else:
+                if pattern:
+                    cmd = f"find {path} -maxdepth 1 -type f -name '{pattern}' 2>/dev/null || true"
+                else:
+                    cmd = f"find {path} -maxdepth 1 -type f 2>/dev/null || true"
+            
+            # Execute command
+            # Use array format to avoid shell quote escaping issues
+            result = await asyncio.to_thread(
+                container.exec_run,
+                ["bash", "-c", cmd],
+                user="root"
+            )
+            
+            if result.exit_code != 0:
+                return {
+                    "error": f"Failed to list files: {result.output.decode('utf-8', errors='replace')}",
+                    "files": []
+                }
+            
+            # Parse output
+            output = result.output.decode('utf-8', errors='replace').strip()
+            files = [f.strip() for f in output.split('\n') if f.strip()]
+            
+            # Get file sizes
+            file_info = []
+            for file_path in files:
+                try:
+                    size_result = await asyncio.to_thread(
+                        container.exec_run,
+                        f"stat -c %s {file_path}",
+                        user="root"
+                    )
+                    if size_result.exit_code == 0:
+                        size = int(size_result.output.decode('utf-8', errors='replace').strip())
+                        file_info.append({
+                            "path": file_path,
+                            "name": os.path.basename(file_path),
+                            "size": size
+                        })
+                except:
+                    file_info.append({
+                        "path": file_path,
+                        "name": os.path.basename(file_path),
+                        "size": 0
+                    })
+            
+            return {
+                "files": file_info,
+                "total": len(file_info),
+                "path": path,
+                "recursive": recursive
+            }
+            
+        except Exception as e:
+            log.error(f"Error listing files in container: {e}", exc_info=True)
+            return {
+                "error": f"Failed to list files: {str(e)}",
+                "files": []
+            }
+    
+    async def read_file(
+        self,
+        chat_id: str,
+        path: str,
+        max_size: int = 10 * 1024 * 1024  # 10MB default
+    ) -> Dict[str, Any]:
+        """
+        Read file content from container.
+        
+        Args:
+            chat_id: Chat session ID
+            path: File path in container
+            max_size: Maximum file size to read (bytes)
+            
+        Returns:
+            Dict with file content or error
+        """
+        await self.initialize()
+        
+        # Validate path
+        if not self._validate_container_path(path):
+            return {
+                "error": f"Invalid path: {path}. Must be within /workspace"
+            }
+        
+        try:
+            # Get container
+            container_info = self.containers.get(chat_id)
+            if not container_info:
+                return {
+                    "error": f"No container found for chat_id: {chat_id}"
+                }
+            
+            container = await asyncio.to_thread(
+                self.docker_client.containers.get,
+                container_info.container_id
+            )
+            
+            # Check if file exists and get size
+            stat_result = await asyncio.to_thread(
+                container.exec_run,
+                f"stat -c '%s %F' {path}",
+                user="root"
+            )
+            
+            if stat_result.exit_code != 0:
+                return {
+                    "error": f"File not found: {path}"
+                }
+            
+            stat_output = stat_result.output.decode('utf-8', errors='replace').strip()
+            parts = stat_output.split(' ', 1)
+            file_size = int(parts[0])
+            file_type = parts[1] if len(parts) > 1 else ""
+            
+            if "directory" in file_type.lower():
+                return {
+                    "error": f"Path is a directory, not a file: {path}"
+                }
+            
+            if file_size > max_size:
+                return {
+                    "error": f"File too large: {file_size} bytes (max: {max_size} bytes)",
+                    "size": file_size,
+                    "max_size": max_size
+                }
+            
+            # Read file using get_archive (safer for binary files)
+            bits, stat = await asyncio.to_thread(
+                container.get_archive,
+                path
+            )
+            
+            # Extract from tar
+            tar_stream = io.BytesIO()
+            for chunk in bits:
+                tar_stream.write(chunk)
+            tar_stream.seek(0)
+            
+            with tarfile.open(fileobj=tar_stream) as tar:
+                members = tar.getmembers()
+                if not members:
+                    return {"error": "File is empty or could not be read"}
+                
+                file_member = members[0]
+                file_obj = tar.extractfile(file_member)
+                if not file_obj:
+                    return {"error": "Could not extract file content"}
+                
+                content_bytes = file_obj.read()
+            
+            # Try to decode as text
+            try:
+                content_text = content_bytes.decode('utf-8')
+                is_text = True
+            except UnicodeDecodeError:
+                content_text = None
+                is_text = False
+            
+            result = {
+                "path": path,
+                "name": os.path.basename(path),
+                "size": file_size,
+                "is_text": is_text
+            }
+            
+            if is_text:
+                result["content"] = content_text
+                result["encoding"] = "utf-8"
+            else:
+                # For binary files, return base64
+                import base64
+                result["content_base64"] = base64.b64encode(content_bytes).decode('ascii')
+                result["encoding"] = "base64"
+            
+            return result
+            
+        except Exception as e:
+            log.error(f"Error reading file from container: {e}", exc_info=True)
+            return {
+                "error": f"Failed to read file: {str(e)}"
+            }
+    
+    async def write_file(
+        self,
+        chat_id: str,
+        path: str,
+        content: Union[str, bytes],
+        encoding: str = "utf-8"
+    ) -> Dict[str, Any]:
+        """
+        Write file to container.
+        
+        Args:
+            chat_id: Chat session ID
+            path: File path in container
+            content: File content (str or bytes)
+            encoding: Encoding for string content
+            
+        Returns:
+            Dict with success status
+        """
+        await self.initialize()
+        
+        # Validate path
+        if not self._validate_container_path(path):
+            return {
+                "error": f"Invalid path: {path}. Must be within /workspace",
+                "success": False
+            }
+        
+        try:
+            # Get container
+            container_info = self.containers.get(chat_id)
+            if not container_info:
+                return {
+                    "error": f"No container found for chat_id: {chat_id}",
+                    "success": False
+                }
+            
+            container = await asyncio.to_thread(
+                self.docker_client.containers.get,
+                container_info.container_id
+            )
+            
+            # Convert content to bytes
+            if isinstance(content, str):
+                content_bytes = content.encode(encoding)
+            else:
+                content_bytes = content
+            
+            # Create tar archive with file
+            tar_stream = io.BytesIO()
+            with tarfile.open(fileobj=tar_stream, mode='w') as tar:
+                file_data = io.BytesIO(content_bytes)
+                tarinfo = tarfile.TarInfo(name=os.path.basename(path))
+                tarinfo.size = len(content_bytes)
+                tarinfo.mtime = time.time()
+                tar.addfile(tarinfo, file_data)
+            
+            tar_stream.seek(0)
+            
+            # Ensure parent directory exists
+            parent_dir = os.path.dirname(path)
+            if parent_dir:
+                await asyncio.to_thread(
+                    container.exec_run,
+                    f"mkdir -p {parent_dir}",
+                    user="root"
+                )
+            
+            # Upload file
+            await asyncio.to_thread(
+                container.put_archive,
+                parent_dir if parent_dir else "/",
+                tar_stream.read()
+            )
+            
+            return {
+                "success": True,
+                "path": path,
+                "bytes_written": len(content_bytes)
+            }
+            
+        except Exception as e:
+            log.error(f"Error writing file to container: {e}", exc_info=True)
+            return {
+                "error": f"Failed to write file: {str(e)}",
+                "success": False
+            }
+    
+    async def extract_file(
+        self,
+        chat_id: str,
+        path: str,
+        max_size: int = 8 * 1024 * 1024  # 8MB (Discord limit for bots)
+    ) -> Dict[str, Any]:
+        """
+        Extract file from container for sending to Discord.
+        
+        Args:
+            chat_id: Chat session ID
+            path: File path in container
+            max_size: Maximum file size (Discord limit: 8MB for bots)
+            
+        Returns:
+            Dict with file bytes and metadata, or error
+        """
+        await self.initialize()
+        
+        # Validate path
+        if not self._validate_container_path(path):
+            return {
+                "error": f"Invalid path: {path}. Must be within /workspace"
+            }
+        
+        try:
+            # Get container
+            container_info = self.containers.get(chat_id)
+            if not container_info:
+                return {
+                    "error": f"No container found for chat_id: {chat_id}"
+                }
+            
+            container = await asyncio.to_thread(
+                self.docker_client.containers.get,
+                container_info.container_id
+            )
+            
+            # Check if file exists and get size
+            stat_result = await asyncio.to_thread(
+                container.exec_run,
+                f"stat -c '%s %F' {path}",
+                user="root"
+            )
+            
+            if stat_result.exit_code != 0:
+                return {
+                    "error": f"File not found: {path}"
+                }
+            
+            stat_output = stat_result.output.decode('utf-8', errors='replace').strip()
+            parts = stat_output.split(' ', 1)
+            file_size = int(parts[0])
+            file_type = parts[1] if len(parts) > 1 else ""
+            
+            if "directory" in file_type.lower():
+                return {
+                    "error": f"Path is a directory, not a file: {path}"
+                }
+            
+            if file_size > max_size:
+                return {
+                    "error": f"File too large for Discord: {file_size} bytes (max: {max_size} bytes)",
+                    "size": file_size,
+                    "max_size": max_size,
+                    "suggestion": "Consider compressing the file or splitting it into smaller parts"
+                }
+            
+            # Extract file using get_archive
+            bits, stat = await asyncio.to_thread(
+                container.get_archive,
+                path
+            )
+            
+            # Extract from tar
+            tar_stream = io.BytesIO()
+            for chunk in bits:
+                tar_stream.write(chunk)
+            tar_stream.seek(0)
+            
+            with tarfile.open(fileobj=tar_stream) as tar:
+                members = tar.getmembers()
+                if not members:
+                    return {"error": "File is empty or could not be read"}
+                
+                file_member = members[0]
+                file_obj = tar.extractfile(file_member)
+                if not file_obj:
+                    return {"error": "Could not extract file content"}
+                
+                file_bytes = file_obj.read()
+            
+            return {
+                "success": True,
+                "filename": os.path.basename(path),
+                "bytes": file_bytes,
+                "size": len(file_bytes),
+                "path": path
+            }
+            
+        except Exception as e:
+            log.error(f"Error extracting file from container: {e}", exc_info=True)
+            return {
+                "error": f"Failed to extract file: {str(e)}"
+            }
 
 
 # Global container manager instance

@@ -119,14 +119,21 @@ class AttachmentProcessor:
     async def download_file(
         self,
         url: str,
-        max_size_mb: int
+        max_size_mb: int,
+        message_id: Optional[str] = None,
+        filename: Optional[str] = None,
+        context: Optional[Dict[str, Any]] = None
     ) -> Optional[bytes]:
         """
         Download file from URL with timeout and size validation.
+        Supports automatic URL refresh on 404 if message_id is provided.
         
         Args:
             url: File URL
             max_size_mb: Maximum allowed size in MB
+            message_id: Optional Discord message ID for URL refresh on 404
+            filename: Optional filename for URL refresh
+            context: Optional context for URL refresh (bot_client, channel_id)
             
         Returns:
             File data as bytes, or None if download failed
@@ -135,6 +142,38 @@ class AttachmentProcessor:
             timeout = aiohttp.ClientTimeout(total=self.download_timeout)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get(url) as response:
+                    if response.status == 404 and message_id and filename and context:
+                        # URL expired, try to re-fetch fresh URL
+                        logger.info(f"URL expired (404), attempting to re-fetch for {filename}")
+                        from AI.tools.attachment_tools import _refetch_attachment_url
+                        
+                        fresh_url = await _refetch_attachment_url(message_id, filename, context)
+                        if fresh_url:
+                            logger.info(f"Got fresh URL, retrying download for {filename}")
+                            # Retry with fresh URL
+                            async with session.get(fresh_url) as retry_response:
+                                if retry_response.status != 200:
+                                    logger.warning(f"Failed to download file with fresh URL: HTTP {retry_response.status}")
+                                    return None
+                                
+                                # Check content length
+                                content_length = int(retry_response.headers.get('Content-Length', 0))
+                                max_size_bytes = max_size_mb * 1024 * 1024
+                                
+                                if content_length > max_size_bytes:
+                                    logger.warning(
+                                        f"File too large: {content_length / (1024*1024):.1f}MB "
+                                        f"(max: {max_size_mb}MB)"
+                                    )
+                                    return None
+                                
+                                # Download with fresh URL
+                                data = await retry_response.read()
+                                return data
+                        else:
+                            logger.warning(f"Failed to re-fetch URL for {filename}")
+                            return None
+                    
                     if response.status != 200:
                         logger.warning(f"Failed to download file: HTTP {response.status}")
                         return None
@@ -415,14 +454,16 @@ class AttachmentProcessor:
     async def process_attachment(
         self,
         attachment: Dict[str, Any],
-        include_content: bool = True
+        include_content: bool = True,
+        context: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Process a Discord attachment based on its type.
         
         Args:
-            attachment: Discord attachment dict with url, filename, content_type, size
+            attachment: Discord attachment dict with url, filename, content_type, size, message_id
             include_content: Whether to include file content (default: True)
+            context: Optional context for URL re-fetch (bot_client, channel_id)
             
         Returns:
             Dict with processed attachment data
@@ -431,6 +472,7 @@ class AttachmentProcessor:
         filename = attachment.get('filename', 'unknown')
         content_type = attachment.get('content_type', '')
         size = attachment.get('size', 0)
+        message_id = attachment.get('message_id')
         
         # Validate URL
         if not self.validate_url(url):
@@ -465,7 +507,13 @@ class AttachmentProcessor:
                 return result
             
             # Download and process
-            data = await self.download_file(url, self.max_text_size_kb / 1024)
+            data = await self.download_file(
+                url,
+                self.max_text_size_kb / 1024,
+                message_id=message_id,
+                filename=filename,
+                context=context
+            )
             if data:
                 text_result = await self.process_text_file(data, filename)
                 result.update(text_result)
@@ -479,7 +527,13 @@ class AttachmentProcessor:
         
         elif file_type == "pdf":
             # Download and process PDF
-            data = await self.download_file(url, self.max_document_size_mb)
+            data = await self.download_file(
+                url,
+                self.max_document_size_mb,
+                message_id=message_id,
+                filename=filename,
+                context=context
+            )
             if data:
                 pdf_result = await self.process_pdf_file(data, filename)
                 result.update(pdf_result)
@@ -488,7 +542,13 @@ class AttachmentProcessor:
         
         elif file_type == "docx":
             # Download and process DOCX
-            data = await self.download_file(url, self.max_document_size_mb)
+            data = await self.download_file(
+                url,
+                self.max_document_size_mb,
+                message_id=message_id,
+                filename=filename,
+                context=context
+            )
             if data:
                 docx_result = await self.process_docx_file(data, filename)
                 result.update(docx_result)

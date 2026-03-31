@@ -32,7 +32,7 @@ class ToolExecutor:
     
     def _register_tools(self):
         """Register all available tools."""
-        from AI.tools import discord_tools, memory_tools, bash_tool, attachment_tools
+        from AI.tools import discord_tools, memory_tools, bash_tool, attachment_tools, container_file_tools
         
         # Register unified Discord query tool
         self.tools["discord_query"] = discord_tools.discord_query
@@ -43,8 +43,12 @@ class ToolExecutor:
         # Register bash tool
         self.tools["bash_tool"] = bash_tool.bash_tool
         
-        # Register attachment query tool
+        # Register attachment tools (READ and SEND)
         self.tools["attachment_query"] = attachment_tools.get_attachment_content
+        self.tools["send_attachment"] = attachment_tools.send_attachment
+        
+        # Register container file access tool
+        self.tools["container_file"] = container_file_tools.container_file
         
         log.info(f"Registered {len(self.tools)} tools: {list(self.tools.keys())}")
     

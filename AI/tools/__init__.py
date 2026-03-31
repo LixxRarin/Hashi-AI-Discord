@@ -185,6 +185,98 @@ TOOL_DEFINITIONS = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_attachment",
+            "description": "Send attachments to Discord from URLs or base64-encoded data. Use this to share images, files, or any content from external sources. Supports spoiler tags and replies. For files from the container, use container_file with action='send_to_discord' instead. Examples: send_attachment(file_source='url', url='https://example.com/image.png', content='Check this out!'), send_attachment(file_source='base64', base64_data='iVBORw0KGgo...', filename='chart.png', content='Generated chart'), send_attachment(file_source='url', url='https://example.com/meme.jpg', spoiler=True)",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "file_source": {
+                        "type": "string",
+                        "enum": ["url", "base64"],
+                        "description": "Source of the file: 'url' (download from URL) or 'base64' (decode base64 data). For container files, use container_file tool instead."
+                    },
+                    "url": {
+                        "type": "string",
+                        "description": "URL to download file from (required if file_source='url'). Must be a direct link to the file. Discord CDN URLs, image hosting sites, etc."
+                    },
+                    "base64_data": {
+                        "type": "string",
+                        "description": "Base64-encoded file data (required if file_source='base64'). The raw base64 string without data URI prefix."
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Filename for the attachment. Required for base64 source. Optional for URL (will be extracted from URL if not provided)."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Optional text message to send with the attachment. Use this to provide context or description."
+                    },
+                    "reply_to": {
+                        "type": "string",
+                        "description": "Optional message ID to reply to. Can be short ID (#N) or full Discord ID."
+                    },
+                    "spoiler": {
+                        "type": "boolean",
+                        "description": "Mark attachment as spoiler (blurred until clicked). Default: false"
+                    }
+                },
+                "required": ["file_source"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "container_file",
+            "description": "Access and manipulate files in the bash container. Use this to list, read, write, and send files created in the container. Perfect for sharing generated content like charts, reports, processed data, etc. All paths must be within /workspace. Examples: container_file(action='list', path='/workspace', recursive=True), container_file(action='read', path='/workspace/data.json'), container_file(action='write', path='/workspace/output.txt', content='Hello!'), container_file(action='send_to_discord', path='/workspace/chart.png', message_content='Here is your chart!')",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "read", "write", "send_to_discord"],
+                        "description": "Action to perform: 'list' (list files in directory), 'read' (read file content), 'write' (create/modify file), 'send_to_discord' (extract and send file to Discord)"
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "File or directory path in container. Must be within /workspace (e.g., '/workspace/file.txt', '/workspace/images/'). Required for all actions."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to write to file (required for action='write'). Can be text or any string data."
+                    },
+                    "recursive": {
+                        "type": "boolean",
+                        "description": "List files recursively (for action='list'). Default: false. Set to true to list all files in subdirectories."
+                    },
+                    "pattern": {
+                        "type": "string",
+                        "description": "Filename pattern to filter (for action='list'). Examples: '*.py', '*.json', 'test_*'. Uses shell glob patterns."
+                    },
+                    "message_content": {
+                        "type": "string",
+                        "description": "Text message to send with file (for action='send_to_discord'). Use this to provide context about the file."
+                    },
+                    "reply_to": {
+                        "type": "string",
+                        "description": "Message ID to reply to (for action='send_to_discord'). Can be short ID (#N) or full Discord ID."
+                    },
+                    "spoiler": {
+                        "type": "boolean",
+                        "description": "Mark file as spoiler (for action='send_to_discord'). Default: false"
+                    },
+                    "encoding": {
+                        "type": "string",
+                        "description": "Text encoding for write action. Default: 'utf-8'. Other options: 'ascii', 'latin-1', etc."
+                    }
+                },
+                "required": ["action", "path"]
+            }
+        }
     }
 ]
 

@@ -1139,6 +1139,77 @@ class MessageSender:
         except Exception as e:
             log.error(f"Error converting custom emojis: {e}")
             return text
+    
+    async def send_with_attachment(
+        self,
+        channel: discord.TextChannel,
+        file: discord.File,
+        content: Optional[str] = None,
+        reference: Optional[discord.Message] = None,
+        spoiler: bool = False,
+        session: Optional[dict] = None
+    ) -> Optional[str]:
+        """
+        Send a message with an attachment.
+        
+        Args:
+            channel: Discord channel to send to
+            file: discord.File object to send
+            content: Optional text content
+            reference: Optional message to reply to
+            spoiler: Mark attachment as spoiler
+            session: Optional session for mode detection
+            
+        Returns:
+            Message ID or None if failed
+        """
+        try:
+            # Set spoiler if requested
+            if spoiler:
+                file.spoiler = True
+            
+            # Determine mode
+            mode = "bot"
+            webhook_url = None
+            if session:
+                mode = session.get("mode", "bot")
+                webhook_url = session.get("webhook_url")
+            
+            # Send based on mode
+            if mode == "bot":
+                # Bot mode: use channel.send
+                sent_msg = await channel.send(
+                    content=content,
+                    file=file,
+                    reference=reference
+                )
+                log.info(f"Sent attachment via bot: {file.filename} ({sent_msg.id})")
+                return str(sent_msg.id)
+            else:
+                # Webhook mode
+                if not webhook_url:
+                    log.error("Webhook mode selected but no webhook_url provided")
+                    return None
+                
+                async with aiohttp.ClientSession() as http_session:
+                    webhook = discord.Webhook.from_url(webhook_url, session=http_session)
+                    
+                    # Note: Webhooks don't support reply references
+                    # We'll send without reference in webhook mode
+                    sent_msg = await webhook.send(
+                        content=content,
+                        file=file,
+                        wait=True
+                    )
+                    log.info(f"Sent attachment via webhook: {file.filename} ({sent_msg.id})")
+                    return str(sent_msg.id)
+        
+        except discord.HTTPException as e:
+            log.error(f"Discord HTTP error sending attachment: {e}")
+            return None
+        except Exception as e:
+            log.error(f"Error sending attachment: {e}", exc_info=True)
+            return None
 
 
 # Global sender instance

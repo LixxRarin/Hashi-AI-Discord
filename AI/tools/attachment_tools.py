@@ -1,87 +1,60 @@
 """
-Attachment Tools - Tools for accessing and reading message attachments
+Attachment Tools - Tools for accessing and reading/sending message attachments
 
-This module provides tools for the LLM to access and read attachments from
-Discord messages, supporting various file types including text, images, PDFs, and DOCX.
+This module provides tools for the LLM to:
+- Read attachments from Discord messages (various file types)
+- Send attachments to Discord from URLs or base64 data
 """
 
 import logging
 import re
+import discord
+import io
+import aiohttp
+import base64
 from typing import Dict, Any, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
 
-
-def parse_discord_cdn_url(url: str) -> Optional[Dict[str, str]]:
-    """
-    Parse Discord CDN URL to extract channel_id, message_id, and filename.
-    
-    URL format: https://cdn.discordapp.com/attachments/{channel_id}/{message_id}/{filename}
-    or: https://media.discordapp.net/attachments/{channel_id}/{message_id}/{filename}
-    
-    Args:
-        url: Discord CDN URL
-        
-    Returns:
-        Dict with 'channel_id', 'message_id', 'filename' or None if not a valid Discord attachment URL
-    """
-    try:
-        # Pattern for Discord CDN attachment URLs
-        pattern = r'https?://(?:cdn\.discordapp\.com|media\.discordapp\.net)/attachments/(\d+)/(\d+)/([^?]+)'
-        match = re.match(pattern, url)
-        
-        if match:
-            channel_id, message_id, filename = match.groups()
-            return {
-                'channel_id': channel_id,
-                'message_id': message_id,
-                'filename': filename
-            }
-        
-        return None
-        
-    except Exception as e:
-        log.debug(f"Failed to parse Discord CDN URL: {e}")
-        return None
+# Discord file size limit for bots (8MB)
+DISCORD_MAX_FILE_SIZE = 8 * 1024 * 1024
 
 
-async def _fallback_fetch_from_message(
-    channel_id: str,
+async def _refetch_attachment_url(
     message_id: str,
     filename: str,
-    include_content: bool,
     context: Dict[str, Any]
-) -> Optional[Dict[str, Any]]:
+) -> Optional[str]:
     """
-    Fallback: Fetch attachment directly from Discord message.
+    Re-fetch fresh URL for an attachment from Discord API.
     
-    This is used when a direct URL download fails (e.g., expired URL).
-    Fetches the message via Discord API to get a fresh URL.
+    This function fetches the message from Discord and retrieves a fresh URL
+    for the specified attachment. Used when stored URLs expire (HTTP 404).
     
     Args:
-        channel_id: Discord channel ID
         message_id: Discord message ID
-        filename: Filename to search for
-        include_content: Whether to include file content
-        context: Context with bot_client
+        filename: Attachment filename to search for
+        context: Context with bot_client and channel_id
         
     Returns:
-        Processed attachment result or None if failed
+        Fresh attachment URL or None if failed
     """
     try:
         bot_client = context.get("bot_client")
-        if not bot_client:
-            log.warning("Fallback failed: bot_client not available in context")
+        channel_id = context.get("channel_id")
+        
+        if not bot_client or not channel_id:
+            log.warning("Re-fetch failed: bot_client or channel_id not available in context")
             return None
         
         # Get channel
         try:
             channel = bot_client.get_channel(int(channel_id))
             if not channel:
-                log.warning(f"Fallback failed: Channel {channel_id} not found")
+                log.warning(f"Re-fetch failed: Channel {channel_id} not found")
                 return None
         except Exception as e:
-            log.warning(f"Fallback failed: Error getting channel: {e}")
+            log.warning(f"Re-fetch failed: Error getting channel: {e}")
             return None
         
         # Fetch message
@@ -90,51 +63,29 @@ async def _fallback_fetch_from_message(
             
             message = await fetch_message_cached(channel, message_id)
             if not message:
-                log.warning(f"Fallback failed: Message {message_id} not found (may be deleted)")
+                log.warning(f"Re-fetch failed: Message {message_id} not found (may be deleted)")
                 return None
                 
         except Exception as e:
-            log.warning(f"Fallback failed: Error fetching message: {e}")
+            log.warning(f"Re-fetch failed: Error fetching message: {e}")
             return None
         
         # Check if message has attachments
         if not message.attachments:
-            log.warning(f"Fallback failed: Message {message_id} has no attachments")
+            log.warning(f"Re-fetch failed: Message {message_id} has no attachments")
             return None
         
         # Find attachment by filename
-        target_attachment = None
         for att in message.attachments:
             if att.filename == filename:
-                target_attachment = att
-                break
+                log.info(f"Re-fetch successful: Got fresh URL for {filename} from message {message_id}")
+                return att.url
         
-        if not target_attachment:
-            log.warning(f"Fallback failed: Attachment '{filename}' not found in message {message_id}")
-            return None
-        
-        # Process attachment with fresh URL
-        from utils.attachment_processor import get_attachment_processor
-        
-        attachment_data = {
-            "filename": target_attachment.filename,
-            "url": target_attachment.url,  # Fresh URL from Discord API
-            "content_type": target_attachment.content_type or "unknown",
-            "size": target_attachment.size
-        }
-        
-        log.info(f"Fallback successful: Processing {filename} with fresh URL from message {message_id}")
-        
-        processor = get_attachment_processor()
-        result = await processor.process_attachment(
-            attachment=attachment_data,
-            include_content=include_content
-        )
-        
-        return result
+        log.warning(f"Re-fetch failed: Attachment '{filename}' not found in message {message_id}")
+        return None
         
     except Exception as e:
-        log.error(f"Fallback error: {e}", exc_info=True)
+        log.error(f"Re-fetch error: {e}", exc_info=True)
         return None
 
 
@@ -146,15 +97,13 @@ async def _process_direct_url(
     """
     Process a direct URL to a file (sticker, attachment, etc.).
     
-    Implements automatic fallback for expired Discord CDN URLs:
-    1. Tries direct download first
-    2. If download fails and URL is from Discord CDN, attempts to fetch from message
-    3. Returns result from fallback if successful, otherwise returns original error
+    Note: Automatic URL refresh on 404 requires message_id in attachment metadata.
+    For old messages without stored message_id, URL refresh is not possible.
     
     Args:
         url: Direct URL to the file
         include_content: Whether to include file content
-        context: Context information (required for fallback)
+        context: Context information (for automatic URL refresh)
         
     Returns:
         Dict with processed file data or error
@@ -196,50 +145,13 @@ async def _process_direct_url(
         
         log.info(f"Processing direct URL: {filename} ({content_type})")
         
-        # Process using AttachmentProcessor
+        # Process using AttachmentProcessor (with context for automatic URL refresh)
         processor = get_attachment_processor()
         result = await processor.process_attachment(
             attachment=attachment,
-            include_content=include_content
+            include_content=include_content,
+            context=context
         )
-        
-        # Check if download failed and try fallback for Discord CDN URLs
-        if "error" in result and include_content:
-            # Parse URL to check if it's a Discord CDN attachment URL
-            parsed_url = parse_discord_cdn_url(url)
-            
-            if parsed_url:
-                # This is a Discord CDN attachment URL that failed
-                log.info(f"Direct URL download failed for {filename}, attempting fallback to message fetch")
-                
-                # Try fallback if context is available
-                if context:
-                    fallback_result = await _fallback_fetch_from_message(
-                        channel_id=parsed_url['channel_id'],
-                        message_id=parsed_url['message_id'],
-                        filename=parsed_url['filename'],
-                        include_content=include_content,
-                        context=context
-                    )
-                    
-                    if fallback_result:
-                        # Fallback succeeded
-                        log.info(f"Fallback successful for {filename}")
-                        return {
-                            "source": "direct_url_with_fallback",
-                            "url": url,
-                            "attachment": fallback_result,
-                            "note": "Original URL failed, retrieved from Discord message (URL may have expired)"
-                        }
-                    else:
-                        # Fallback failed, add helpful context to error
-                        result["fallback_attempted"] = True
-                        result["fallback_failed"] = True
-                        result["suggestion"] = f"URL may have expired and message may be deleted. Try using message_id='{parsed_url['message_id']}' with filename='{parsed_url['filename']}' instead."
-                else:
-                    # No context available for fallback
-                    result["fallback_not_attempted"] = True
-                    result["suggestion"] = f"URL may have expired. Try using message_id='{parsed_url['message_id']}' with filename='{parsed_url['filename']}' instead."
         
         return {
             "source": "direct_url",
@@ -353,11 +265,10 @@ async def get_attachment_content(
                     return {"error": "AI name not found in context (required for short ID lookup)"}
                 
                 # Look up Discord ID
-                discord_id = manager.get_discord_id(
+                discord_id = await manager.get_discord_id(
                     server_id=server_id,
                     channel_id=channel_id,
                     ai_name=ai_name,
-                    chat_id=chat_id,
                     short_id=short_id
                 )
                 
@@ -400,7 +311,8 @@ async def get_attachment_content(
                 "filename": att.filename,
                 "url": att.url,
                 "content_type": att.content_type or "unknown",
-                "size": att.size
+                "size": att.size,
+                "message_id": str(message.id)
             })
         
         # Filter attachments if requested
@@ -446,7 +358,8 @@ async def get_attachment_content(
             try:
                 result = await processor.process_attachment(
                     attachment=att,
-                    include_content=include_content
+                    include_content=include_content,
+                    context=context
                 )
                 
                 # Add index information
@@ -482,3 +395,306 @@ async def get_attachment_content(
             "error": f"Failed to get attachment content: {str(e)}",
             "message_id": message_id
         }
+
+
+async def send_attachment(
+    file_source: str,
+    url: Optional[str] = None,
+    base64_data: Optional[str] = None,
+    filename: Optional[str] = None,
+    content: Optional[str] = None,
+    reply_to: Optional[str] = None,
+    spoiler: bool = False,
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Send an attachment to Discord from various sources.
+    
+    This tool allows the LLM to send files to Discord from:
+    - URLs: Download and send files from external links
+    - Base64: Send files encoded as base64 strings
+    
+    Note: For sending files from the container, use container_file with action="send_to_discord"
+    
+    Args:
+        file_source: Source type ("url" or "base64")
+        url: URL to download file from (required if file_source="url")
+        base64_data: Base64-encoded file data (required if file_source="base64")
+        filename: Filename for the attachment (required for base64, optional for url)
+        content: Optional text message to send with the attachment
+        reply_to: Optional message ID to reply to
+        spoiler: Mark attachment as spoiler (default: False)
+        context: Context information (channel, session, etc.)
+        
+    Returns:
+        Dict with message_id and status, or error
+        
+    Examples:
+        # Send image from URL
+        send_attachment(
+            file_source="url",
+            url="https://example.com/image.png",
+            content="Here's the image!"
+        )
+        
+        # Send file from base64
+        send_attachment(
+            file_source="base64",
+            base64_data="iVBORw0KGgo...",
+            filename="chart.png",
+            content="Generated chart"
+        )
+        
+        # Send with spoiler tag
+        send_attachment(
+            file_source="url",
+            url="https://example.com/spoiler.jpg",
+            spoiler=True
+        )
+    """
+    if context is None:
+        return {"error": "No context provided"}
+    
+    log.info(f"send_attachment called: source={file_source}, filename={filename}")
+    
+    # Validate file_source
+    if file_source not in ["url", "base64"]:
+        return {
+            "error": f"Invalid file_source: {file_source}",
+            "valid_sources": ["url", "base64"],
+            "note": "For container files, use container_file with action='send_to_discord'"
+        }
+    
+    try:
+        # Route to appropriate handler
+        if file_source == "url":
+            return await _send_from_url(
+                url, filename, content, reply_to, spoiler, context
+            )
+        elif file_source == "base64":
+            return await _send_from_base64(
+                base64_data, filename, content, reply_to, spoiler, context
+            )
+    
+    except Exception as e:
+        log.error(f"Error in send_attachment: {e}", exc_info=True)
+        return {
+            "error": f"Failed to send attachment: {str(e)}",
+            "file_source": file_source
+        }
+
+
+async def _send_from_url(
+    url: Optional[str],
+    filename: Optional[str],
+    content: Optional[str],
+    reply_to: Optional[str],
+    spoiler: bool,
+    context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle sending attachment from URL."""
+    if not url:
+        return {"error": "URL is required for file_source='url'"}
+    
+    log.info(f"Downloading file from URL: {url}")
+    
+    try:
+        # Download file from URL
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                if response.status != 200:
+                    return {
+                        "error": f"Failed to download from URL: HTTP {response.status}",
+                        "url": url
+                    }
+                
+                # Check content length
+                content_length = response.headers.get('Content-Length')
+                if content_length:
+                    size = int(content_length)
+                    if size > DISCORD_MAX_FILE_SIZE:
+                        return {
+                            "error": f"File too large: {size} bytes (max: {DISCORD_MAX_FILE_SIZE} bytes)",
+                            "size": size,
+                            "max_size": DISCORD_MAX_FILE_SIZE,
+                            "url": url
+                        }
+                
+                # Read file data
+                file_data = await response.read()
+                
+                # Check actual size
+                if len(file_data) > DISCORD_MAX_FILE_SIZE:
+                    return {
+                        "error": f"File too large: {len(file_data)} bytes (max: {DISCORD_MAX_FILE_SIZE} bytes)",
+                        "size": len(file_data),
+                        "max_size": DISCORD_MAX_FILE_SIZE,
+                        "url": url
+                    }
+                
+                # Determine filename if not provided
+                if not filename:
+                    # Try to get from Content-Disposition header
+                    content_disposition = response.headers.get('Content-Disposition', '')
+                    if 'filename=' in content_disposition:
+                        filename = content_disposition.split('filename=')[1].strip('"\'')
+                    else:
+                        # Extract from URL
+                        import os
+                        filename = os.path.basename(url.split('?')[0])
+                        if not filename or filename == '/':
+                            filename = "download"
+                
+                log.info(f"Downloaded {len(file_data)} bytes from {url}")
+        
+        # Send to Discord
+        return await _send_file_to_discord(
+            file_data, filename, content, reply_to, spoiler, context
+        )
+    
+    except aiohttp.ClientError as e:
+        log.error(f"HTTP error downloading from URL: {e}")
+        return {
+            "error": f"Failed to download from URL: {str(e)}",
+            "url": url
+        }
+    except Exception as e:
+        log.error(f"Error downloading from URL: {e}", exc_info=True)
+        return {
+            "error": f"Failed to download from URL: {str(e)}",
+            "url": url
+        }
+
+
+async def _send_from_base64(
+    base64_data: Optional[str],
+    filename: Optional[str],
+    content: Optional[str],
+    reply_to: Optional[str],
+    spoiler: bool,
+    context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Handle sending attachment from base64 data."""
+    if not base64_data:
+        return {"error": "base64_data is required for file_source='base64'"}
+    
+    if not filename:
+        return {"error": "filename is required for file_source='base64'"}
+    
+    log.info(f"Decoding base64 data for file: {filename}")
+    
+    try:
+        # Decode base64
+        file_data = base64.b64decode(base64_data)
+        
+        # Check size
+        if len(file_data) > DISCORD_MAX_FILE_SIZE:
+            return {
+                "error": f"File too large: {len(file_data)} bytes (max: {DISCORD_MAX_FILE_SIZE} bytes)",
+                "size": len(file_data),
+                "max_size": DISCORD_MAX_FILE_SIZE
+            }
+        
+        log.info(f"Decoded {len(file_data)} bytes from base64")
+        
+        # Send to Discord
+        return await _send_file_to_discord(
+            file_data, filename, content, reply_to, spoiler, context
+        )
+    
+    except base64.binascii.Error as e:
+        log.error(f"Invalid base64 data: {e}")
+        return {
+            "error": f"Invalid base64 data: {str(e)}"
+        }
+    except Exception as e:
+        log.error(f"Error decoding base64: {e}", exc_info=True)
+        return {
+            "error": f"Failed to decode base64: {str(e)}"
+        }
+
+
+async def _send_file_to_discord(
+    file_data: bytes,
+    filename: str,
+    content: Optional[str],
+    reply_to: Optional[str],
+    spoiler: bool,
+    context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Send file data to Discord."""
+    # Get channel and session
+    channel_id = context.get("channel_id")
+    bot_client = context.get("bot_client")
+    session = context.get("session", {})
+    server_id = context.get("server_id")
+    ai_name = context.get("ai_name")
+    
+    if not all([channel_id, bot_client]):
+        return {"error": "Missing required context (channel_id, bot_client)"}
+    
+    try:
+        # Get channel
+        channel = bot_client.get_channel(int(channel_id))
+        if not channel:
+            return {"error": f"Channel {channel_id} not found"}
+        
+        # Create discord.File from bytes
+        file_obj = discord.File(
+            io.BytesIO(file_data),
+            filename=filename,
+            spoiler=spoiler
+        )
+        
+        # Get reference message if reply_to is provided
+        reference_message = None
+        if reply_to:
+            from expressions.reply_expression import ReplyExpression
+            reference_message = await ReplyExpression.fetch_message_safe(
+                channel, reply_to,
+                server_id=server_id,
+                ai_name=ai_name
+            )
+            if not reference_message:
+                log.warning(f"Reply target message {reply_to} not found")
+        
+        # Send using MessageSender
+        from utils.message_sender import get_message_sender
+        sender = get_message_sender()
+        
+        message_id = await sender.send_with_attachment(
+            channel=channel,
+            file=file_obj,
+            content=content,
+            reference=reference_message,
+            spoiler=spoiler,
+            session=session
+        )
+        
+        if message_id:
+            log.info(f"Sent attachment {filename} to Discord (message_id: {message_id})")
+            return {
+                "success": True,
+                "message_id": message_id,
+                "filename": filename,
+                "size": len(file_data)
+            }
+        else:
+            return {
+                "error": "Failed to send attachment to Discord",
+                "filename": filename
+            }
+    
+    except discord.HTTPException as e:
+        log.error(f"Discord HTTP error: {e}")
+        return {
+            "error": f"Discord error: {str(e)}",
+            "filename": filename
+        }
+    except Exception as e:
+        log.error(f"Error sending to Discord: {e}", exc_info=True)
+        return {
+            "error": f"Failed to send to Discord: {str(e)}",
+            "filename": filename
+        }
+

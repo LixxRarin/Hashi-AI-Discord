@@ -239,7 +239,8 @@ class MessageIntake:
                     "filename": att.filename,
                     "url": att.url,
                     "content_type": att.content_type or "unknown",
-                    "size": att.size
+                    "size": att.size,
+                    "message_id": str(message.id)
                 })
         
         # Capture stickers

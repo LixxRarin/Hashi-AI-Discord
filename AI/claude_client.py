@@ -316,7 +316,7 @@ class ClaudeClient(BaseAIClient):
                     ai_response += content_block.text
                 elif content_block.type == "thinking":
                     thinking_content += content_block.thinking
-                    func.log.info(f"Response contains thinking block ({len(content_block.thinking)} chars)")
+                    func.log.debug(f"Response contains thinking block ({len(content_block.thinking)} chars)")
                 elif content_block.type == "redacted_thinking":
                     # Redacted thinking blocks contain encrypted content
                     # Don't try to display them, but note their presence
