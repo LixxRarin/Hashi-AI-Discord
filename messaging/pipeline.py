@@ -544,28 +544,40 @@ class MessagePipeline:
             registry = get_expression_registry()
             expr_result = registry.process_text(display_response, config)
             
-            # Handle ignore expression (should_skip = True means pure <IGNORE> was detected)
+            # Handle ignore expression (should_skip = True means <IGNORE> was detected)
             if expr_result.should_skip:
-                log.debug("Expression system: AI sent pure <IGNORE>, skipping message")
+                ignore_type = expr_result.metadata.get("ignore_type")
                 
-                await self.processor.short_id_manager.skip_next_id(
-                    server_id, channel_id, ai_name
-                )
-                
-                await self.store.add_assistant_message(
-                    server_id,
-                    channel_id,
-                    ai_name,
-                    "<IGNORE>",  # Save the tag itself
-                    [],  # No Discord IDs (message not sent)
-                    session_with_context.get("chat_id", "default"),
-                    short_id=None  # No short_id for ignored messages
-                )
-                
-                if config.get("sleep_mode_enabled", False):
-                    await self._handle_ignore_for_sleep(
-                        server_id, channel_id, ai_name, session_with_context
+                if ignore_type == "pure":
+                    # Pure ignore: save <IGNORE> to history, handle sleep mode
+                    log.debug("Expression system: AI sent pure <IGNORE>, skipping message")
+                    
+                    await self.processor.short_id_manager.skip_next_id(
+                        server_id, channel_id, ai_name
                     )
+                    
+                    await self.store.add_assistant_message(
+                        server_id,
+                        channel_id,
+                        ai_name,
+                        "<IGNORE>",  # Save the tag itself
+                        [],  # No Discord IDs (message not sent)
+                        session_with_context.get("chat_id", "default"),
+                        short_id=None  # No short_id for ignored messages
+                    )
+                    
+                    if config.get("sleep_mode_enabled", False):
+                        await self._handle_ignore_for_sleep(
+                            server_id, channel_id, ai_name, session_with_context
+                        )
+                
+                elif ignore_type == "impure":
+                    # Impure ignore: don't save to history, don't handle sleep mode
+                    log.warning(
+                        "Expression system: AI sent impure <IGNORE> (with additional content), "
+                        "skipping message and not saving to history"
+                    )
+                    # No history save, no sleep mode handling for impure ignore
                 
                 await self.buffer.clear_specific_messages(
                     server_id, channel_id, ai_name, processing_message_ids

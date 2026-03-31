@@ -14,13 +14,13 @@ Correct usage (pure ignore):
     <IGNORE>
     <thinking>...</thinking>\n\n<IGNORE>  # Thinking tags are stripped
     
-Incorrect usage (impure ignore - tag will be stripped, rest sent normally):
-    <IGNORE> Sorry, I can't help with that  # Sends: "Sorry, I can't help with that"
-    I think <IGNORE> would be best here     # Sends: "I think would be best here"
+Incorrect usage (impure ignore - nothing sent, nothing saved):
+    <IGNORE> Sorry, I can't help with that  # Not sent to Discord, not saved to history
+    I think <IGNORE> would be best here     # Not sent to Discord, not saved to history
 
 Behavior:
 - Pure ignore: Not sent to Discord, saved to history as <IGNORE>
-- Impure ignore: <IGNORE> tag stripped, rest of content sent normally
+- Impure ignore: Not sent to Discord, not saved to history
 
 Migrated from: utils/ignore_parser.py
 """
@@ -43,8 +43,8 @@ class IgnoreExpression(BaseExpression):
     where the AI recognizes it shouldn't respond.
     
     Behavior:
-    - Pure ignore (<IGNORE> only): Not sent to Discord, saved to history
-    - Impure ignore (<IGNORE> + content): Tag stripped, rest sent normally
+    - Pure ignore (<IGNORE> only): Not sent to Discord, saved to history as <IGNORE>
+    - Impure ignore (<IGNORE> + content): Not sent to Discord, not saved to history
     
     Thinking tags (<thinking>, <think>, etc.) are stripped before checking,
     so "<thinking>...</thinking>\n\n<IGNORE>" is treated as pure ignore.
@@ -91,14 +91,14 @@ class IgnoreExpression(BaseExpression):
         Parse ignore syntax and determine if message should be skipped.
         
         - Pure ignore: message is skipped (not sent to Discord, saved to history as <IGNORE>)
-        - Impure ignore: <IGNORE> tag is stripped, rest of content is sent normally
+        - Impure ignore: message is skipped (not sent to Discord, not saved to history)
         
         Args:
             text: Text to check for ignore tag
             config: AI configuration (not used for ignore parsing)
             
         Returns:
-            ExpressionResult with should_skip=True only for pure ignore
+            ExpressionResult with should_skip=True for both pure and impure ignore
         """
         is_pure = self.is_pure_ignore(text)
         has_ignore = self.has_syntax(text)
@@ -116,14 +116,14 @@ class IgnoreExpression(BaseExpression):
         
         if has_ignore:
             # Impure ignore: has <IGNORE> but with additional content
-            # Strip the tag and send the rest normally
+            # Don't send to Discord, don't save to history
             log.warning(
                 "Found <IGNORE> tag with additional content - "
-                "stripping tag and sending rest of content. "
-                "Use ONLY <IGNORE> to skip responding."
+                "message will be skipped and not saved to history. "
+                "Use ONLY <IGNORE> to skip responding and save to history."
             )
             return ExpressionResult(
-                should_skip=False,
+                should_skip=True,
                 metadata={
                     "expression": "ignore",
                     "ignore_type": "impure",
@@ -163,8 +163,8 @@ When to use <IGNORE>:
 IMPORTANT: When you decide not to respond, output ONLY: <IGNORE>
 Do not add any other text or explanation.
 
-If you add text after <IGNORE>, the tag will be stripped and your message will be sent normally.
-Example: "<IGNORE> Sorry" will send "Sorry" to the channel."""
+If you add text with <IGNORE>, the message will not be sent to Discord and will not be saved to history.
+Example: "<IGNORE> Sorry" will not send anything and will not be saved."""
     
     def is_pure_ignore(self, text: str) -> bool:
         """

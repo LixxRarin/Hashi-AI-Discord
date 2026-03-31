@@ -6,9 +6,136 @@ Discord messages, supporting various file types including text, images, PDFs, an
 """
 
 import logging
-from typing import Dict, Any, List, Optional
+import re
+from typing import Dict, Any, List, Optional, Tuple
 
 log = logging.getLogger(__name__)
+
+
+def parse_discord_cdn_url(url: str) -> Optional[Dict[str, str]]:
+    """
+    Parse Discord CDN URL to extract channel_id, message_id, and filename.
+    
+    URL format: https://cdn.discordapp.com/attachments/{channel_id}/{message_id}/{filename}
+    or: https://media.discordapp.net/attachments/{channel_id}/{message_id}/{filename}
+    
+    Args:
+        url: Discord CDN URL
+        
+    Returns:
+        Dict with 'channel_id', 'message_id', 'filename' or None if not a valid Discord attachment URL
+    """
+    try:
+        # Pattern for Discord CDN attachment URLs
+        pattern = r'https?://(?:cdn\.discordapp\.com|media\.discordapp\.net)/attachments/(\d+)/(\d+)/([^?]+)'
+        match = re.match(pattern, url)
+        
+        if match:
+            channel_id, message_id, filename = match.groups()
+            return {
+                'channel_id': channel_id,
+                'message_id': message_id,
+                'filename': filename
+            }
+        
+        return None
+        
+    except Exception as e:
+        log.debug(f"Failed to parse Discord CDN URL: {e}")
+        return None
+
+
+async def _fallback_fetch_from_message(
+    channel_id: str,
+    message_id: str,
+    filename: str,
+    include_content: bool,
+    context: Dict[str, Any]
+) -> Optional[Dict[str, Any]]:
+    """
+    Fallback: Fetch attachment directly from Discord message.
+    
+    This is used when a direct URL download fails (e.g., expired URL).
+    Fetches the message via Discord API to get a fresh URL.
+    
+    Args:
+        channel_id: Discord channel ID
+        message_id: Discord message ID
+        filename: Filename to search for
+        include_content: Whether to include file content
+        context: Context with bot_client
+        
+    Returns:
+        Processed attachment result or None if failed
+    """
+    try:
+        bot_client = context.get("bot_client")
+        if not bot_client:
+            log.warning("Fallback failed: bot_client not available in context")
+            return None
+        
+        # Get channel
+        try:
+            channel = bot_client.get_channel(int(channel_id))
+            if not channel:
+                log.warning(f"Fallback failed: Channel {channel_id} not found")
+                return None
+        except Exception as e:
+            log.warning(f"Fallback failed: Error getting channel: {e}")
+            return None
+        
+        # Fetch message
+        try:
+            from utils.message_cache import fetch_message_cached
+            
+            message = await fetch_message_cached(channel, message_id)
+            if not message:
+                log.warning(f"Fallback failed: Message {message_id} not found (may be deleted)")
+                return None
+                
+        except Exception as e:
+            log.warning(f"Fallback failed: Error fetching message: {e}")
+            return None
+        
+        # Check if message has attachments
+        if not message.attachments:
+            log.warning(f"Fallback failed: Message {message_id} has no attachments")
+            return None
+        
+        # Find attachment by filename
+        target_attachment = None
+        for att in message.attachments:
+            if att.filename == filename:
+                target_attachment = att
+                break
+        
+        if not target_attachment:
+            log.warning(f"Fallback failed: Attachment '{filename}' not found in message {message_id}")
+            return None
+        
+        # Process attachment with fresh URL
+        from utils.attachment_processor import get_attachment_processor
+        
+        attachment_data = {
+            "filename": target_attachment.filename,
+            "url": target_attachment.url,  # Fresh URL from Discord API
+            "content_type": target_attachment.content_type or "unknown",
+            "size": target_attachment.size
+        }
+        
+        log.info(f"Fallback successful: Processing {filename} with fresh URL from message {message_id}")
+        
+        processor = get_attachment_processor()
+        result = await processor.process_attachment(
+            attachment=attachment_data,
+            include_content=include_content
+        )
+        
+        return result
+        
+    except Exception as e:
+        log.error(f"Fallback error: {e}", exc_info=True)
+        return None
 
 
 async def _process_direct_url(
@@ -19,10 +146,15 @@ async def _process_direct_url(
     """
     Process a direct URL to a file (sticker, attachment, etc.).
     
+    Implements automatic fallback for expired Discord CDN URLs:
+    1. Tries direct download first
+    2. If download fails and URL is from Discord CDN, attempts to fetch from message
+    3. Returns result from fallback if successful, otherwise returns original error
+    
     Args:
         url: Direct URL to the file
         include_content: Whether to include file content
-        context: Context information
+        context: Context information (required for fallback)
         
     Returns:
         Dict with processed file data or error
@@ -70,6 +202,44 @@ async def _process_direct_url(
             attachment=attachment,
             include_content=include_content
         )
+        
+        # Check if download failed and try fallback for Discord CDN URLs
+        if "error" in result and include_content:
+            # Parse URL to check if it's a Discord CDN attachment URL
+            parsed_url = parse_discord_cdn_url(url)
+            
+            if parsed_url:
+                # This is a Discord CDN attachment URL that failed
+                log.info(f"Direct URL download failed for {filename}, attempting fallback to message fetch")
+                
+                # Try fallback if context is available
+                if context:
+                    fallback_result = await _fallback_fetch_from_message(
+                        channel_id=parsed_url['channel_id'],
+                        message_id=parsed_url['message_id'],
+                        filename=parsed_url['filename'],
+                        include_content=include_content,
+                        context=context
+                    )
+                    
+                    if fallback_result:
+                        # Fallback succeeded
+                        log.info(f"Fallback successful for {filename}")
+                        return {
+                            "source": "direct_url_with_fallback",
+                            "url": url,
+                            "attachment": fallback_result,
+                            "note": "Original URL failed, retrieved from Discord message (URL may have expired)"
+                        }
+                    else:
+                        # Fallback failed, add helpful context to error
+                        result["fallback_attempted"] = True
+                        result["fallback_failed"] = True
+                        result["suggestion"] = f"URL may have expired and message may be deleted. Try using message_id='{parsed_url['message_id']}' with filename='{parsed_url['filename']}' instead."
+                else:
+                    # No context available for fallback
+                    result["fallback_not_attempted"] = True
+                    result["suggestion"] = f"URL may have expired. Try using message_id='{parsed_url['message_id']}' with filename='{parsed_url['filename']}' instead."
         
         return {
             "source": "direct_url",
