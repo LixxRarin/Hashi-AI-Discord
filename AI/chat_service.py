@@ -463,9 +463,17 @@ class ChatService:
         should_add_current = True
         if truncated_history and truncated_history[-1]["role"] == "user" and not images:
             last_history_content = truncated_history[-1]["content"]
-            if user_content_processed in last_history_content or last_history_content in user_content_processed:
-                should_add_current = False
-                func.log.debug("Skipping duplicate user message (no images)")
+            
+            # Check if last history message has multimodal content (images)
+            # Multimodal content is stored as a list, text-only as string
+            last_msg_has_images = isinstance(last_history_content, list)
+            
+            # Only skip if content matches AND the history message doesn't have images
+            # If history has images but current doesn't, still don't skip (different context)
+            if not last_msg_has_images:
+                if user_content_processed in last_history_content or last_history_content in user_content_processed:
+                    should_add_current = False
+                    func.log.debug("Skipping duplicate user message (no images)")
         
         # Insert history and user message at their configured positions
         # If positions weren't specified, add them at the end

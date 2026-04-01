@@ -12,6 +12,22 @@ import discord
 log = logging.getLogger(__name__)
 
 
+def clean_discord_url(url: str) -> str:
+    """
+    Remove trailing ampersands from Discord URLs.
+    
+    Discord.py sometimes returns URLs with trailing '&' characters,
+    which can cause issues with URL parsing. This function cleans them.
+    
+    Args:
+        url: The URL to clean
+        
+    Returns:
+        Cleaned URL without trailing ampersands
+    """
+    return url.rstrip('&') if url else url
+
+
 @dataclass
 class MessageMetadata:
     """Metadata extracted from a Discord message."""
@@ -237,7 +253,7 @@ class MessageIntake:
             for att in message.attachments:
                 attachments.append({
                     "filename": att.filename,
-                    "url": att.url,
+                    "url": clean_discord_url(att.url),
                     "content_type": att.content_type or "unknown",
                     "size": att.size,
                     "message_id": str(message.id)
@@ -251,7 +267,7 @@ class MessageIntake:
                 stickers.append({
                     "name": sticker.name,
                     "id": str(sticker.id),
-                    "url": sticker.url,
+                    "url": clean_discord_url(sticker.url),
                     "format": str(sticker.format)
                 })
         

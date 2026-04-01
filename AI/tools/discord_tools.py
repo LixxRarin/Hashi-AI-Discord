@@ -79,9 +79,39 @@ async def discord_query(
 
 async def _handle_message_query(action: str, query: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:
     """Handle message resource queries."""
-    from AI.tools.message_tools import get_message_info
+    from AI.tools.message_tools import get_message_info, edit_own_message, delete_message
     
-    if action == "get":
+    if action == "edit":
+        # Edit own message
+        message_id = query.get("message_id") or query.get("id")
+        new_content = query.get("new_content") or query.get("content")
+        
+        if not message_id:
+            return {"error": "For action 'edit', provide 'message_id' or 'id'"}
+        if not new_content:
+            return {"error": "For action 'edit', provide 'new_content' or 'content'"}
+        
+        return await edit_own_message(
+            message_id=message_id,
+            new_content=new_content,
+            context=context
+        )
+    
+    elif action == "delete":
+        # Delete message
+        message_id = query.get("message_id") or query.get("id")
+        reason = query.get("reason")
+        
+        if not message_id:
+            return {"error": "For action 'delete', provide 'message_id' or 'id'"}
+        
+        return await delete_message(
+            message_id=message_id,
+            reason=reason,
+            context=context
+        )
+    
+    elif action == "get":
         # Get specific message by ID
         if "short_id" in query:
             return await get_message_info(
@@ -127,7 +157,7 @@ async def _handle_message_query(action: str, query: Dict[str, Any], context: Dic
     else:
         return {
             "error": f"Unknown action '{action}' for resource 'message'",
-            "valid_actions": ["get", "list", "search"]
+            "valid_actions": ["get", "list", "search", "edit", "delete"]
         }
 
 

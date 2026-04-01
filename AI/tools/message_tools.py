@@ -1,11 +1,14 @@
 """
-Message Tools - Tools for querying message information
+Message Tools - Tools for querying and managing messages
 
-This module provides tools for the LLM to query information about
-messages in the conversation history.
+This module provides tools for the LLM to query and manage messages:
+- get_message_info: Query message information from conversation history
+- edit_own_message: Edit the AI's own messages
+- delete_message: Delete messages (own or others with permission)
 """
 
 import logging
+import discord
 from typing import Dict, Any, List, Optional
 
 log = logging.getLogger(__name__)
@@ -191,4 +194,489 @@ async def get_message_info(
         return {
             "error": f"Failed to retrieve message information: {str(e)}",
             "messages": []
+        }
+
+
+async def edit_own_message(
+    message_id: str,
+    new_content: str,
+    context: Dict[str, Any]
+) -> Dict[str, Any]:
+    """
+    Edit one of the AI's own messages.
+    
+    This tool allows the LLM to edit any of its previous messages in the
+    current conversation. It validates that the message belongs to the AI
+    before editing.
+    
+    Args:
+        message_id: Short ID (#5) or Discord ID to edit
+        new_content: New content for the message
+        context: Tool execution context (bot_client, guild, channel_id, etc.)
+        
+    Returns:
+        Dict with success status and details
+    """
+    if context is None:
+        return {"success": False, "error": "No context provided"}
+    
+    # Validate parameters
+    if not message_id:
+        return {
+            "success": False,
+            "error": "message_id is required",
+            "message": "Please provide a message_id to edit"
+        }
+    
+    if not new_content or new_content.isspace():
+        return {
+            "success": False,
+            "error": "new_content cannot be empty",
+            "message": "Please provide non-empty content for the message"
+        }
+    
+    try:
+        # Extract context
+        bot_client = context.get("bot_client")
+        channel_id = context.get("channel_id")
+        server_id = context.get("server_id")
+        ai_name = context.get("ai_name")
+        session = context.get("session", {})
+        
+        if not all([bot_client, channel_id, server_id, ai_name]):
+            return {
+                "success": False,
+                "error": "Missing required context",
+                "message": "Internal error: missing bot_client, channel_id, server_id, or ai_name"
+            }
+        
+        # Get channel
+        try:
+            channel = bot_client.get_channel(int(channel_id))
+            if not channel:
+                return {
+                    "success": False,
+                    "error": "Channel not found",
+                    "message": f"Could not find channel {channel_id}"
+                }
+        except ValueError:
+            return {
+                "success": False,
+                "error": "Invalid channel_id",
+                "message": f"Invalid channel ID: {channel_id}"
+            }
+        
+        # Resolve message_id (short_id -> discord_id if needed)
+        resolved_message_id = message_id
+        short_id = None
+        
+        # Check if it's a short_id format (#5 or just 5)
+        if message_id.startswith('#'):
+            try:
+                short_id = int(message_id[1:])
+                # Resolve short_id to discord_id
+                from messaging.short_id_manager import get_short_id_manager
+                short_id_manager = get_short_id_manager()
+                resolved_message_id = await short_id_manager.get_discord_id(
+                    server_id, channel_id, ai_name, short_id
+                )
+                if not resolved_message_id:
+                    return {
+                        "success": False,
+                        "error": f"Short ID #{short_id} not found",
+                        "message": f"Message #{short_id} not found in conversation history"
+                    }
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": f"Invalid short_id format: {message_id}",
+                    "message": "Short ID must be a number (e.g., #5)"
+                }
+        elif message_id.isdigit() and len(message_id) < 10:
+            # Looks like a short_id without #
+            try:
+                short_id = int(message_id)
+                from messaging.short_id_manager import get_short_id_manager
+                short_id_manager = get_short_id_manager()
+                resolved_message_id = await short_id_manager.get_discord_id(
+                    server_id, channel_id, ai_name, short_id
+                )
+                if not resolved_message_id:
+                    return {
+                        "success": False,
+                        "error": f"Short ID {short_id} not found",
+                        "message": f"Message #{short_id} not found in conversation history"
+                    }
+            except ValueError:
+                pass  # Not a valid short_id, treat as discord_id
+        
+        # Fetch the message
+        try:
+            from utils.message_cache import fetch_message_cached
+            message = await fetch_message_cached(channel, resolved_message_id)
+            
+            if not message:
+                return {
+                    "success": False,
+                    "error": "Message not found",
+                    "message_id": message_id,
+                    "message": f"Message {message_id} not found in channel"
+                }
+        except discord.NotFound:
+            return {
+                "success": False,
+                "error": "Message not found",
+                "message_id": message_id,
+                "message": f"Message {message_id} not found (may have been deleted)"
+            }
+        except Exception as e:
+            log.error(f"Error fetching message {resolved_message_id}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to fetch message: {str(e)}",
+                "message_id": message_id
+            }
+        
+        # Validate ownership - check if message is from the bot
+        if message.author.id != bot_client.user.id:
+            return {
+                "success": False,
+                "error": "Cannot edit message: not your message",
+                "message_id": message_id,
+                "message_author": f"{message.author.name}#{message.author.discriminator}",
+                "message": f"You can only edit your own messages. This message belongs to {message.author.name}."
+            }
+        
+        # Edit the message using MessageSender
+        from utils.message_sender import get_message_sender
+        sender = get_message_sender()
+        
+        mode = session.get("mode", "bot")
+        webhook_url = session.get("webhook_url")
+        
+        try:
+            updated_ids = await sender.edit_messages(
+                channel=channel,
+                message_ids=[resolved_message_id],
+                new_text=new_content,
+                mode=mode,
+                webhook_url=webhook_url,
+                split_message_fn=None
+            )
+            
+            if not updated_ids:
+                return {
+                    "success": False,
+                    "error": "Failed to edit message",
+                    "message_id": message_id,
+                    "message": "Message edit operation failed"
+                }
+            
+            # Update conversation history
+            from AI.chat_service import get_service
+            chat_service = get_service()
+            
+            current_chat_id = session.get("chat_id", "default")
+            history = chat_service.get_ai_history(
+                server_id,
+                channel_id,
+                ai_name,
+                current_chat_id
+            )
+            
+            # Find and update the assistant message in history
+            updated_history = False
+            if history:
+                for i in range(len(history) - 1, -1, -1):
+                    if history[i]["role"] == "assistant":
+                        # Check if this is the message we edited
+                        # (we'll update the most recent assistant message for simplicity)
+                        history[i]["content"] = new_content
+                        updated_history = True
+                        break
+                
+                if updated_history:
+                    await chat_service.set_ai_history(
+                        server_id,
+                        channel_id,
+                        ai_name,
+                        history,
+                        current_chat_id
+                    )
+            
+            log.info(f"Message {message_id} edited successfully by AI {ai_name}")
+            
+            return {
+                "success": True,
+                "message_id": resolved_message_id,
+                "short_id": short_id,
+                "updated_content": new_content[:100] + "..." if len(new_content) > 100 else new_content,
+                "message": f"Message {message_id} edited successfully"
+            }
+            
+        except discord.Forbidden:
+            return {
+                "success": False,
+                "error": "Permission denied",
+                "message_id": message_id,
+                "message": "Cannot edit message: missing permissions"
+            }
+        except Exception as e:
+            log.error(f"Error editing message {message_id}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to edit message: {str(e)}",
+                "message_id": message_id
+            }
+    
+    except Exception as e:
+        log.error(f"Error in edit_own_message: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"Internal error: {str(e)}",
+            "message_id": message_id
+        }
+
+
+async def delete_message(
+    message_id: str,
+    reason: Optional[str] = None,
+    context: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """
+    Delete a message from Discord.
+    
+    The AI can always delete its own messages. To delete other users' messages,
+    the bot needs 'manage_messages' permission. Returns clear error if permission
+    is missing.
+    
+    Args:
+        message_id: Short ID (#5) or Discord ID to delete
+        reason: Optional reason for deletion (for logging)
+        context: Tool execution context
+        
+    Returns:
+        Dict with success status and permission details
+    """
+    if context is None:
+        return {"success": False, "error": "No context provided"}
+    
+    # Validate parameters
+    if not message_id:
+        return {
+            "success": False,
+            "error": "message_id is required",
+            "message": "Please provide a message_id to delete"
+        }
+    
+    try:
+        # Extract context
+        bot_client = context.get("bot_client")
+        channel_id = context.get("channel_id")
+        server_id = context.get("server_id")
+        ai_name = context.get("ai_name")
+        session = context.get("session", {})
+        
+        if not all([bot_client, channel_id, server_id, ai_name]):
+            return {
+                "success": False,
+                "error": "Missing required context",
+                "message": "Internal error: missing bot_client, channel_id, server_id, or ai_name"
+            }
+        
+        # Get channel
+        try:
+            channel = bot_client.get_channel(int(channel_id))
+            if not channel:
+                return {
+                    "success": False,
+                    "error": "Channel not found",
+                    "message": f"Could not find channel {channel_id}"
+                }
+        except ValueError:
+            return {
+                "success": False,
+                "error": "Invalid channel_id",
+                "message": f"Invalid channel ID: {channel_id}"
+            }
+        
+        # Resolve message_id (short_id -> discord_id if needed)
+        resolved_message_id = message_id
+        short_id = None
+        
+        # Check if it's a short_id format (#5 or just 5)
+        if message_id.startswith('#'):
+            try:
+                short_id = int(message_id[1:])
+                from messaging.short_id_manager import get_short_id_manager
+                short_id_manager = get_short_id_manager()
+                resolved_message_id = await short_id_manager.get_discord_id(
+                    server_id, channel_id, ai_name, short_id
+                )
+                if not resolved_message_id:
+                    return {
+                        "success": False,
+                        "error": f"Short ID #{short_id} not found",
+                        "message": f"Message #{short_id} not found in conversation history"
+                    }
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": f"Invalid short_id format: {message_id}",
+                    "message": "Short ID must be a number (e.g., #5)"
+                }
+        elif message_id.isdigit() and len(message_id) < 10:
+            # Looks like a short_id without #
+            try:
+                short_id = int(message_id)
+                from messaging.short_id_manager import get_short_id_manager
+                short_id_manager = get_short_id_manager()
+                resolved_message_id = await short_id_manager.get_discord_id(
+                    server_id, channel_id, ai_name, short_id
+                )
+                if not resolved_message_id:
+                    return {
+                        "success": False,
+                        "error": f"Short ID {short_id} not found",
+                        "message": f"Message #{short_id} not found in conversation history"
+                    }
+            except ValueError:
+                pass  # Not a valid short_id, treat as discord_id
+        
+        # Fetch the message
+        try:
+            from utils.message_cache import fetch_message_cached
+            message = await fetch_message_cached(channel, resolved_message_id)
+            
+            if not message:
+                return {
+                    "success": False,
+                    "error": "Message not found",
+                    "message_id": message_id,
+                    "message": f"Message {message_id} not found in channel"
+                }
+        except discord.NotFound:
+            return {
+                "success": False,
+                "error": "Message not found",
+                "message_id": message_id,
+                "message": f"Message {message_id} not found (may have been deleted)"
+            }
+        except Exception as e:
+            log.error(f"Error fetching message {resolved_message_id}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to fetch message: {str(e)}",
+                "message_id": message_id
+            }
+        
+        # Check if it's the bot's own message
+        is_own_message = message.author.id == bot_client.user.id
+        
+        # Check permissions
+        if not is_own_message:
+            # Need manage_messages permission to delete other users' messages
+            if not channel.permissions_for(channel.guild.me).manage_messages:
+                return {
+                    "success": False,
+                    "error": "Missing permissions: manage_messages",
+                    "required_permission": "manage_messages",
+                    "message_id": message_id,
+                    "message": "Cannot delete message: bot lacks 'manage_messages' permission. Ask a server admin to grant this permission."
+                }
+        
+        # Delete the message
+        try:
+            await message.delete()
+            
+            # Invalidate cache
+            from utils.message_cache import get_message_cache
+            cache = get_message_cache()
+            await cache.invalidate(channel_id, resolved_message_id)
+            
+            # If it's own message, update ResponseManager and history
+            if is_own_message:
+                # Update ResponseManager (remove from state)
+                response_manager = bot_client.message_pipeline.response_manager
+                state = response_manager.get_state(server_id, channel_id, ai_name)
+                current_gen = state.get_current()
+                
+                # Check if this message is in the current generation
+                if current_gen and resolved_message_id in current_gen.discord_ids:
+                    # Clear the response manager state
+                    response_manager.clear(server_id, channel_id, ai_name)
+                
+                # Update conversation history
+                from AI.chat_service import get_service
+                chat_service = get_service()
+                
+                current_chat_id = session.get("chat_id", "default")
+                history = chat_service.get_ai_history(
+                    server_id,
+                    channel_id,
+                    ai_name,
+                    current_chat_id
+                )
+                
+                # Remove the last assistant message from history
+                if history:
+                    updated_history = []
+                    removed_assistant = False
+                    for msg in reversed(history):
+                        if msg["role"] == "assistant" and not removed_assistant:
+                            removed_assistant = True
+                            continue  # Skip this message
+                        updated_history.insert(0, msg)
+                    
+                    await chat_service.set_ai_history(
+                        server_id,
+                        channel_id,
+                        ai_name,
+                        updated_history,
+                        current_chat_id
+                    )
+            
+            log.info(
+                f"Message {message_id} deleted by AI {ai_name} "
+                f"(own_message={is_own_message}, reason={reason})"
+            )
+            
+            return {
+                "success": True,
+                "message_id": resolved_message_id,
+                "short_id": short_id,
+                "deleted_by": "bot",
+                "was_own_message": is_own_message,
+                "reason": reason,
+                "message": f"Message {message_id} deleted successfully"
+            }
+            
+        except discord.Forbidden:
+            return {
+                "success": False,
+                "error": "Permission denied",
+                "message_id": message_id,
+                "message": "Cannot delete message: missing permissions (this shouldn't happen)"
+            }
+        except discord.NotFound:
+            return {
+                "success": False,
+                "error": "Message not found",
+                "message_id": message_id,
+                "message": "Message was already deleted"
+            }
+        except Exception as e:
+            log.error(f"Error deleting message {message_id}: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": f"Failed to delete message: {str(e)}",
+                "message_id": message_id
+            }
+    
+    except Exception as e:
+        log.error(f"Error in delete_message: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": f"Internal error: {str(e)}",
+            "message_id": message_id
         }

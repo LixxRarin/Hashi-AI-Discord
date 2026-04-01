@@ -99,8 +99,9 @@ user_reply_format_syntax: "{quote}[{time}] {name} (@{username}) #{short_id} → 
 # These control how attachments and stickers are displayed in the message context
 # Note: When vision is enabled, images are sent as actual image data to the API
 # These templates only affect the TEXT representation in the context
-attachment_format: "[Attachment: {filename}]({url})"  # Format for each attachment
-sticker_format: "[Sticker: {name}]({url})"  # Format for each sticker
+# URLs are wrapped in angle brackets to preserve query parameters (Discord CDN auth)
+attachment_format: "[Attachment: {filename}](<{url}>)"  # Format for each attachment
+sticker_format: "[Sticker: {name}](<{url}>)"  # Format for each sticker
 
 # Message Edit/Delete Tracking - How edited/deleted messages appear in LLM history
 edit_marker_text: "(edited)"           # Marker text for edited messages
@@ -412,18 +413,28 @@ tool_calling_prompt: |
   - "server", "members", "roles" → get_server_info
   - Questions about past → search_memories or list_memories (check before answering)
   
-  CRITICAL - Memory Management (Save/Update IMMEDIATELY):
+  Images & Attachments:
+  
+  - Images in the CURRENT message are ALREADY VISIBLE to you in the context
+  - You can see and analyze them directly - describe what you see
+  - ONLY use attachment_query for:
+    - Attachments from PREVIOUS messages (not the current one)
+    - Non-image files (PDFs, documents, archives, etc.)
+    - When explicitly asked to fetch a specific old attachment
+  - If you can see an image right now, analyze it directly - DON'T query it
+  
+  Memory Management (Save/Update):
   
   ALWAYS save NEW information:
-  • Preferences: "I prefer X", "I like Y" → add_memory
-  • Personal facts: "I'm a developer", "My name is X" → add_memory
-  • Important context: "I'm working on X", "We have 50 members" → add_memory
+  - Preferences: "I prefer X", "I like Y" → add_memory
+  - Personal facts: "I'm a developer", "My name is X" → add_memory
+  - Important context: "I'm working on X", "We have 50 members" → add_memory
 
   ALWAYS update CHANGED information:
-  • Status updates: "We reached 100 members" (if you had ~100 saved) → update_memory
-  • Corrections: "Actually I prefer Y" (if you had X saved) → update_memory
-  • Progress: "I finished project X" (if you had "working on X") → update_memory
-  • Any information that supersedes what you have saved → update_memory
+  - Status updates: "We reached 100 members" (if you had ~100 saved) → update_memory
+  - Corrections: "Actually I prefer Y" (if you had X saved) → update_memory
+  - Progress: "I finished project X" (if you had "working on X") → update_memory
+  - Any information that supersedes what you have saved → update_memory
   
   Process: When user shares info, FIRST check memories (list_memories/search_memories), THEN:
   - If it's new → add_memory
@@ -431,10 +442,10 @@ tool_calling_prompt: |
   - If it contradicts saved info → update_memory
   
   Examples:
-  • "I prefer dark mode" → add_memory(content="User prefers dark mode")
-  • "We reached 100 members" → search_memories("members") → update_memory(memory_id=X, content="Server has 100 members")
-  • "I finished the Python project" → search_memories("Python project") → update_memory
-  • "Actually I'm a JavaScript developer" → search_memories("developer") → update_memory
+  - "I prefer dark mode" → add_memory(content="User prefers dark mode")
+  - "We reached 100 members" → search_memories("members") → update_memory(memory_id=X, content="Server has 100 members")
+  - "I finished the Python project" → search_memories("Python project") → update_memory
+  - "I am 19 years old." → search_memories("years") → update_memory
   
   Key rule: Information changes over time. Keep your memory current by updating it automatically.
 

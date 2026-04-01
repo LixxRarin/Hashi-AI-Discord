@@ -15,7 +15,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "discord_query",
-            "description": "Query Discord information: messages (#N or IDs), users (@mentions or names), channels, server stats, emojis/stickers, and polls. Always use this to get accurate Discord data - never guess. Examples: discord_query(resource='message', action='get', query={'short_id': 5}), discord_query(resource='user', action='search', query={'name': 'john'}), discord_query(resource='emoji', action='list', query={'limit': 10})",
+            "description": "Query and manage Discord information: messages (#N or IDs), users (@mentions or names), channels, server stats, emojis/stickers, and polls. Supports querying (get/search/list) and message management (edit/delete). Always use this to get accurate Discord data - never guess. Examples: discord_query(resource='message', action='get', query={'short_id': 5}), discord_query(resource='message', action='edit', query={'message_id': '#5', 'new_content': 'Updated text'}), discord_query(resource='message', action='delete', query={'message_id': '#5', 'reason': 'Mistake'})",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -26,16 +26,28 @@ TOOL_DEFINITIONS = [
                     },
                     "action": {
                         "type": "string",
-                        "enum": ["get", "search", "list"],
-                        "description": "Action to perform: 'get' (retrieve specific item by ID), 'search' (find items matching criteria), 'list' (show all or recent items)"
+                        "enum": ["get", "search", "list", "edit", "delete"],
+                        "description": "Action to perform: 'get' (retrieve specific item by ID), 'search' (find items matching criteria), 'list' (show all or recent items), 'edit' (edit own message - messages only), 'delete' (delete message - messages only)"
                     },
                     "query": {
                         "type": "object",
-                        "description": "Query parameters (flexible based on resource and action). Common parameters: 'id' or 'short_id' (for get), 'name' or 'search_term' (for search), 'limit' (for list), 'include_fields' (fields to include)",
+                        "description": "Query parameters (flexible based on resource and action). Common parameters: 'id' or 'short_id' (for get), 'name' or 'search_term' (for search), 'limit' (for list), 'include_fields' (fields to include), 'new_content' (for edit), 'reason' (for delete)",
                         "properties": {
                             "id": {
                                 "type": "string",
                                 "description": "Discord ID or short ID (#N format)"
+                            },
+                            "message_id": {
+                                "type": "string",
+                                "description": "Message ID for edit/delete actions. Can be short ID (#5) or full Discord ID"
+                            },
+                            "new_content": {
+                                "type": "string",
+                                "description": "New content for message (required for action='edit'). Special syntax will be automatically removed."
+                            },
+                            "reason": {
+                                "type": "string",
+                                "description": "Reason for deletion (optional for action='delete'). Used for logging/audit purposes."
                             },
                             "short_id": {
                                 "type": "integer",
@@ -275,6 +287,40 @@ TOOL_DEFINITIONS = [
                     }
                 },
                 "required": ["action", "path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "moderate_member",
+            "description": "Execute moderation actions on server members: timeout (mute temporarily), ban (permanent removal), kick (temporary removal), unban (remove ban), remove_timeout (unmute). Each action requires specific permissions and will return clear errors if permissions are missing. Cannot moderate server owner or members with higher roles. Examples: moderate_member(action='timeout', user_id='123', duration=60, reason='Spam'), moderate_member(action='ban', user_id='456', delete_message_days=1, reason='Harassment')",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["timeout", "ban", "kick", "unban", "remove_timeout"],
+                        "description": "Moderation action: 'timeout' (mute, requires moderate_members), 'ban' (permanent ban, requires ban_members), 'kick' (temporary removal, requires kick_members), 'unban' (remove ban, requires ban_members), 'remove_timeout' (unmute, requires moderate_members)"
+                    },
+                    "user_id": {
+                        "type": "string",
+                        "description": "Discord user ID of the target member. For unban, can be ID of user not in server."
+                    },
+                    "duration": {
+                        "type": "integer",
+                        "description": "Timeout duration in minutes (required for action='timeout'). Min: 1, Max: 40320 (28 days). Example: 60 for 1 hour, 1440 for 1 day."
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional reason for the moderation action (shown in audit log and to moderators)."
+                    },
+                    "delete_message_days": {
+                        "type": "integer",
+                        "description": "For action='ban' only: delete user's messages from last N days (0-7). Default: 0 (don't delete messages)."
+                    }
+                },
+                "required": ["action", "user_id"]
             }
         }
     }
