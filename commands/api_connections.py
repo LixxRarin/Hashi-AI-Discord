@@ -43,17 +43,20 @@ class APIConnections(commands.Cog):
         guild_name = interaction.guild.name
         user_id = interaction.user.id
         
-        # Create main view
+        # Create main view with pagination
         view = APIConnectionListView(
             server_id=server_id,
             guild_name=guild_name,
-            user_id=user_id
+            user_id=user_id,
+            page=0
         )
         
-        # Create embed
+        # Create embed for first page
         embed = create_connection_list_embed(
             server_id=server_id,
-            guild_name=guild_name
+            guild_name=guild_name,
+            page=0,
+            per_page=5
         )
         
         await interaction.followup.send(

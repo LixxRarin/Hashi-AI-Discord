@@ -238,17 +238,161 @@ def create_connection_details_embed(
 class APIConnectionListView(ui.View):
     """Main view for API connection management."""
     
-    def __init__(self, server_id: str, guild_name: str, user_id: int):
+    def __init__(self, server_id: str, guild_name: str, user_id: int, page: int = 0):
         super().__init__(timeout=300)
         self.server_id = server_id
         self.guild_name = guild_name
         self.user_id = user_id
+        self.current_page = page
+        self.per_page = 5
         
-        # Add action buttons
+        # Calculate total pages
+        connections = func.list_api_connections(server_id)
+        total_connections = len(connections)
+        self.total_pages = max(1, (total_connections + self.per_page - 1) // self.per_page)
+        
+        # Add action buttons (row 1)
         self.add_item(CreateConnectionButton())
         self.add_item(EditConnectionButton())
         self.add_item(RemoveConnectionButton())
         self.add_item(ViewDetailsButton())
+        
+        # Add pagination buttons (row 2) only if more than 1 page
+        if self.total_pages > 1:
+            self.first_btn = FirstPageButton()
+            self.prev_btn = PreviousPageButton()
+            self.counter_btn = PageCounterButton()
+            self.next_btn = NextPageButton()
+            self.last_btn = LastPageButton()
+            
+            self.add_item(self.first_btn)
+            self.add_item(self.prev_btn)
+            self.add_item(self.counter_btn)
+            self.add_item(self.next_btn)
+            self.add_item(self.last_btn)
+            self._update_buttons()
+    
+    def _update_buttons(self):
+        """Update pagination button states based on current page."""
+        if self.total_pages <= 1:
+            return
+        
+        # Update button states
+        self.first_btn.disabled = (self.current_page == 0)
+        self.prev_btn.disabled = (self.current_page == 0)
+        self.next_btn.disabled = (self.current_page >= self.total_pages - 1)
+        self.last_btn.disabled = (self.current_page >= self.total_pages - 1)
+        self.counter_btn.label = f"Page {self.current_page + 1}/{self.total_pages}"
+    
+    async def _update_message(self, interaction: discord.Interaction):
+        """Update the message with current page."""
+        try:
+            self._update_buttons()
+            
+            embed = create_connection_list_embed(
+                server_id=self.server_id,
+                guild_name=self.guild_name,
+                page=self.current_page,
+                per_page=self.per_page
+            )
+            
+            await interaction.response.edit_message(
+                embed=embed,
+                view=self
+            )
+        except Exception as e:
+            func.log.error(f"Error updating pagination: {e}")
+            await interaction.response.send_message(
+                f"❌ Error updating page: {str(e)}",
+                ephemeral=True
+            )
+
+
+class FirstPageButton(ui.Button):
+    """Button to go to first page."""
+    
+    def __init__(self):
+        super().__init__(
+            label="⏮️",
+            style=discord.ButtonStyle.secondary,
+            custom_id="api_first",
+            row=1
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Go to first page."""
+        self.view.current_page = 0
+        await self.view._update_message(interaction)
+
+
+class PreviousPageButton(ui.Button):
+    """Button to go to previous page."""
+    
+    def __init__(self):
+        super().__init__(
+            label="◀️",
+            style=discord.ButtonStyle.primary,
+            custom_id="api_previous",
+            row=1
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Go to previous page."""
+        if self.view.current_page > 0:
+            self.view.current_page -= 1
+        await self.view._update_message(interaction)
+
+
+class PageCounterButton(ui.Button):
+    """Page counter display (non-interactive)."""
+    
+    def __init__(self):
+        super().__init__(
+            label="Page 1/1",
+            style=discord.ButtonStyle.secondary,
+            custom_id="api_counter",
+            disabled=True,
+            row=1
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Non-interactive button."""
+        pass
+
+
+class NextPageButton(ui.Button):
+    """Button to go to next page."""
+    
+    def __init__(self):
+        super().__init__(
+            label="▶️",
+            style=discord.ButtonStyle.primary,
+            custom_id="api_next",
+            row=1
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Go to next page."""
+        if self.view.current_page < self.view.total_pages - 1:
+            self.view.current_page += 1
+        await self.view._update_message(interaction)
+
+
+class LastPageButton(ui.Button):
+    """Button to go to last page."""
+    
+    def __init__(self):
+        super().__init__(
+            label="⏭️",
+            style=discord.ButtonStyle.secondary,
+            custom_id="api_last",
+            row=1
+        )
+    
+    async def callback(self, interaction: discord.Interaction):
+        """Go to last page."""
+        self.view.current_page = self.view.total_pages - 1
+        await self.view._update_message(interaction)
 
 
 class CreateConnectionButton(ui.Button):
@@ -262,23 +406,39 @@ class CreateConnectionButton(ui.Button):
         )
     
     async def callback(self, interaction: discord.Interaction):
-        """Handle create button click - show Step 1 modal."""
-        # Show Step 1: Provider & Credentials
-        modal = CreateConnectionStep1Modal(
-            server_id=str(interaction.guild.id),
-            user_id=interaction.user.id
+        """Handle create button click - show provider selection first."""
+        server_id = str(interaction.guild.id)
+        user_id = interaction.user.id
+        
+        # Show provider selection first (makes more sense)
+        view = CreateConnectionProviderSelectView(
+            server_id=server_id,
+            user_id=user_id,
+            create_data={}
         )
-        await interaction.response.send_modal(modal)
+        
+        embed = discord.Embed(
+            title="➕ New Connection - Select Provider",
+            description="First, select the API provider you want to use:",
+            color=discord.Color.green()
+        )
+        
+        await interaction.response.edit_message(
+            embed=embed,
+            view=view
+        )
 
 
-class CreateConnectionStep1Modal(ui.Modal):
-    """Step 1: Provider & Credentials."""
+class CreateConnectionDetailsModal(ui.Modal):
+    """Modal for connection details after provider selection."""
     
-    def __init__(self, server_id: str, user_id: int):
-        super().__init__(title="New Connection - Step 1/3")
+    def __init__(self, server_id: str, user_id: int, provider: str, provider_display: str):
+        super().__init__(title=f"New {provider_display} Connection")
         
         self.server_id = server_id
         self.user_id = user_id
+        self.provider = provider
+        self.provider_display = provider_display
         
         # Connection name
         self.connection_name = ui.TextInput(
@@ -289,6 +449,15 @@ class CreateConnectionStep1Modal(ui.Modal):
             style=discord.TextStyle.short
         )
         self.add_item(self.connection_name)
+        
+        # Model
+        self.model = ui.TextInput(
+            label="Model",
+            placeholder="e.g., gpt-4, deepseek-chat, claude-3-opus",
+            required=True,
+            style=discord.TextStyle.short
+        )
+        self.add_item(self.model)
         
         # API Key
         self.api_key = ui.TextInput(
@@ -302,21 +471,30 @@ class CreateConnectionStep1Modal(ui.Modal):
         # Base URL (optional)
         self.base_url = ui.TextInput(
             label="Base URL (Optional)",
-            placeholder="Custom API endpoint (leave empty for default)",
+            placeholder="Custom endpoint (leave empty for default)",
             required=False,
             style=discord.TextStyle.short
         )
         self.add_item(self.base_url)
     
     async def on_submit(self, interaction: discord.Interaction):
-        """Handle Step 1 submission - show provider selection."""
+        """Handle modal submission - create connection with defaults."""
         try:
-            # Validate connection name
+            # Validate inputs
             conn_name = self.connection_name.value.strip()
+            model = self.model.value.strip()
+            api_key = self.api_key.value.strip()
             
             if not conn_name:
                 await interaction.response.send_message(
                     "❌ Connection name cannot be empty.",
+                    ephemeral=True
+                )
+                return
+            
+            if not model:
+                await interaction.response.send_message(
+                    "❌ Model name is required.",
                     ephemeral=True
                 )
                 return
@@ -330,35 +508,69 @@ class CreateConnectionStep1Modal(ui.Modal):
                 )
                 return
             
-            # Store data and show provider selection
-            create_data = {
-                "connection_name": conn_name,
-                "api_key": self.api_key.value.strip(),
-                "base_url": self.base_url.value.strip() if self.base_url.value else None
-            }
-            
-            # Show provider selection view
-            view = CreateConnectionProviderSelectView(
+            # Create connection with sensible defaults
+            success = await func.create_api_connection(
                 server_id=self.server_id,
+                connection_name=conn_name,
+                provider=self.provider,
+                api_key=api_key,
+                model=model,
+                base_url=self.base_url.value.strip() if self.base_url.value else None,
+                max_tokens=1000,
+                temperature=0.7,
+                top_p=1.0,
+                frequency_penalty=0.0,
+                presence_penalty=0.0,
+                context_size=4096,
+                think_switch=True,
+                think_depth=3,
+                hide_thinking_tags=True,
+                thinking_tag_patterns=None,
+                max_tool_rounds=5,
+                custom_extra_body=None,
+                save_thinking_in_history=True,
+                vision_enabled=False,
+                vision_detail="auto",
+                max_image_size=20,
+                created_by=str(interaction.user.id)
+            )
+            
+            if not success:
+                await interaction.response.send_message(
+                    f"❌ Failed to create connection '{conn_name}'.",
+                    ephemeral=True
+                )
+                return
+            
+            # Success - return to main view
+            view = APIConnectionListView(
+                server_id=self.server_id,
+                guild_name=interaction.guild.name,
                 user_id=self.user_id,
-                create_data=create_data
+                page=0
             )
             
-            embed = discord.Embed(
-                title="➕ New Connection - Select Provider",
-                description=f"**Connection Name:** `{conn_name}`\n\n"
-                           "Select the API provider:",
-                color=discord.Color.green()
+            embed = create_connection_list_embed(
+                self.server_id,
+                interaction.guild.name,
+                page=0,
+                per_page=5
             )
             
+            # Send success message first
             await interaction.response.send_message(
-                embed=embed,
-                view=view,
+                f"✅ **Connection Created!**\n"
+                f"**Name:** `{conn_name}`\n"
+                f"**Provider:** {self.provider_display}\n"
+                f"**Model:** `{model}`\n\n"
+                f"💡 Use `/setup` to create an AI with this connection!",
                 ephemeral=True
             )
+            
+            func.log.info(f"Created API connection '{conn_name}' for provider '{self.provider}'")
         
         except Exception as e:
-            func.log.error(f"Error in create step 1: {e}\n{traceback.format_exc()}")
+            func.log.error(f"Error creating connection: {e}\n{traceback.format_exc()}")
             await interaction.response.send_message(
                 f"❌ Error: {str(e)}",
                 ephemeral=True
@@ -377,19 +589,22 @@ class CreateConnectionProviderSelectView(ui.View):
         # Add provider select
         self.add_item(ProviderSelect())
         
-        # Add cancel button
-        self.add_item(CancelCreateButton(server_id, user_id))
+        # Add back button
+        self.add_item(BackToMainButton(server_id, user_id))
     
     async def on_provider_selected(self, interaction: discord.Interaction, provider: str):
-        """Handle provider selection - show Step 2 modal."""
+        """Handle provider selection - show connection details modal."""
         try:
-            self.create_data["provider"] = provider
+            # Get provider display name
+            registry = get_registry()
+            provider_meta = registry.get_metadata(provider)
             
-            # Show Step 2 modal
-            modal = CreateConnectionStep2Modal(
+            # Show connection details modal
+            modal = CreateConnectionDetailsModal(
                 server_id=self.server_id,
                 user_id=self.user_id,
-                create_data=self.create_data
+                provider=provider,
+                provider_display=provider_meta.display_name
             )
             
             await interaction.response.send_modal(modal)
@@ -410,10 +625,10 @@ class ProviderSelect(ui.Select):
         options = []
         
         for name, metadata in registry.get_all_metadata().items():
+            # Don't use emoji parameter - some emojis are invalid in Discord SelectOption
             options.append(discord.SelectOption(
-                label=metadata.display_name,
+                label=f"{metadata.icon} {metadata.display_name}",
                 value=name,
-                emoji=metadata.icon,
                 description=f"{metadata.display_name} API"[:100]
             ))
         
@@ -650,12 +865,15 @@ class FinishCreateButton(ui.Button):
             view = APIConnectionListView(
                 server_id=self.server_id,
                 guild_name=interaction.guild.name,
-                user_id=self.user_id
+                user_id=self.user_id,
+                page=0
             )
             
             embed = create_connection_list_embed(
                 self.server_id,
-                interaction.guild.name
+                interaction.guild.name,
+                page=0,
+                per_page=5
             )
             
             await interaction.message.edit(
@@ -687,12 +905,15 @@ class CancelCreateButton(ui.Button):
         view = APIConnectionListView(
             server_id=self.server_id,
             guild_name=interaction.guild.name,
-            user_id=self.user_id
+            user_id=self.user_id,
+            page=0
         )
         
         embed = create_connection_list_embed(
             self.server_id,
-            interaction.guild.name
+            interaction.guild.name,
+            page=0,
+            per_page=5
         )
         
         await interaction.response.edit_message(
@@ -1302,12 +1523,15 @@ class ConfirmRemoveButton(ui.Button):
             view = APIConnectionListView(
                 server_id=self.server_id,
                 guild_name=interaction.guild.name,
-                user_id=self.user_id
+                user_id=self.user_id,
+                page=0
             )
             
             embed = create_connection_list_embed(
                 self.server_id,
-                interaction.guild.name
+                interaction.guild.name,
+                page=0,
+                per_page=5
             )
             
             await interaction.response.edit_message(
@@ -1362,12 +1586,15 @@ class CancelRemoveButton(ui.Button):
         view = APIConnectionListView(
             server_id=self.server_id,
             guild_name=interaction.guild.name,
-            user_id=self.user_id
+            user_id=self.user_id,
+            page=0
         )
         
         embed = create_connection_list_embed(
             self.server_id,
-            interaction.guild.name
+            interaction.guild.name,
+            page=0,
+            per_page=5
         )
         
         await interaction.response.edit_message(
@@ -1568,12 +1795,15 @@ class BackToMainButton(ui.Button):
         view = APIConnectionListView(
             server_id=self.server_id,
             guild_name=interaction.guild.name,
-            user_id=self.user_id
+            user_id=self.user_id,
+            page=0
         )
         
         embed = create_connection_list_embed(
             self.server_id,
-            interaction.guild.name
+            interaction.guild.name,
+            page=0,
+            per_page=5
         )
         
         await interaction.response.edit_message(
