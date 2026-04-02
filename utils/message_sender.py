@@ -894,7 +894,7 @@ class MessageSender:
         
         Strategy:
         - If new content fits in existing messages: edit them
-        - If new content needs more messages: edit existing + create new
+        - If new content needs more messages: edit existing create new
         - If new content needs fewer messages: edit needed + delete extras
         
         Note: Reply tags and other special syntax are stripped since Discord

@@ -44,7 +44,7 @@ def create_connection_list_embed(
         embed = discord.Embed(
             title=f"🔌 API Connections - {guild_name}",
             description="No API connections configured in this server.\n\n"
-                       "💡 Click **+ Create New** to create your first connection!",
+                       "💡 Click **Create New** to create your first connection!",
             color=discord.Color.blue()
         )
         return embed
@@ -210,7 +210,7 @@ def create_connection_details_embed(
         
         adv_text = f"**Custom Extra Body:**\n```json\n{extra_body_preview}\n```"
         embed.add_field(name="🔬 Advanced", value=adv_text, inline=False)
-    
+
     # Usage
     ais_using = func.get_ais_using_connection(server_id, connection_name)
     
@@ -400,7 +400,7 @@ class CreateConnectionButton(ui.Button):
     
     def __init__(self):
         super().__init__(
-            label="+ Create New",
+            label="Create New",
             style=discord.ButtonStyle.success,
             emoji="➕"
         )
