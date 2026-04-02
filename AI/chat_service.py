@@ -940,10 +940,21 @@ class ChatService:
             tool_config = config.get("tool_calling", {})
             
             if tool_config.get("enabled", False):
-                from AI.tools import get_tool_definitions
+                from AI.tools import get_tool_definitions, get_tool_names
                 from AI.tool_executor import get_executor
                 
                 allowed_tools = tool_config.get("allowed_tools", ["all"])
+                
+                # Filter out moderation tools if disabled
+                if not config.get("enable_moderation_tools", False):
+                    if "all" in allowed_tools:
+                        # Get all tools except moderation
+                        all_tool_names = get_tool_names()
+                        allowed_tools = [t for t in all_tool_names if t != "moderate_member"]
+                    else:
+                        # Remove moderate_member from explicit list
+                        allowed_tools = [t for t in allowed_tools if t != "moderate_member"]
+                
                 tools = get_tool_definitions(allowed_tools)
                 
                 executor = get_executor()

@@ -227,6 +227,8 @@ class PresetCommands(commands.Cog):
                 # Systems
                 if "enable_memory_system" in preset_config:
                     config_lines.append(f"• Memory: {'✅' if preset_config['enable_memory_system'] else '❌'}")
+                if "enable_moderation_tools" in preset_config:
+                    config_lines.append(f"• Moderation: {'✅' if preset_config['enable_moderation_tools'] else '❌'}")
                 if "sleep_mode_enabled" in preset_config:
                     config_lines.append(f"• Sleep Mode: {'✅' if preset_config['sleep_mode_enabled'] else '❌'}")
                 
@@ -368,6 +370,8 @@ class PresetCommands(commands.Cog):
         
         if "enable_memory_system" in preset_config:
             systems_parts.append(f"Memory {'✅' if preset_config['enable_memory_system'] else '❌'}")
+        if "enable_moderation_tools" in preset_config:
+            systems_parts.append(f"Moderation {'✅' if preset_config['enable_moderation_tools'] else '❌'}")
         if "sleep_mode_enabled" in preset_config:
             systems_parts.append(f"Sleep {'✅' if preset_config['sleep_mode_enabled'] else '❌'}")
         if systems_parts:
@@ -405,6 +409,11 @@ class PresetCommands(commands.Cog):
                 ai_tools.append(f"• **Memory:** {preset_config['memory_max_tokens']} tokens")
             else:
                 ai_tools.append(f"• **Memory:** {'Enabled' if memory_enabled else 'Disabled'}")
+        
+        # Moderation Tools
+        if "enable_moderation_tools" in preset_config:
+            moderation_enabled = preset_config['enable_moderation_tools']
+            ai_tools.append(f"• **Moderation:** {'⚠️ Enabled' if moderation_enabled else 'Disabled'}")
         
         if ai_tools:
             embed.add_field(

@@ -683,11 +683,15 @@ class MessageActionsView(ui.View):
                 )
                 return
             
-            # Remove last 2 messages from history (user + assistant)
+            # Remove only the last assistant message from history (preserve user message and all IDs)
+            from messaging.store import get_store
             from AI.chat_service import get_service
-            chat_service = get_service()
             
+            store = get_store()
+            chat_service = get_service()
             current_chat_id = self.session.get("chat_id", "default")
+            
+            # Get the last user message content for regeneration
             history = chat_service.get_ai_history(
                 self.server_id,
                 self.channel_id,
@@ -695,31 +699,17 @@ class MessageActionsView(ui.View):
                 current_chat_id
             )
             
-            # extrac the actual user message BEFORE removing it
-            # This ensures we use the edited version from ConversationStore
+            # Extract user message content
             actual_user_message = None
-            if len(history) >= 2:
-                # Find the last user message in history (edited version)
+            if history:
                 for msg in reversed(history):
                     if msg["role"] == "user":
                         actual_user_message = msg["content"]
                         break
-                
-                # Now remove last 2 messages
-                updated_history = history[:-2]
-                await chat_service.set_ai_history(
-                    self.server_id,
-                    self.channel_id,
-                    self.ai_name,
-                    updated_history,
-                    current_chat_id
-                )
             
-            # Use the EDITED message from ConversationStore
-            # Fallback to state.user_message only if extraction failed
+            # Use the user message from history or fallback to ResponseManager
             user_msg_content = actual_user_message if actual_user_message else state.user_message
             
-            # Log if we're using fallback
             if not actual_user_message:
                 log.warning(
                     f"Could not extract user message from history for regeneration, "
@@ -727,9 +717,33 @@ class MessageActionsView(ui.View):
                 )
             else:
                 log.debug(
-                    f"Using edited user message from ConversationStore for regeneration "
-                    f"(length: {len(user_msg_content)})"
+                    f"Using user message from history for regeneration (length: {len(user_msg_content)})"
                 )
+            
+            # Remove ONLY the last assistant message (preserves all short IDs and user message)
+            full_history = await store.get_full_history(
+                self.server_id,
+                self.channel_id,
+                self.ai_name,
+                current_chat_id
+            )
+            
+            if full_history:
+                # Find the last assistant message
+                for i in range(len(full_history) - 1, -1, -1):
+                    if full_history[i].role == "assistant":
+                        # Remove this message directly from the store
+                        if full_history[i].discord_ids:
+                            # Use the first discord_id to identify the message
+                            await store.delete_message_by_discord_id(
+                                self.server_id,
+                                self.channel_id,
+                                self.ai_name,
+                                full_history[i].discord_ids[0],
+                                current_chat_id
+                            )
+                            log.debug(f"Removed last assistant message from history (preserved user message and all IDs)")
+                        break
             
             await interaction.followup.send(
                 "🔄 Regenerating response...",

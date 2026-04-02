@@ -24,7 +24,7 @@ yaml = YAML(typ='rt')
 yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
-DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.1.3"
+DEFAULT_AI_CONFIG_CONTENT = r"""version: "1.1.4"
 # DEFAULT AI CONFIGURATION
     # This file contains all default configuration values for AI behavior.
     # Edit these values to change the default behavior for all new AIs.
@@ -164,21 +164,21 @@ advanced_expressions:
       WHEN TO USE REPLIES (Be proactive):
       
       ALWAYS use <REPLY:ID> when:
-      • Multiple people are actively talking (group chat) for clarity
-      • Responding to a message that's not the most recent one
-      • Answering a specific question from someone
-      • Continuing a conversation thread from earlier messages
-      • Any ambiguity about who/what you're responding to
+      - Multiple people are actively talking (group chat) for clarity
+      - Responding to a message that's not the most recent one
+      - Answering a specific question from someone
+      - Continuing a conversation thread from earlier messages
+      - Any ambiguity about who/what you're responding to
       
       ONLY skip replies when:
-      • True 1:1 conversation (just you and one person, back-and-forth)
-      • Making a general statement to everyone
-      • Starting a new topic
+      - True 1:1 conversation (just you and one person, back-and-forth)
+      - Making a general statement to everyone
+      - Starting a new topic
       
       MENTIONS: Use @username when:
-      • You want to get someone's attention
-      • Replying to them (combine with <REPLY:ID>)
-      • Referring to someone in your message
+      - You want to get someone's attention
+      - Replying to them (combine with <REPLY:ID>)
+      - Referring to someone in your message
       
       Example: '<REPLY:5> @user This is the user who was asking about XXXX.'
       
@@ -188,13 +188,13 @@ advanced_expressions:
       
       Rules:
       1. Never use the same <REPLY:id> twice in one response
-      2. Line breaks (\n) send separate messages
+      2. One line breaks (\n) send separate messages
       3. When in doubt, USE the reply - it's better to over-use than under-use
       
       EXAMPLES:
-      • Group chat: '<REPLY:3> Hello, user.' (ALWAYS reply in groups)
-      • Older message: '@John about your question earlier, yes!'
-      • General: 'Hey everyone! How's it going?' (no reply needed)
+      - Group chat: '<REPLY:3> Hello, user.' (ALWAYS reply in groups)
+      - Older message: '@John about your question earlier, yes!'
+      - General: '@everyone Hey everyone! How's it going?' (no reply needed)
   
   reaction:
     enabled: false
@@ -372,8 +372,7 @@ sleep_wakeup_patterns:
 
 
 # Tool Calling, LLM function calling for enhanced capabilities
-# Allows the AI to call tools like get_message_info, get_emoji_info, get_user_info, and memory tools
-# Memory system requires tool_calling.enabled: true to work
+# Memory system and Moderation Tools requires tool_calling.enabled: true to work
 tool_calling:
   enabled: false
   allowed_tools: ["all"]
@@ -388,6 +387,12 @@ tool_calling:
 # When enabled, saved memories are injected into the prompt and LLM can manage them
 enable_memory_system: false
 memory_max_tokens: 1500  # Maximum tokens allowed in memory
+
+# Moderation Tools - Dangerous tools for server moderation
+# Allows the AI to timeout, kick, ban, and manage member moderation
+# REQUIRES: tool_calling.enabled: true
+# WARNING: These tools give the AI power to moderate users. Only enable if you trust the AI!
+enable_moderation_tools: false
 
 # Memory System Prompt Template
 # Variables: {{memory}}, {{char}}, {{user}}, {{memory_count}}, {{ai_name}}
@@ -533,8 +538,6 @@ DISCORD_CHAT_PRESET_OVERRIDES = {
         "poll": {"enabled": True},
         "block": {"enabled": True},
         "embed": {"enabled": True},
-        "edit": {"enabled": True},
-        "delete": {"enabled": True}
     },
     "sleep_mode_enabled": True,
     "send_message_line_by_line": True,
@@ -542,6 +545,7 @@ DISCORD_CHAT_PRESET_OVERRIDES = {
     "save_errors_in_history": True,
     "send_errors_to_chat": True,
     "enable_memory_system": True,
+    "enable_moderation_tools": False, 
     "tool_calling": {
         "enabled": True,
         "allowed_tools": ["all"]

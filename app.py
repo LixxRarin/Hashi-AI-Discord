@@ -44,8 +44,8 @@ class BridgeBot(commands.Bot):
         await self.load_extension('commands.regenerate_commands')
         await self.load_extension('commands.debug_commands')
         await self.load_extension('commands.preset_commands')
-        await self.load_extension('commands.config_commands')
-        await self.load_extension('commands.config_view_commands')
+        # New dynamic config system
+        await self.load_extension('commands.config_interactive')
         await self.load_extension('commands.backup_commands')
         
         await self.load_extension('commands.ai.lifecycle')
