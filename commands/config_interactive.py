@@ -10,8 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
-from utils.config_ui_components import ConfigCategorySelectView
-from utils.config_metadata import get_all_categories, get_category_configs, get_category_emoji
+from utils.config_ui_components import ConfigCategorySelectView, create_category_selection_embed
 from commands.shared.autocomplete import AutocompleteHelpers
 
 
@@ -74,32 +73,8 @@ class ConfigInteractiveCommands(commands.Cog):
             )
             return
         
-        # Create initial embed
-        categories = get_all_categories()
-        
-        embed = discord.Embed(
-            title=f"⚙️ Configure: {ai_name}",
-            description="Choose a category to configure:",
-            color=discord.Color.blue()
-        )
-        
-        # Add category info
-        category_info = []
-        for category in categories[:10]:  # Show first 10
-            config_count = len(get_category_configs(category))
-            emoji = get_category_emoji(category)
-            category_info.append(f"{emoji} **{category}** - {config_count} configs")
-        
-        if len(categories) > 10:
-            category_info.append(f"... and {len(categories) - 10} more categories")
-        
-        embed.add_field(
-            name="Available Categories",
-            value="\n".join(category_info),
-            inline=False
-        )
-        
-        embed.set_footer(text="Select a category from the menu below")
+        # Create initial embed using standardized helper
+        embed = create_category_selection_embed(ai_name)
         
         # Create view
         view = ConfigCategorySelectView(

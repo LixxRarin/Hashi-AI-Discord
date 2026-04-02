@@ -202,17 +202,64 @@ class ConfigMetadata:
             "response_filter_timeout": {"min": 1.0},
         },
         "int": {
-            "cache_count_threshold": {"min": 1},
-            "engaged_message_threshold": {"min": 1},
-            "greeting_index": {"min": 0}, 
-            "lorebook_scan_depth": {"min": 1}, 
-            "sleep_mode_threshold": {"min": 1},
-            "memory_max_tokens": {"min": 100}, 
+            "cache_count_threshold",
+            "engaged_message_threshold",
+            "greeting_index", 
+            "lorebook_scan_depth", 
+            "sleep_mode_threshold",
+            "memory_max_tokens", 
         },
         "choice": {
+            # String choices
             "error_handling_mode": ["friendly", "detailed", "silent"],
             "user_syntax_replacement": ["none", "username", "display_name", "mention", "id"],
             "response_filter_fallback": ["respond", "ignore"],
+            
+            # Boolean choices - Display & Messaging
+            "use_card_ai_display_name": [True, False],
+            "send_the_greeting_message": [True, False],
+            "send_message_line_by_line": [True, False],
+            "new_chat_on_reset": [True, False],
+            
+            # Boolean choices - Timing & Delays
+            "typing_detection_enabled": [True, False],
+            
+            # Boolean choices - Text Processing
+            "remove_ai_emoji": [True, False],
+            "save_errors_in_history": [True, False],
+            "send_errors_to_chat": [True, False],
+            "show_original_on_edit": [True, False],
+            "enable_delete_tracking": [True, False],
+            "show_content_on_delete": [True, False],
+            
+            # Boolean choices - Message Action Buttons
+            "message_action_buttons.enabled": [True, False],
+            
+            # Boolean choices - Character Card
+            "use_lorebook": [True, False],
+            
+            # Boolean choices - Response Filter
+            "use_response_filter": [True, False],
+            
+            # Boolean choices - Expression Systems
+            "advanced_expressions.reply.enabled": [True, False],
+            "advanced_expressions.reaction.enabled": [True, False],
+            "advanced_expressions.ignore.enabled": [True, False],
+            "advanced_expressions.poll.enabled": [True, False],
+            "advanced_expressions.block.enabled": [True, False],
+            "advanced_expressions.embed.enabled": [True, False],
+            
+            # Boolean choices - Tool Calling
+            "tool_calling.enabled": [True, False],
+            
+            # Boolean choices - Memory System
+            "enable_memory_system": [True, False],
+            
+            # Boolean choices - Moderation Tools
+            "enable_moderation_tools": [True, False],
+            
+            # Boolean choices - Sleep Mode
+            "sleep_mode_enabled": [True, False],
         }
     }
     
@@ -280,6 +327,30 @@ class ConfigMetadata:
         "message_action_buttons.enabled": "Show Discord UI buttons on AI messages (previous/next/regenerate/delete/edit)",
         "message_action_buttons.buttons": "List of buttons to display (type, emoji, label, style, enabled for each button)",
     }
+    
+    def is_choice_config(self, config_key: str) -> bool:
+        """
+        Check if config has predefined choices.
+        
+        Args:
+            config_key: Config key to check
+        
+        Returns:
+            True if config has predefined choices
+        """
+        return config_key in self.VALIDATORS.get("choice", {})
+    
+    def get_choices(self, config_key: str) -> List[str]:
+        """
+        Get available choices for a choice config.
+        
+        Args:
+            config_key: Config key
+        
+        Returns:
+            List of available choices, or empty list if not a choice config
+        """
+        return self.VALIDATORS.get("choice", {}).get(config_key, [])
     
     def get_label(self, config_name: str) -> str:
         """
