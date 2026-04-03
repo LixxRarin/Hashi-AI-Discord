@@ -6,6 +6,7 @@ from typing import Dict, Any, Optional, Set, List
 import aiohttp
 import discord
 
+from utils.http_client import create_http_session
 import AI.openai_client as openai_client
 import AI.deepseek_client as deepseek_client
 from AI.chat_service import get_service
@@ -95,7 +96,7 @@ class discord_AI_bot:
                                     func.log.debug(f"Could not load character card avatar: {e}")
                         
                         # Update webhook with cached data only
-                        async with aiohttp.ClientSession() as http_session:
+                        async with create_http_session() as http_session:
                             webhook_obj = discord.Webhook.from_url(webhook_url, session=http_session)
                             
                             if avatar_bytes:

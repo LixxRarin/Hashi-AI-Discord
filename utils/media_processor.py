@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from urllib.parse import urlparse
 
 import aiohttp
+from utils.http_client import create_http_session
 
 
 logger = logging.getLogger(__name__)
@@ -87,8 +88,7 @@ class ImageProcessor:
             Image data as bytes, or None if download failed
         """
         try:
-            timeout = aiohttp.ClientTimeout(total=self.download_timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with create_http_session(timeout_total=self.download_timeout) as session:
                 async with session.get(url) as response:
                     if response.status != 200:
                         logger.warning(f"Failed to download image: HTTP {response.status}")

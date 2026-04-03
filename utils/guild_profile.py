@@ -13,6 +13,7 @@ from discord.ext import commands
 from typing import Optional
 
 import utils.func as func
+from utils.http_client import create_http_session
 
 
 async def bytes_to_data_uri(image_bytes: bytes) -> str:
@@ -104,7 +105,7 @@ async def set_guild_profile(
     
     func.log.info(f"Updating guild profile for guild {guild_id}: {list(payload.keys())}")
     
-    async with aiohttp.ClientSession() as session:
+    async with create_http_session() as session:
         async with session.patch(url, json=payload, headers=headers) as resp:
             if resp.status == 200:
                 func.log.info(f"Successfully updated guild profile for guild {guild_id}")
@@ -132,7 +133,7 @@ async def get_guild_profile(bot: commands.Bot, guild_id: int) -> Optional[dict]:
         "Authorization": f"Bot {bot.http.token}"
     }
     
-    async with aiohttp.ClientSession() as session:
+    async with create_http_session() as session:
         async with session.get(url, headers=headers) as resp:
             if resp.status == 200:
                 return await resp.json()
@@ -165,7 +166,7 @@ async def reset_guild_profile(bot: commands.Bot, guild_id: int) -> bool:
             "Content-Type": "application/json"
         }
         
-        async with aiohttp.ClientSession() as session:
+        async with create_http_session() as session:
             async with session.patch(url, json=payload, headers=headers) as resp:
                 if resp.status == 200:
                     func.log.info(f"Successfully reset guild profile for guild {guild_id}")

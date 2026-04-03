@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 import io
 
 import aiohttp
+from utils.http_client import create_http_session
 
 logger = logging.getLogger(__name__)
 
@@ -139,8 +140,7 @@ class AttachmentProcessor:
             File data as bytes, or None if download failed
         """
         try:
-            timeout = aiohttp.ClientTimeout(total=self.download_timeout)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with create_http_session(timeout_total=self.download_timeout) as session:
                 async with session.get(url) as response:
                     if response.status == 404 and message_id and filename and context:
                         # URL expired, try to re-fetch fresh URL

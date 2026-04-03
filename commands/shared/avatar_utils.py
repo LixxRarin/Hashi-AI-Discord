@@ -10,6 +10,7 @@ from typing import Optional
 import aiohttp
 
 import utils.func as func
+from utils.http_client import create_http_session
 
 
 class AvatarUtils:
@@ -30,7 +31,7 @@ class AvatarUtils:
             return None
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with create_http_session() as session:
                 async with session.get(url) as response:
                     if response.status == 200:
                         return await response.read()

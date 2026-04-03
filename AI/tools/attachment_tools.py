@@ -13,6 +13,7 @@ import io
 import aiohttp
 import base64
 from typing import Dict, Any, List, Optional, Tuple
+from utils.http_client import create_http_session
 
 log = logging.getLogger(__name__)
 
@@ -500,8 +501,8 @@ async def _send_from_url(
     
     try:
         # Download file from URL
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+        async with create_http_session(timeout_total=30) as session:
+            async with session.get(url) as response:
                 if response.status != 200:
                     return {
                         "error": f"Failed to download from URL: HTTP {response.status}",

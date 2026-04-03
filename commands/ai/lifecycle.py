@@ -13,6 +13,7 @@ At least, that’s what I figure.” - Sonic the Hedgehog
 import time
 import asyncio
 import aiohttp
+from utils.http_client import create_http_session
 import traceback
 import discord
 from discord import app_commands
@@ -151,7 +152,7 @@ class AILifecycle(commands.Cog):
             webhook_url = session.get("webhook_url")
             if webhook_url:
                 try:
-                    async with aiohttp.ClientSession() as aio_session:
+                    async with create_http_session() as aio_session:
                         webhook_obj = discord.Webhook.from_url(webhook_url, session=aio_session)
                         await webhook_obj.delete(reason=f"AI '{ai_name}' removed from channel")
                     func.log.info("Deleted webhook for AI")

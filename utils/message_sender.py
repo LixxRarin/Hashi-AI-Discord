@@ -23,6 +23,7 @@ from expressions.reply_expression import ReplyExpression
 from expressions.poll_expression import PollExpression
 from expressions.block_expression import BlockExpression
 from expressions.embed_expression import EmbedExpression
+from utils.http_client import create_http_session, retry_on_network_error
 
 log = logging.getLogger(__name__)
 
@@ -712,8 +713,8 @@ class MessageSender:
         """
         ids = []
         
-        # Reuse single HTTP session for all messages
-        async with aiohttp.ClientSession() as http_session:
+        # Reuse single HTTP session for all messages with proper configuration
+        async with create_http_session() as http_session:
             webhook = discord.Webhook.from_url(webhook_url, session=http_session)
             
             if line_by_line:
@@ -725,30 +726,59 @@ class MessageSender:
                             line_chunks = self._split_message(line, split_fn)
                             for chunk in line_chunks:
                                 try:
-                                    sent_msg = await webhook.send(chunk, wait=True)
-                                    ids.append(str(sent_msg.id))
+                                    sent_msg = await self._send_webhook_with_retry(webhook, chunk)
+                                    if sent_msg:
+                                        ids.append(str(sent_msg.id))
                                     await asyncio.sleep(0)
                                 except Exception as e:
-                                    log.error(f"Error sending line chunk as webhook: {e}")
+                                    log.error(f"Error sending line chunk as webhook: {e}", exc_info=True)
                         else:
                             try:
-                                sent_msg = await webhook.send(line, wait=True)
-                                ids.append(str(sent_msg.id))
+                                sent_msg = await self._send_webhook_with_retry(webhook, line)
+                                if sent_msg:
+                                    ids.append(str(sent_msg.id))
                                 await asyncio.sleep(0)
                             except Exception as e:
-                                log.error(f"Error sending line as webhook: {e}")
+                                log.error(f"Error sending line as webhook: {e}", exc_info=True)
             else:
                 # Send as chunks
                 chunks = self._split_message(text, split_fn)
                 for chunk in chunks:
                     try:
-                        sent_msg = await webhook.send(chunk, wait=True)
-                        ids.append(str(sent_msg.id))
+                        sent_msg = await self._send_webhook_with_retry(webhook, chunk)
+                        if sent_msg:
+                            ids.append(str(sent_msg.id))
                         await asyncio.sleep(0)
                     except Exception as e:
-                        log.error(f"Error sending chunk as webhook: {e}")
+                        log.error(f"Error sending chunk as webhook: {e}", exc_info=True)
         
         return ids
+    
+    @retry_on_network_error(max_attempts=3, base_delay=1.0)
+    async def _send_webhook_with_retry(
+        self,
+        webhook: discord.Webhook,
+        content: str
+    ) -> Optional[discord.Message]:
+        """
+        Send a webhook message with automatic retry on network errors.
+        
+        Args:
+            webhook: Discord webhook object
+            content: Message content to send
+            
+        Returns:
+            Sent message or None if failed
+        """
+        try:
+            return await webhook.send(content, wait=True)
+        except discord.HTTPException as e:
+            log.error(f"Discord HTTP error sending webhook message: {e}")
+            # Don't retry on Discord API errors (rate limits, permissions, etc)
+            return None
+        except Exception as e:
+            log.error(f"Unexpected error sending webhook message: {e}")
+            raise
     
     def _split_message(
         self,
@@ -846,7 +876,7 @@ class MessageSender:
                     log.warning("Webhook mode selected but no webhook_url provided")
                     return None
                 
-                async with aiohttp.ClientSession() as http_session:
+                async with create_http_session() as http_session:
                     webhook = discord.Webhook.from_url(webhook_url, session=http_session)
                     message = await fetch_message_cached(channel, first_msg_id)
                     if message:
@@ -946,7 +976,7 @@ class MessageSender:
                             log.warning("Webhook mode but no webhook_url, skipping edit")
                             continue
                         
-                        async with aiohttp.ClientSession() as http_session:
+                        async with create_http_session() as http_session:
                             webhook = discord.Webhook.from_url(webhook_url, session=http_session)
                             await webhook.edit_message(int(msg_id), content=chunk)
                             result_ids.append(msg_id)
@@ -1015,10 +1045,10 @@ class MessageSender:
             else:
                 if not webhook_url:
                     return None
-                async with aiohttp.ClientSession() as http_session:
+                async with create_http_session() as http_session:
                     webhook = discord.Webhook.from_url(webhook_url, session=http_session)
-                    sent_msg = await webhook.send(text, wait=True)
-                    return str(sent_msg.id)
+                    sent_msg = await self._send_webhook_with_retry(webhook, text)
+                    return str(sent_msg.id) if sent_msg else None
         except Exception as e:
             log.error(f"Error sending single message: {e}")
             return None
@@ -1191,7 +1221,7 @@ class MessageSender:
                     log.error("Webhook mode selected but no webhook_url provided")
                     return None
                 
-                async with aiohttp.ClientSession() as http_session:
+                async with create_http_session() as http_session:
                     webhook = discord.Webhook.from_url(webhook_url, session=http_session)
                     
                     # Note: Webhooks don't support reply references

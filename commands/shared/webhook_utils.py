@@ -9,6 +9,7 @@ import aiohttp
 import discord
 
 import utils.func as func
+from utils.http_client import create_http_session
 
 
 class WebhookUtils:
@@ -36,7 +37,7 @@ class WebhookUtils:
         sent_messages = []
         
         try:
-            async with aiohttp.ClientSession() as session:
+            async with create_http_session() as session:
                 webhook_obj = discord.Webhook.from_url(url, session=session)
                 
                 if session_config.get("config", {}).get("send_message_line_by_line", False):
@@ -124,7 +125,7 @@ class WebhookUtils:
             True if successful, False otherwise
         """
         try:
-            async with aiohttp.ClientSession() as session:
+            async with create_http_session() as session:
                 webhook_obj = discord.Webhook.from_url(url, session=session)
                 
                 kwargs = {}
@@ -156,7 +157,7 @@ class WebhookUtils:
             True if successful, False otherwise
         """
         try:
-            async with aiohttp.ClientSession() as session:
+            async with create_http_session() as session:
                 webhook_obj = discord.Webhook.from_url(url, session=session)
                 await webhook_obj.delete()
                 func.log.debug(f"Deleted webhook: {url}")
