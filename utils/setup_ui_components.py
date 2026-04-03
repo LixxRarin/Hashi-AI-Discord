@@ -125,26 +125,61 @@ class Step1_ChannelSelectView(ui.View):
         self.add_item(CancelButton())
     
     async def on_channel_selected(self, interaction: discord.Interaction, channel: discord.TextChannel):
-        """Handle channel selection."""
+        """Handle channel selection with validation."""
         try:
-            self.wizard_data.channel_id = str(channel.id)
+            # Validate: Check if channel already has any AI configured
+            server_id = str(self.wizard_data.guild_id)
+            channel_id = str(channel.id)
+            channel_data = func.get_session_data(server_id, channel_id) or {}
+            
+            if channel_data:
+                # Channel already has AI(s) configured
+                existing_ais = list(channel_data.keys())
+                existing_modes = [ai_data.get("mode", "unknown") for ai_data in channel_data.values()]
+                
+                await interaction.response.send_message(
+                    f"❌ **Channel already has AI configured**\n\n"
+                    f"**Channel:** #{channel.name}\n"
+                    f"**Existing AI(s):** {', '.join(existing_ais)}\n"
+                    f"**Mode(s):** {', '.join(existing_modes)}\n\n"
+                    f"💡 **Only 1 AI per channel is allowed.**\n"
+                    f"To configure a new AI, remove the existing one first using `/remove_ai`.",
+                    ephemeral=True
+                )
+                return
+            
+            # Channel is empty, proceed
+            self.wizard_data.channel_id = channel_id
             self.wizard_data.channel_name = channel.name
             self.wizard_data.current_step = 2
             
-            # Move to step 2
+            # Move to step 2 with improved descriptions
             view = Step2_ModeSelectView(self.wizard_data)
             embed = create_step_embed(
                 step=2,
                 title="Select Mode",
-                description="Choose how the AI will appear in the channel:\n\n"
-                           "🤖 **Bot Mode**: AI uses the bot's account\n"
-                           "• Only one bot per channel\n"
-                           "• Guild-specific avatar and nickname\n"
-                           "• Simpler setup\n\n"
-                           "🔗 **Webhook Mode**: AI uses a webhook\n"
-                           "• Multiple AIs per channel\n"
-                           "• Custom avatar per AI\n"
-                           "• More flexible",
+                description=(
+                    "Choose how the AI will appear in the channel:\n\n"
+                    
+                    "🤖 **Bot Mode**\n"
+                    "The AI uses the bot's Discord account.\n"
+                    "**Advantages:**\n"
+                    "• More complete and realistic profile\n"
+                    "• Full support for replys\n"
+                    "• Advanced expressions work 100%\n"
+                    "• Server-specific avatar and nickname\n"
+                    "• More stable and reliable\n\n"
+                    
+                    "🔗 **Webhook Mode**\n"
+                    "The AI uses a custom webhook.\n"
+                    "**Advantages:**\n"
+                    "• Ideal for roleplay and characters\n"
+                    "• Doesn't interfere with bot profile\n"
+                    "• Fully customizable avatar and name\n"
+                    "• More flexible for multiple characters\n\n"
+                    
+                    "⚠️ **Important:** Only 1 AI per channel is allowed."
+                ),
                 wizard_data=self.wizard_data
             )
             
@@ -206,29 +241,17 @@ class BotModeButton(ui.Button):
             self.view.wizard_data.mode = "bot"
             self.view.wizard_data.current_step = 3
             
-            # Check for existing bot in channel
-            server_id = str(self.view.wizard_data.guild_id)
-            channel_id = self.view.wizard_data.channel_id
-            channel_data = func.get_session_data(server_id, channel_id) or {}
+            # Validation already done in Step 1, proceed directly to Step 3
+            view = Step3_APIConnectionView(self.view.wizard_data)
+            embed = create_step_embed(
+                step=3,
+                title="Select API Connection",
+                description="Choose an API connection for the AI to use.\n\n"
+                           "If you don't have any connections yet, create one first.",
+                wizard_data=self.view.wizard_data
+            )
             
-            existing_bot = None
-            for ai_name, ai_data in channel_data.items():
-                if ai_data.get("mode") == "bot":
-                    existing_bot = ai_name
-                    break
-            
-            if existing_bot:
-                await interaction.response.send_message(
-                    f"❌ **Bot mode already configured**\n\n"
-                    f"AI '{existing_bot}' is already using bot mode in this channel.\n"
-                    f"Only one bot per channel is allowed.\n\n"
-                    f"💡 Use webhook mode for multiple AIs, or remove the existing bot first.",
-                    ephemeral=True
-                )
-                return
-            
-            # Move to step 3
-            await self._move_to_step3(interaction)
+            await interaction.response.edit_message(embed=embed, view=view)
         
         except Exception as e:
             func.log.error(f"Error selecting bot mode: {e}\n{traceback.format_exc()}")
@@ -236,19 +259,6 @@ class BotModeButton(ui.Button):
                 f"❌ Error: {str(e)}",
                 ephemeral=True
             )
-    
-    async def _move_to_step3(self, interaction: discord.Interaction):
-        """Move to API connection selection."""
-        view = Step3_APIConnectionView(self.view.wizard_data)
-        embed = create_step_embed(
-            step=3,
-            title="Select API Connection",
-            description="Choose an API connection for the AI to use.\n\n"
-                       "If you don't have any connections yet, create one first.",
-            wizard_data=self.view.wizard_data
-        )
-        
-        await interaction.response.edit_message(embed=embed, view=view)
 
 
 class WebhookModeButton(ui.Button):
