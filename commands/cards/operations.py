@@ -528,7 +528,7 @@ class AIOperations(commands.Cog):
         # Add greetings to embed
         greetings_text = "\n\n".join(greeting_list)
         
-        # Discord embed description limit is 4096 characters
+        # Discord embed description limit is 16000 characters
         if len(greetings_text) > 3900:
             greetings_text = greetings_text[:3900] + "\n\n... (list truncated)"
         
@@ -557,7 +557,7 @@ class AIOperations(commands.Cog):
         # Choose color based on active status
         color = discord.Color.green() if is_active else discord.Color.purple()
         
-        # Prepare greeting text for description (max 4096 characters)
+        # Prepare greeting text for description (max 16000 characters)
         max_text_length = 3900  # Leave room for code block markers and warning
         
         if len(greeting_text) <= max_text_length:

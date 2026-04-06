@@ -421,7 +421,7 @@ class ChatService:
         history = self.get_ai_history(server_id, channel_id, ai_name, chat_id)
         
         # Token management
-        context_size = llm_params.get("context_size", 4096)
+        context_size = llm_params.get("context_size", 16000)
         max_tokens = llm_params.get("max_tokens", 1000)
         
         # Validate and adjust max_tokens to prevent negative history space

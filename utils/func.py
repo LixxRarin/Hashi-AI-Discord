@@ -494,7 +494,7 @@ async def create_api_connection(
     top_p: float = 1.0,
     frequency_penalty: float = 0.0,
     presence_penalty: float = 0.0,
-    context_size: int = 64000,
+    context_size: int = 16000,
     think_switch: bool = True,
     think_depth: int = 3,
     hide_thinking_tags: bool = True,

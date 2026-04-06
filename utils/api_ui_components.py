@@ -159,7 +159,7 @@ def create_connection_details_embed(
     gen_text += f"• **Top P:** `{connection_data.get('top_p', 1.0)}`\n"
     gen_text += f"• **Frequency Penalty:** `{connection_data.get('frequency_penalty', 0.0)}`\n"
     gen_text += f"• **Presence Penalty:** `{connection_data.get('presence_penalty', 0.0)}`\n"
-    gen_text += f"• **Context Size:** `{connection_data.get('context_size', 4096)}` tokens"
+    gen_text += f"• **Context Size:** `{connection_data.get('context_size', 16000)}` tokens"
     
     embed.add_field(name="⚙️ Generation", value=gen_text, inline=False)
     
@@ -521,7 +521,7 @@ class CreateConnectionDetailsModal(ui.Modal):
                 top_p=1.0,
                 frequency_penalty=0.0,
                 presence_penalty=0.0,
-                context_size=4096,
+                context_size=16000,
                 think_switch=True,
                 think_depth=3,
                 hide_thinking_tags=True,
@@ -686,8 +686,8 @@ class CreateConnectionStep2Modal(ui.Modal):
         # Context Size
         self.context_size = ui.TextInput(
             label="Context Size",
-            placeholder="Default: 4096",
-            default="4096",
+            placeholder="Default: 16000",
+            default="16000",
             required=False,
             style=discord.TextStyle.short
         )
@@ -708,7 +708,7 @@ class CreateConnectionStep2Modal(ui.Modal):
             try:
                 max_tokens = int(self.max_tokens.value) if self.max_tokens.value else 1000
                 temperature = float(self.temperature.value) if self.temperature.value else 0.7
-                context_size = int(self.context_size.value) if self.context_size.value else 4096
+                context_size = int(self.context_size.value) if self.context_size.value else 16000
             except ValueError as e:
                 await interaction.response.send_message(
                     f"❌ Invalid number format: {e}",

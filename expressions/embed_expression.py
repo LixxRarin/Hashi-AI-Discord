@@ -53,7 +53,7 @@ class EmbedExpression(BaseExpression):
     
     # Discord embed limits
     MAX_TITLE_LENGTH = 256
-    MAX_DESCRIPTION_LENGTH = 4096
+    MAX_DESCRIPTION_LENGTH = 16000
     MAX_FIELDS = 25
     MAX_FIELD_NAME_LENGTH = 256
     MAX_FIELD_VALUE_LENGTH = 1024

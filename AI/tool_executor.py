@@ -276,7 +276,7 @@ class ToolExecutor:
         tool_config = config.get("tool_calling", {})
         
         # Get context_size, model, and provider - try API connection first
-        context_size = 4096  # Default fallback
+        context_size = 16000  # Default fallback
         model = "gpt-4"  # Default model for tiktoken
         provider = None  # Provider for encoding resolution
         connection_name = session.get("api_connection")
@@ -289,19 +289,19 @@ class ToolExecutor:
                 if server_id:
                     connection = func.get_api_connection(server_id, connection_name)
                     if connection:
-                        context_size = connection.get("context_size", 4096)
+                        context_size = connection.get("context_size", 16000)
                         model = connection.get("model", "gpt-4")
                         provider = connection.get("provider")
                     else:
-                        context_size = config.get("context_size", 4096)
+                        context_size = config.get("context_size", 16000)
                 else:
-                    context_size = config.get("context_size", 4096)
+                    context_size = config.get("context_size", 16000)
             except Exception as e:
                 log.warning(f"Failed to get context_size from API connection: {e}")
-                context_size = config.get("context_size", 4096)
+                context_size = config.get("context_size", 16000)
         else:
             # Fallback to config
-            context_size = config.get("context_size", 4096)
+            context_size = config.get("context_size", 16000)
         
         # Get configuration parameters with defaults
         percentage = tool_config.get("tool_result_max_percentage", 35)
