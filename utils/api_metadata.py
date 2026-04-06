@@ -183,9 +183,38 @@ class APIMetadata:
         "custom_extra_body": "Additional provider-specific parameters (JSON)",
     }
     
+    def is_dynamic_choice_param(self, param: str) -> bool:
+        """
+        Check if parameter has dynamically loaded choices.
+        
+        Args:
+            param: Parameter key to check
+        
+        Returns:
+            True if parameter has dynamic choices (e.g., provider)
+        """
+        return param == "provider"
+    
+    def get_dynamic_choices(self, param: str) -> List[Any]:
+        """
+        Get dynamically loaded choices for a parameter.
+        
+        Args:
+            param: Parameter key
+        
+        Returns:
+            List of available choices loaded dynamically
+        """
+        if param == "provider":
+            # Import here to avoid circular dependency
+            from AI.provider_registry import get_registry
+            registry = get_registry()
+            return registry.list_providers()
+        return []
+    
     def is_choice_param(self, param: str) -> bool:
         """
-        Check if parameter has predefined choices.
+        Check if parameter has predefined choices (static or dynamic).
         
         Args:
             param: Parameter key to check
@@ -193,11 +222,11 @@ class APIMetadata:
         Returns:
             True if parameter has predefined choices
         """
-        return param in self.VALIDATORS.get("choice", {})
+        return param in self.VALIDATORS.get("choice", {}) or self.is_dynamic_choice_param(param)
     
     def get_choices(self, param: str) -> List[Any]:
         """
-        Get available choices for a choice parameter.
+        Get available choices for a choice parameter (static or dynamic).
         
         Args:
             param: Parameter key
@@ -205,6 +234,11 @@ class APIMetadata:
         Returns:
             List of available choices, or empty list if not a choice param
         """
+        # Check for dynamic choices first
+        if self.is_dynamic_choice_param(param):
+            return self.get_dynamic_choices(param)
+        
+        # Fall back to static choices
         return self.VALIDATORS.get("choice", {}).get(param, [])
     
     def get_label(self, param: str) -> str:

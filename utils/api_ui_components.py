@@ -1890,8 +1890,13 @@ class EditParameterModal(ui.Modal):
             # Update local data
             self.connection_data[self.param] = parsed_value
             
-            # Dismiss modal silently (no confirmation message to keep chat clean)
-            await interaction.response.defer()
+            # Send confirmation message
+            label = self.metadata.get_label(self.param)
+            formatted_value = self.metadata.format_value_for_display(parsed_value, self.param)
+            await interaction.response.send_message(
+                f"✅ **Updated {label}**\nNew value: `{formatted_value}`",
+                ephemeral=True
+            )
             
             func.log.info(f"Updated connection '{self.connection_name}' parameter '{self.param}' = {parsed_value}")
         
@@ -1975,8 +1980,12 @@ class EditParameterChoiceView(ui.View):
             # Update local data
             self.connection_data[self.param] = value
             
-            # Dismiss interaction silently (no confirmation message to keep chat clean)
-            await interaction.response.defer()
+            # Send confirmation message
+            label = self.metadata.get_label(self.param)
+            await interaction.response.send_message(
+                f"✅ **Updated {label}**\nNew value: `{display_value}`",
+                ephemeral=True
+            )
             
             func.log.info(f"Updated connection '{self.connection_name}' parameter '{self.param}' = {value}")
         
@@ -1999,7 +2008,24 @@ class ParameterChoiceSelect(ui.Select):
         is_boolean = all(isinstance(c, bool) for c in choices)
         
         for choice in choices:
-            if is_boolean:
+            # Special handling for provider parameter
+            if param == "provider":
+                from AI.provider_registry import get_registry
+                registry = get_registry()
+                try:
+                    provider_meta = registry.get_metadata(str(choice))
+                    label = f"{provider_meta.icon} {provider_meta.display_name}"
+                    value = str(choice)
+                    # Use the provider's own description if available
+                    description = provider_meta.description if provider_meta.description else f"{provider_meta.display_name} API"
+                    is_default = (choice == current_value)
+                except ValueError:
+                    # Fallback if provider not found in registry
+                    label = str(choice).upper()
+                    value = str(choice)
+                    description = f"Provider: {choice}"
+                    is_default = (choice == current_value)
+            elif is_boolean:
                 # Display booleans as Enabled/Disabled
                 label = "✅ Enabled" if choice else "❌ Disabled"
                 value = "true" if choice else "false"  # Discord requires string values
