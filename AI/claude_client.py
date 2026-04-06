@@ -220,20 +220,12 @@ class ClaudeClient(BaseAIClient):
                         api_params["max_tokens"]  # Don't exceed max_tokens
                     )
                     
-                    # Configure thinking with explicit redaction control
-                    # save_thinking_in_history controls if we want readable thinking
-                    save_thinking = llm_params.get("save_thinking_in_history", True)
-                    
+                    # Configure thinking - API returns thinking content when available
+                    # The save_thinking_in_history setting controls response processing, not API behavior
                     api_params["thinking"] = {
                         "type": "enabled",
                         "budget_tokens": budget_tokens
                     }
-                    
-                    # Request non-redacted thinking if save_thinking_in_history is True
-                    # This allows the thinking content to be readable and saved in history
-                    if save_thinking:
-                        # Try to request non-redacted thinking (API may still redact for safety)
-                        api_params["thinking"]["redact"] = False
                     
                     thinking_enabled = True
                     
