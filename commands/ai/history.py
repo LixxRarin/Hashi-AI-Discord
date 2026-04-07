@@ -15,6 +15,8 @@ from AI.chat_service import get_service
 from messaging.response import get_response_manager
 from messaging.store import get_store
 from commands.shared.autocomplete import AutocompleteHelpers
+from utils.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.thumbnail_helper import get_character_card_thumbnail_url
 
 
 class HistoryManager(commands.Cog):
@@ -66,73 +68,75 @@ class HistoryManager(commands.Cog):
             )
             return
         
-        # If there's existing history, ask for confirmation
-        confirm_msg = await interaction.channel.send(
-            f"⚠️ **WARNING: Clear History Confirmation** (requested by {interaction.user.mention})\n\n"
-            f"**AI:** {ai_name}\n"
-            f"**Channel:** <#{found_channel_id}>\n"
-            f"**Messages in history:** {len(existing_history)}\n\n"
-            f"⚠️ **This will DELETE ALL CONVERSATION HISTORY!**\n"
-            f"All RP/conversation progress will be permanently lost.\n\n"
-            f"**React with ✅ to confirm or ❌ to cancel.**"
-        )
-        
-        # Send ephemeral acknowledgment
-        await interaction.followup.send(
-            "✅ Confirmation message sent. Please react to confirm or cancel.",
-            ephemeral=True
-        )
-        
-        # Add reactions
-        await confirm_msg.add_reaction("✅")
-        await confirm_msg.add_reaction("❌")
-        
-        # Wait for reaction
-        def check(reaction, user):
-            return (
-                user == interaction.user
-                and reaction.message.id == confirm_msg.id
-                and str(reaction.emoji) in ["✅", "❌"]
+        # Get character card thumbnail if available
+        channel_obj = interaction.guild.get_channel(int(found_channel_id))
+        thumbnail_url = None
+        if channel_obj:
+            thumbnail_url = await get_character_card_thumbnail_url(
+                channel=channel_obj,
+                session=session,
+                server_id=server_id
             )
         
-        try:
-            reaction, user = await self.bot.wait_for("reaction_add", timeout=60.0, check=check)
+        # Get chat info for display
+        chat_id_display = current_chat_id
+        if len(current_chat_id) > 30:
+            chat_id_display = f"{current_chat_id[:20]}...{current_chat_id[-8:]}"
+        
+        # Prepare detail fields
+        details_fields = [
+            {
+                "name": "📊 Details",
+                "value": f"• **AI:** {ai_name}\n"
+                        f"• **Channel:** <#{found_channel_id}>\n"
+                        f"• **Chat ID:** `{chat_id_display}`\n"
+                        f"• **Messages:** {len(existing_history)} in history"
+            },
+            {
+                "name": "⚠️ Warning",
+                "value": "**This will permanently delete ALL conversation history!**\n"
+                        "All roleplay and conversation progress will be lost forever.\n"
+                        "This action cannot be undone."
+            }
+        ]
+        
+        # Define confirmation callback
+        async def on_confirm(confirm_interaction: discord.Interaction):
+            # Clear the history
+            await service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
             
-            if str(reaction.emoji) == "✅":
-                # Clear the history
-                await service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
-                
-                try:
-                    await confirm_msg.edit(
-                        content=f"✅ **History Cleared Successfully**\n\n"
-                        f"**AI:** {ai_name}\n"
-                        f"**Channel:** <#{found_channel_id}>\n"
-                        f"**Cleared by:** {interaction.user.mention}\n\n"
-                        f"The conversation history has been permanently deleted."
-                    )
-                    await confirm_msg.clear_reactions()
-                except discord.NotFound:
-                    pass
-                func.log.info("Cleared history for AI")
-            else:
-                try:
-                    await confirm_msg.edit(
-                        content=f"❌ **Clear History Cancelled**\n\n"
-                        f"No changes were made to the conversation history."
-                    )
-                    await confirm_msg.clear_reactions()
-                except discord.NotFound:
-                    pass
-                
-        except TimeoutError:
-            try:
-                await confirm_msg.edit(
-                    content=f"⏱️ **Clear History Timed Out**\n\n"
-                    f"No reaction received within 60 seconds. No changes were made."
-                )
-                await confirm_msg.clear_reactions()
-            except discord.NotFound:
-                pass
+            # Create success embed
+            success_embed = create_success_embed(
+                title="✅ History Cleared Successfully",
+                description=f"The conversation history for **{ai_name}** has been permanently deleted.",
+                fields=[
+                    {
+                        "name": "📊 Summary",
+                        "value": f"• **AI:** {ai_name}\n"
+                                f"• **Channel:** <#{found_channel_id}>\n"
+                                f"• **Messages Cleared:** {len(existing_history)}\n"
+                                f"• **Cleared by:** {interaction.user.mention}"
+                    }
+                ],
+                thumbnail_url=thumbnail_url
+            )
+            
+            await confirm_interaction.response.edit_message(
+                embed=success_embed,
+                view=None
+            )
+            
+            func.log.info(f"Cleared history for AI '{ai_name}' in server {server_id}, channel {found_channel_id}")
+        
+        # Show double confirmation dialog
+        await confirm_dangerous_action(
+            interaction=interaction,
+            action_name="Clear History",
+            warning_message="This will permanently delete all conversation history!",
+            details_fields=details_fields,
+            on_confirm=on_confirm,
+            thumbnail_url=thumbnail_url
+        )
     
     async def _delete_single_message_with_retry(
         self,

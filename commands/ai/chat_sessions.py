@@ -6,6 +6,7 @@ Provides commands to manage multiple chat sessions for AIs.
 import uuid
 from pathlib import Path
 from typing import List
+import datetime
 
 import discord
 from discord import app_commands
@@ -17,6 +18,7 @@ from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.webhook_utils import WebhookUtils
 from utils.pagination import PaginatedView
 from utils.thumbnail_helper import get_character_card_thumbnail_url
+from utils.confirmation_ui import confirm_dangerous_action, create_success_embed
 
 
 class ChatSessions(commands.Cog):
@@ -460,91 +462,107 @@ class ChatSessions(commands.Cog):
         # Get chat info for confirmation
         info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
         
-        # Send confirmation message
-        import datetime
-        created = datetime.datetime.fromtimestamp(info["created_at"]).strftime("%Y-%m-%d %H:%M")
-        
-        confirm_msg = await interaction.channel.send(
-            f"⚠️ **WARNING: Delete Chat Confirmation** (requested by {interaction.user.mention})\n\n"
-            f"**AI:** {ai_name}\n"
-            f"**Chat ID:** `{chat_id}`\n"
-            f"**Messages:** {info['message_count']}\n"
-            f"**Created:** {created}\n\n"
-            f"⚠️ **This will PERMANENTLY DELETE this chat session!**\n"
-            f"All conversation history will be lost.\n\n"
-            f"**React with ✅ to confirm or ❌ to cancel.**"
-        )
-        
-        # Send ephemeral acknowledgment
-        await interaction.followup.send(
-            "✅ Confirmation message sent. Please react to confirm or cancel.",
-            ephemeral=True
-        )
-        
-        # Add reactions
-        await confirm_msg.add_reaction("✅")
-        await confirm_msg.add_reaction("❌")
-        
-        # Wait for reaction
-        def check(reaction, user):
-            return (
-                user == interaction.user
-                and reaction.message.id == confirm_msg.id
-                and str(reaction.emoji) in ["✅", "❌"]
+        # Get character card thumbnail if available
+        channel_obj = interaction.guild.get_channel(int(found_channel_id))
+        thumbnail_url = None
+        if channel_obj:
+            thumbnail_url = await get_character_card_thumbnail_url(
+                channel=channel_obj,
+                session=session,
+                server_id=server_id
             )
         
-        try:
-            reaction, user = await self.bot.wait_for("reaction_add", timeout=60.0, check=check)
-            
-            if str(reaction.emoji) == "✅":
-                # Delete the chat
-                try:
-                    success = await service.history_manager.delete_chat(
-                        server_id, found_channel_id, ai_name, chat_id
+        # Format timestamps
+        created = datetime.datetime.fromtimestamp(info["created_at"]).strftime("%Y-%m-%d %H:%M")
+        updated = datetime.datetime.fromtimestamp(info["updated_at"]).strftime("%Y-%m-%d %H:%M")
+        
+        # Format chat ID for display
+        chat_id_display = chat_id
+        if len(chat_id) > 30:
+            chat_id_display = f"{chat_id[:20]}...{chat_id[-8:]}"
+        
+        # Prepare detail fields
+        details_fields = [
+            {
+                "name": "📊 Chat Details",
+                "value": f"• **AI:** {ai_name}\n"
+                        f"• **Channel:** <#{found_channel_id}>\n"
+                        f"• **Chat ID:** `{chat_id_display}`\n"
+                        f"• **Messages:** {info['message_count']}\n"
+                        f"• **Created:** {created}\n"
+                        f"• **Last Updated:** {updated}"
+            },
+            {
+                "name": "⚠️ Warning",
+                "value": "**This will permanently delete this chat session!**\n"
+                        "All conversation history in this chat will be lost forever.\n"
+                        "This action cannot be undone."
+            }
+        ]
+        
+        # Define confirmation callback
+        async def on_confirm(confirm_interaction: discord.Interaction):
+            # Delete the chat
+            try:
+                success = await service.history_manager.delete_chat(
+                    server_id, found_channel_id, ai_name, chat_id
+                )
+                
+                if success:
+                    # Create success embed
+                    success_embed = create_success_embed(
+                        title="✅ Chat Deleted Successfully",
+                        description=f"The chat session **{chat_id_display}** has been permanently deleted.",
+                        fields=[
+                            {
+                                "name": "📊 Summary",
+                                "value": f"• **AI:** {ai_name}\n"
+                                        f"• **Chat ID:** `{chat_id_display}`\n"
+                                        f"• **Messages Deleted:** {info['message_count']}\n"
+                                        f"• **Deleted by:** {interaction.user.mention}"
+                            }
+                        ],
+                        thumbnail_url=thumbnail_url
                     )
                     
-                    if success:
-                        try:
-                            await confirm_msg.edit(
-                                content=f"✅ **Chat Deleted Successfully**\n\n"
-                                f"**AI:** {ai_name}\n"
-                                f"**Chat ID:** `{chat_id}`\n"
-                                f"**Deleted by:** {interaction.user.mention}\n\n"
-                                f"The chat session has been permanently deleted."
-                            )
-                            await confirm_msg.clear_reactions()
-                        except discord.NotFound:
-                            pass
-                        func.log.info(f"Deleted chat '{chat_id}'")
-                    else:
-                        await interaction.followup.send(
-                            f"❌ Failed to delete chat. Check logs for details.",
-                            ephemeral=True
-                        )
-                except ValueError as e:
-                    await interaction.followup.send(
-                        f"❌ Error: {str(e)}",
-                        ephemeral=True
+                    await confirm_interaction.response.edit_message(
+                        embed=success_embed,
+                        view=None
                     )
-            else:
-                try:
-                    await confirm_msg.edit(
-                        content=f"❌ **Delete Chat Cancelled**\n\n"
-                        f"No changes were made."
+                    
+                    func.log.info(f"Deleted chat '{chat_id}' for AI '{ai_name}' in server {server_id}")
+                else:
+                    # Failed to delete
+                    from utils.confirmation_ui import create_error_embed
+                    error_embed = create_error_embed(
+                        title="❌ Delete Failed",
+                        description="Failed to delete the chat session. Check logs for details."
                     )
-                    await confirm_msg.clear_reactions()
-                except discord.NotFound:
-                    pass
-                
-        except TimeoutError:
-            try:
-                await confirm_msg.edit(
-                    content=f"⏱️ **Delete Chat Timed Out**\n\n"
-                    f"No reaction received within 60 seconds. No changes were made."
+                    await confirm_interaction.response.edit_message(
+                        embed=error_embed,
+                        view=None
+                    )
+            except ValueError as e:
+                # Error during deletion
+                from utils.confirmation_ui import create_error_embed
+                error_embed = create_error_embed(
+                    title="❌ Error",
+                    description=f"An error occurred: {str(e)}"
                 )
-                await confirm_msg.clear_reactions()
-            except discord.NotFound:
-                pass
+                await confirm_interaction.response.edit_message(
+                    embed=error_embed,
+                    view=None
+                )
+        
+        # Show double confirmation dialog
+        await confirm_dangerous_action(
+            interaction=interaction,
+            action_name="Delete Chat",
+            warning_message="This will permanently delete this chat session!",
+            details_fields=details_fields,
+            on_confirm=on_confirm,
+            thumbnail_url=thumbnail_url
+        )
     
     @app_commands.command(name="rename_chat", description="Rename a chat session")
     @app_commands.default_permissions(administrator=True)

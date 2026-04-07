@@ -16,6 +16,7 @@ import utils.func as func
 from commands.shared.autocomplete import AutocompleteHelpers
 from utils.pagination import PaginatedView
 from utils.thumbnail_helper import upload_thumbnail_to_discord
+from utils.confirmation_ui import confirm_dangerous_action, create_success_embed
 
 
 class CardRegistry(commands.Cog):
@@ -278,124 +279,155 @@ class CardRegistry(commands.Cog):
         # Check if card is in use
         ais_using = func.get_ais_using_card(server_id, card_name)
         
-        if ais_using and not force:
-            # Build list of AIs using this card
-            ai_list = []
-            for channel_id, ai_name in ais_using:
-                channel_obj = interaction.guild.get_channel(int(channel_id))
-                channel_name = channel_obj.name if channel_obj else f"Channel {channel_id}"
-                ai_list.append(f"• `{ai_name}` in #{channel_name}")
-            
-            ai_list_str = "\n".join(ai_list[:10])
-            if len(ais_using) > 10:
-                ai_list_str += f"\n• ... and {len(ais_using) - 10} more"
-            
-            # Send confirmation message
-            confirm_msg = await interaction.channel.send(
-                f"⚠️ **Remove Card Confirmation** (requested by {interaction.user.mention})\n\n"
-                f"**Card:** `{card_name}`\n"
-                f"**Character:** {card_info.get('name', card_name)}\n"
-                f"**In use by:** {len(ais_using)} AI(s)\n\n"
-                f"**AIs using this card:**\n{ai_list_str}\n\n"
-                f"⚠️ **Removing this card will:**\n"
-                f"• Remove it from the registry\n"
-                f"• Break references in AIs using it\n"
-                f"{'• **DELETE the cached file**\n' if delete_file else '• Keep the cached file\n'}\n\n"
-                f"**React with ✅ to confirm or ❌ to cancel.**"
+        # Get character card thumbnail
+        cache_path = card_info.get("cache_path")
+        thumbnail_url = None
+        if cache_path and Path(cache_path).suffix.lower() == '.png' and Path(cache_path).exists():
+            # Upload thumbnail to Discord CDN
+            thumbnail_url = await upload_thumbnail_to_discord(
+                interaction.channel,
+                cache_path,
+                server_id=server_id
             )
-            
-            await interaction.followup.send(
-                "✅ Confirmation message sent. Please react to confirm or cancel.",
-                ephemeral=True
-            )
-            
-            # Add reactions
-            try:
-                await confirm_msg.add_reaction("✅")
-                await confirm_msg.add_reaction("❌")
-            except discord.HTTPException as e:
-                func.log.error(f"Failed to add reactions: {e}")
-                await confirm_msg.edit(content=f"{confirm_msg.content}\n\n❌ Failed to add reactions. Please try again.")
-                return
-            
-            # Wait for reaction
-            def check(reaction, user):
-                return (
-                    user.id == interaction.user.id and
-                    str(reaction.emoji) in ["✅", "❌"] and
-                    reaction.message.id == confirm_msg.id
-                )
-            
-            try:
-                reaction, user = await self.bot.wait_for('reaction_add', timeout=30.0, check=check)
-                
-                if str(reaction.emoji) == "❌":
-                    await confirm_msg.edit(content="❌ Card removal cancelled.")
-                    return
-                
-                # User confirmed
-                await confirm_msg.edit(content="🔄 Removing card...")
-                
-            except asyncio.TimeoutError:
-                await confirm_msg.edit(content="⏱️ Timeout. Card removal cancelled.")
-                return
-        else:
-            # No confirmation needed (not in use or force=True)
-            confirm_msg = None
         
-        # Remove from registry
-        success = await func.unregister_character_card(server_id, card_name)
+        # Get character info
+        char_name = card_info.get('name', card_name)
+        creator = card_info.get('creator', 'Unknown')
         
-        if not success:
-            msg = f"❌ Failed to remove card from registry."
-            if confirm_msg:
-                await confirm_msg.edit(content=msg)
-            else:
-                await interaction.followup.send(msg, ephemeral=True)
-            return
-        
-        # Delete file if requested
-        file_deleted = False
-        if delete_file:
-            cache_path = card_info.get("cache_path")
-            if cache_path:
-                try:
-                    file_path = Path(cache_path)
-                    if file_path.exists():
-                        file_path.unlink()
-                        file_deleted = True
-                        func.log.info(f"Deleted card file: {cache_path}")
-                except Exception as e:
-                    func.log.error(f"Error deleting card file: {e}")
-        
-        # Clean up AI references
-        cleaned_ais = []
+        # Build AI usage list
+        ai_usage_text = ""
         if ais_using:
-            for channel_id, ai_name in ais_using:
-                try:
-                    channel_data = func.get_session_data(server_id, channel_id)
-                    if channel_data and ai_name in channel_data:
-                        # Remove card reference
-                        if "character_card_name" in channel_data[ai_name]:
-                            del channel_data[ai_name]["character_card_name"]
-                        await func.update_session_data(server_id, channel_id, channel_data)
-                        cleaned_ais.append(ai_name)
-                except Exception as e:
-                    func.log.error(f"Error cleaning AI reference: {e}")
+            ai_list = []
+            for channel_id, ai_name in ais_using[:5]:
+                channel_obj = interaction.guild.get_channel(int(channel_id))
+                channel_name = f"#{channel_obj.name}" if channel_obj else f"Channel {channel_id}"
+                ai_list.append(f"• `{ai_name}` in {channel_name}")
+            
+            ai_usage_text = "\n".join(ai_list)
+            if len(ais_using) > 5:
+                ai_usage_text += f"\n• ... and {len(ais_using) - 5} more"
         
-        # Build result message
-        result_msg = f"✅ **Card removed successfully!**\n\n"
-        result_msg += f"**Card:** `{card_name}`\n"
-        result_msg += f"**Character:** {card_info.get('name', card_name)}\n"
-        result_msg += f"**File deleted:** {'Yes' if file_deleted else 'No'}\n"
-        if cleaned_ais:
-            result_msg += f"**AI references cleaned:** {len(cleaned_ais)}\n"
-        result_msg += f"\n💡 The card has been removed from the registry."
+        # Prepare detail fields
+        details_fields = [
+            {
+                "name": "📊 Card Details",
+                "value": f"• **Card ID:** `{card_name}`\n"
+                        f"• **Character:** {char_name}\n"
+                        f"• **Creator:** {creator}\n"
+                        f"• **In Use:** {len(ais_using)} AI(s)"
+            }
+        ]
         
-        if confirm_msg:
-            await confirm_msg.edit(content=result_msg)
+        # Add usage information if card is in use
+        if ais_using:
+            details_fields.append({
+                "name": "🤖 AIs Using This Card",
+                "value": ai_usage_text
+            })
+        
+        # Add what will be deleted
+        deletion_info = "• Remove from registry\n"
+        if ais_using:
+            deletion_info += f"• Clean {len(ais_using)} AI reference(s)\n"
+        if delete_file:
+            deletion_info += "• **DELETE the cached file**\n"
         else:
-            await interaction.followup.send(result_msg, ephemeral=True)
+            deletion_info += "• Keep the cached file\n"
+        
+        details_fields.append({
+            "name": "💾 Actions to Perform",
+            "value": deletion_info
+        })
+        
+        details_fields.append({
+            "name": "⚠️ Warning",
+            "value": "**This will permanently remove the card from the registry!**\n"
+                    + ("The cached file will also be deleted.\n" if delete_file else "")
+                    + ("AIs using this card will have broken references.\n" if ais_using else "")
+                    + "This action cannot be undone."
+        })
+        
+        # Define confirmation callback
+        async def on_confirm(confirm_interaction: discord.Interaction):
+            # Remove from registry
+            success = await func.unregister_character_card(server_id, card_name)
+            
+            if not success:
+                from utils.confirmation_ui import create_error_embed
+                error_embed = create_error_embed(
+                    title="❌ Removal Failed",
+                    description="Failed to remove card from registry. Check logs for details."
+                )
+                await confirm_interaction.response.edit_message(
+                    embed=error_embed,
+                    view=None
+                )
+                return
+            
+            # Delete file if requested
+            file_deleted = False
+            if delete_file:
+                cache_path = card_info.get("cache_path")
+                if cache_path:
+                    try:
+                        file_path = Path(cache_path)
+                        if file_path.exists():
+                            file_path.unlink()
+                            file_deleted = True
+                            func.log.info(f"Deleted card file: {cache_path}")
+                    except Exception as e:
+                        func.log.error(f"Error deleting card file: {e}")
+            
+            # Clean up AI references
+            cleaned_ais = []
+            if ais_using:
+                for channel_id, ai_name in ais_using:
+                    try:
+                        channel_data = func.get_session_data(server_id, channel_id)
+                        if channel_data and ai_name in channel_data:
+                            # Remove card reference
+                            if "character_card_name" in channel_data[ai_name]:
+                                del channel_data[ai_name]["character_card_name"]
+                            await func.update_session_data(server_id, channel_id, channel_data)
+                            cleaned_ais.append(ai_name)
+                    except Exception as e:
+                        func.log.error(f"Error cleaning AI reference: {e}")
+            
+            func.log.info(f"Removed card '{card_name}' from server {server_id}")
+            
+            # Create success embed
+            success_fields = [
+                {
+                    "name": "📊 Summary",
+                    "value": f"• **Card:** `{card_name}`\n"
+                            f"• **Character:** {char_name}\n"
+                            f"• **File Deleted:** {'Yes' if file_deleted else 'No'}\n"
+                            f"• **AI References Cleaned:** {len(cleaned_ais)}\n"
+                            f"• **Removed by:** {interaction.user.mention}"
+                }
+            ]
+            
+            success_embed = create_success_embed(
+                title="✅ Card Removed Successfully",
+                description=f"The character card **{char_name}** has been removed from the registry.",
+                fields=success_fields,
+                thumbnail_url=thumbnail_url
+            )
+            
+            await confirm_interaction.response.edit_message(
+                embed=success_embed,
+                view=None
+            )
+        
+        # Show double confirmation dialog
+        await confirm_dangerous_action(
+            interaction=interaction,
+            action_name="Remove Card",
+            warning_message="This will permanently remove the card from the registry!",
+            details_fields=details_fields,
+            on_confirm=on_confirm,
+            thumbnail_url=thumbnail_url
+        )
     
     @app_commands.command(name="export_card", description="Export a registered character card")
     @app_commands.default_permissions(administrator=True)

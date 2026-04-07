@@ -25,6 +25,9 @@ from AI.chat_service import get_service
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.avatar_utils import AvatarUtils
 from commands.shared.webhook_utils import WebhookUtils
+from utils.http_client import create_http_session
+from utils.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.thumbnail_helper import get_character_card_thumbnail_url
 
 
 class AILifecycle(commands.Cog):
@@ -145,80 +148,173 @@ class AILifecycle(commands.Cog):
             return
         
         found_channel_id, session = found_ai_data
-        channel_data = func.get_session_data(server_id, found_channel_id)
         
-        # Delete webhook if in webhook mode
-        if session.get("mode") == "webhook":
-            webhook_url = session.get("webhook_url")
-            if webhook_url:
-                try:
-                    async with create_http_session() as aio_session:
-                        webhook_obj = discord.Webhook.from_url(webhook_url, session=aio_session)
-                        await webhook_obj.delete(reason=f"AI '{ai_name}' removed from channel")
-                    func.log.info("Deleted webhook for AI")
-                except Exception as e:
-                    func.log.error(f"Failed to delete webhook: {e}")
-        
-        # Get service for cleanup operations
-        service = get_service()
-        
-        # Clear ALL conversation history for this AI
-        await service.clear_ai_history(server_id, found_channel_id, ai_name, chat_id=None, keep_greeting=False)
-        func.log.info("Cleared conversation history for AI")
-        
-        # Clear memory files
-        try:
-            from AI.tools.memory_tools import delete_memory_file
-            deleted = delete_memory_file(server_id, found_channel_id, ai_name)  # Deletes all chats for this AI in this channel
-            if deleted:
-                func.log.info(f"Deleted memory files in channel {found_channel_id}")
-        except Exception as e:
-            func.log.warning(f"Failed to delete memory files: {e}")
-        
-        # Clear ResponseManager data
-        try:
-            if hasattr(self.bot, 'message_pipeline'):
-                response_manager = self.bot.message_pipeline.response_manager
-                response_manager.clear(server_id, found_channel_id, ai_name)
-                func.log.info("Cleared response manager data")
-        except Exception as e:
-            func.log.warning(f"Failed to clear response manager data: {e}")
-        
-        # Clear MessageBuffer data
-        try:
-            if hasattr(self.bot, 'message_pipeline'):
-                await self.bot.message_pipeline.buffer.clear(server_id, found_channel_id, ai_name)
-                func.log.info("Cleared message buffer")
-        except Exception as e:
-            func.log.warning(f"Failed to clear message buffer: {e}")
-        
-        # Remove from session data
-        del channel_data[ai_name]
-        
-        if not channel_data:
-            await func.remove_session_data(server_id, found_channel_id)
-        else:
-            await func.update_session_data(server_id, found_channel_id, channel_data)
+        # Get character card thumbnail if available
+        channel_obj = interaction.guild.get_channel(int(found_channel_id))
+        thumbnail_url = None
+        if channel_obj:
+            thumbnail_url = await get_character_card_thumbnail_url(
+                channel=channel_obj,
+                session=session,
+                server_id=server_id
+            )
         
         # Get channel name for display
-        channel_obj = interaction.guild.get_channel(int(found_channel_id))
         channel_name = f"#{channel_obj.name}" if channel_obj else f"Channel {found_channel_id}"
         
-        func.log.info(f"Successfully removed AI and all related data from channel {found_channel_id}")
+        # Get mode information
+        mode = session.get("mode", "bot")
+        mode_display = "Webhook" if mode == "webhook" else "Bot"
         
-        await interaction.followup.send(
-            f"✅ **AI '{ai_name}' successfully removed!**\n\n"
-            f"**Channel:** {channel_name}\n"
-            f"**Deleted data:**\n"
-            f"• Session configuration\n"
-            f"• Conversation history (all chats)\n"
-            f"• Memory files\n"
-            f"• Response manager data (generations)\n"
-            f"• Message buffer\n"
-            f"• Webhook (if applicable)\n\n"
-            f"All data for this AI has been permanently deleted.\n"
-            f"-# Sayonara... {ai_name}...",
-            ephemeral=True
+        # Get provider and model info
+        provider = session.get("provider", "unknown")
+        api_connection = session.get("api_connection")
+        model_info = "Unknown"
+        if api_connection:
+            connection = func.get_api_connection(server_id, api_connection)
+            if connection:
+                model_info = connection.get("model", "Unknown")
+        else:
+            model_info = session.get("model", "Unknown")
+        
+        # Count total chats and messages
+        service = get_service()
+        try:
+            chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+            total_chats = len(chat_ids)
+            total_messages = 0
+            for chat_id in chat_ids:
+                info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+                total_messages += info.get("message_count", 0)
+        except:
+            total_chats = 0
+            total_messages = 0
+        
+        # Prepare detail fields
+        details_fields = [
+            {
+                "name": "📊 AI Details",
+                "value": f"• **AI Name:** {ai_name}\n"
+                        f"• **Channel:** {channel_name}\n"
+                        f"• **Mode:** {mode_display}\n"
+                        f"• **Provider:** {provider.upper()}\n"
+                        f"• **Model:** `{model_info}`"
+            },
+            {
+                "name": "💾 Data to be Deleted",
+                "value": f"• **Chat Sessions:** {total_chats}\n"
+                        f"• **Total Messages:** {total_messages}\n"
+                        f"• Session configuration\n"
+                        f"• All conversation history\n"
+                        f"• Memory files\n"
+                        f"• Response manager data\n"
+                        f"• Message buffer\n"
+                        f"• Webhook (if applicable)"
+            },
+            {
+                "name": "⚠️ Warning",
+                "value": "**This will permanently delete the AI and ALL its data!**\n"
+                        "All conversation history, memory files, and configurations will be lost forever.\n"
+                        "This action cannot be undone."
+            }
+        ]
+        
+        # Define confirmation callback
+        async def on_confirm(confirm_interaction: discord.Interaction):
+            # Get fresh data
+            channel_data = func.get_session_data(server_id, found_channel_id)
+            
+            # Delete webhook if in webhook mode
+            if session.get("mode") == "webhook":
+                webhook_url = session.get("webhook_url")
+                if webhook_url:
+                    try:
+                        async with create_http_session() as aio_session:
+                            webhook_obj = discord.Webhook.from_url(webhook_url, session=aio_session)
+                            await webhook_obj.delete(reason=f"AI '{ai_name}' removed from channel")
+                        func.log.info(f"Deleted webhook for AI '{ai_name}'")
+                    except Exception as e:
+                        func.log.error(f"Failed to delete webhook: {e}")
+            
+            # Clear ALL conversation history for this AI
+            await service.clear_ai_history(server_id, found_channel_id, ai_name, chat_id=None, keep_greeting=False)
+            func.log.info(f"Cleared conversation history for AI '{ai_name}'")
+            
+            # Clear memory files
+            try:
+                from AI.tools.memory_tools import delete_memory_file
+                deleted = delete_memory_file(server_id, found_channel_id, ai_name)
+                if deleted:
+                    func.log.info(f"Deleted memory files for AI '{ai_name}' in channel {found_channel_id}")
+            except Exception as e:
+                func.log.warning(f"Failed to delete memory files: {e}")
+            
+            # Clear ResponseManager data
+            try:
+                if hasattr(self.bot, 'message_pipeline'):
+                    response_manager = self.bot.message_pipeline.response_manager
+                    response_manager.clear(server_id, found_channel_id, ai_name)
+                    func.log.info(f"Cleared response manager data for AI '{ai_name}'")
+            except Exception as e:
+                func.log.warning(f"Failed to clear response manager data: {e}")
+            
+            # Clear MessageBuffer data
+            try:
+                if hasattr(self.bot, 'message_pipeline'):
+                    await self.bot.message_pipeline.buffer.clear(server_id, found_channel_id, ai_name)
+                    func.log.info(f"Cleared message buffer for AI '{ai_name}'")
+            except Exception as e:
+                func.log.warning(f"Failed to clear message buffer: {e}")
+            
+            # Remove from session data
+            del channel_data[ai_name]
+            
+            if not channel_data:
+                await func.remove_session_data(server_id, found_channel_id)
+            else:
+                await func.update_session_data(server_id, found_channel_id, channel_data)
+            
+            func.log.info(f"Successfully removed AI '{ai_name}' and all related data from channel {found_channel_id}")
+            
+            # Create success embed
+            success_embed = create_success_embed(
+                title="✅ AI Removed Successfully",
+                description=f"The AI **{ai_name}** has been permanently removed from {channel_name}.",
+                fields=[
+                    {
+                        "name": "📊 Summary",
+                        "value": f"• **AI:** {ai_name}\n"
+                                f"• **Channel:** {channel_name}\n"
+                                f"• **Chats Deleted:** {total_chats}\n"
+                                f"• **Messages Deleted:** {total_messages}\n"
+                                f"• **Removed by:** {interaction.user.mention}"
+                    },
+                    {
+                        "name": "💾 Deleted Data",
+                        "value": "• Session configuration\n"
+                                "• All conversation history\n"
+                                "• Memory files\n"
+                                "• Response manager data\n"
+                                "• Message buffer\n"
+                                "• Webhook (if applicable)"
+                    }
+                ],
+                thumbnail_url=thumbnail_url
+            )
+            
+            await confirm_interaction.response.edit_message(
+                embed=success_embed,
+                view=None
+            )
+        
+        # Show double confirmation dialog
+        await confirm_dangerous_action(
+            interaction=interaction,
+            action_name="Remove AI",
+            warning_message="This will permanently delete the AI and ALL its data!",
+            details_fields=details_fields,
+            on_confirm=on_confirm,
+            thumbnail_url=thumbnail_url
         )
 
 
@@ -228,13 +324,13 @@ async def execute_setup_from_wizard(
     interaction: discord.Interaction
 ) -> tuple[bool, str]:
     """
-    Executa o setup com os dados coletados do wizard.
-    
+    Executes the setup using the data collected from the wizard.
+
     Args:
         bot: Bot instance
-        wizard_data: SetupWizardData com todas as configurações
+        wizard_data: SetupWizardData with all configurations
         interaction: Discord interaction
-    
+
     Returns:
         tuple: (success: bool, message: str)
     """

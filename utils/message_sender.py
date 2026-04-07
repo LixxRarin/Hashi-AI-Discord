@@ -868,7 +868,7 @@ class MessageSender:
             if mode == "bot":
                 message = await fetch_message_cached(channel, first_msg_id)
                 if message:
-                    await message.edit(content="Generating...")
+                    await message.edit(content="> Generating...")
                     log.debug(f"Edited message {first_msg_id} to show 'Generating...'")
             else:
                 # Webhook mode
