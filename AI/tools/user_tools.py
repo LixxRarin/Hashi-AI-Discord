@@ -139,13 +139,20 @@ def _search_users_any(guild: discord.Guild, query: str, limit: int) -> List[Tupl
     return results[:limit]
 
 
-def _format_user_info(member: discord.Member, include_fields: List[str]) -> Dict[str, Any]:
+async def _format_user_info(
+    member: discord.Member,
+    include_fields: List[str],
+    include_image: bool = False,
+    context: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
     """
     Format user information based on include_fields.
     
     Args:
         member: Discord member object
         include_fields: List of fields to include
+        include_image: Whether to fetch avatar image for vision (default: False)
+        context: Context for vision processing (required if include_image=True)
         
     Returns:
         Dict with formatted user information
@@ -160,6 +167,18 @@ def _format_user_info(member: discord.Member, include_fields: List[str]) -> Dict
         user_info["avatar_url"] = str(member.avatar.url) if member.avatar else None
         user_info["bot"] = member.bot
         user_info["system"] = member.system if hasattr(member, 'system') else False
+        
+        # Fetch avatar image for vision if requested
+        if include_image and member.avatar and context:
+            from AI.tools.vision_utils import fetch_image_for_vision
+            avatar_image = await fetch_image_for_vision(
+                url=str(member.avatar.url),
+                context=context,
+                image_type="avatar"
+            )
+            if avatar_image:
+                user_info["avatar_image"] = avatar_image
+                log.info(f"Attached avatar image for user {member.name}")
         
         # Get user's custom status if available
         if member.activity:
@@ -262,6 +281,7 @@ async def get_user_info(
     limit: int = 10,
     include_bots: bool = True,
     include_fields: List[str] = None,
+    include_image: bool = False,
     context: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
@@ -274,6 +294,7 @@ async def get_user_info(
         limit: Maximum number of results (default: 10, max: 50 for searches, 100 for list_all)
         include_bots: Include bot users in list_all results (default: True)
         include_fields: Fields to include in response (not used for list_all)
+        include_image: Include avatar image for visual analysis (default: False)
         context: Context information (guild, etc.)
         
     Returns:
@@ -370,15 +391,18 @@ async def get_user_info(
                     "found_count": 0
                 }
             
+            # Format users with image support
+            formatted_users = []
+            for member, score, field in results:
+                user_data = await _format_user_info(member, include_fields, include_image, context)
+                formatted_users.append({
+                    "user": user_data,
+                    "match_score": score,
+                    "match_field": field
+                })
+            
             return {
-                "users": [
-                    {
-                        "user": _format_user_info(member, include_fields),
-                        "match_score": score,
-                        "match_field": field
-                    }
-                    for member, score, field in results
-                ],
+                "users": formatted_users,
                 "search_term": user_identifier,
                 "found_count": len(results),
                 "query_type": query_type
@@ -395,15 +419,18 @@ async def get_user_info(
                     "found_count": 0
                 }
             
+            # Format users with image support
+            formatted_users = []
+            for member, score, field in results:
+                user_data = await _format_user_info(member, include_fields, include_image, context)
+                formatted_users.append({
+                    "user": user_data,
+                    "match_score": score,
+                    "match_field": field
+                })
+            
             return {
-                "users": [
-                    {
-                        "user": _format_user_info(member, include_fields),
-                        "match_score": score,
-                        "match_field": field
-                    }
-                    for member, score, field in results
-                ],
+                "users": formatted_users,
                 "search_term": user_identifier,
                 "found_count": len(results),
                 "query_type": query_type
@@ -420,15 +447,18 @@ async def get_user_info(
                     "found_count": 0
                 }
             
+            # Format users with image support
+            formatted_users = []
+            for member, score, field in results:
+                user_data = await _format_user_info(member, include_fields, include_image, context)
+                formatted_users.append({
+                    "user": user_data,
+                    "match_score": score,
+                    "match_field": field
+                })
+            
             return {
-                "users": [
-                    {
-                        "user": _format_user_info(member, include_fields),
-                        "match_score": score,
-                        "match_field": field
-                    }
-                    for member, score, field in results
-                ],
+                "users": formatted_users,
                 "search_term": user_identifier,
                 "found_count": len(results),
                 "query_type": query_type
@@ -499,7 +529,7 @@ async def get_user_info(
             }
         
         return {
-            "user": _format_user_info(member, include_fields),
+            "user": await _format_user_info(member, include_fields, include_image, context),
             "found": True
         }
     

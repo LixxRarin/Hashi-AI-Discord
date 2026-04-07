@@ -165,6 +165,9 @@ async def _handle_user_query(action: str, query: Dict[str, Any], context: Dict[s
     """Handle user resource queries."""
     from AI.tools.user_tools import get_user_info
     
+    # Extract include_image parameter (works for ALL actions)
+    include_image = query.get("include_image", False)
+    
     if action == "get":
         # Get specific user by ID
         user_id = query.get("id") or query.get("user_id")
@@ -175,6 +178,7 @@ async def _handle_user_query(action: str, query: Dict[str, Any], context: Dict[s
             user_identifier=user_id,
             query_type="by_id",
             include_fields=query.get("include_fields", ["all"]),
+            include_image=include_image,
             context=context
         )
     
@@ -190,6 +194,7 @@ async def _handle_user_query(action: str, query: Dict[str, Any], context: Dict[s
             query_type=query_type,
             limit=query.get("limit", 10),
             include_fields=query.get("include_fields", ["all"]),
+            include_image=include_image,
             context=context
         )
     
@@ -199,6 +204,7 @@ async def _handle_user_query(action: str, query: Dict[str, Any], context: Dict[s
             query_type="list_all",
             limit=query.get("limit", 50),
             include_bots=query.get("include_bots", True),
+            include_image=include_image,
             context=context
         )
     
@@ -301,6 +307,9 @@ async def _handle_emoji_query(action: str, query: Dict[str, Any], context: Dict[
     """Handle emoji resource queries."""
     from AI.tools.emoji_tools import get_emoji_info
     
+    # Extract include_image parameter (works for ALL actions)
+    include_image = query.get("include_image", False)
+    
     if action == "search":
         # Search emoji or sticker
         search_term = query.get("search_term") or query.get("name")
@@ -312,6 +321,7 @@ async def _handle_emoji_query(action: str, query: Dict[str, Any], context: Dict[
             query_type=query_type,
             search_term=search_term,
             limit=query.get("limit", 10),
+            include_image=include_image,
             context=context
         )
     
@@ -321,6 +331,7 @@ async def _handle_emoji_query(action: str, query: Dict[str, Any], context: Dict[
         return await get_emoji_info(
             query_type=query_type,
             limit=query.get("limit", 10),
+            include_image=include_image,
             context=context
         )
     

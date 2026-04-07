@@ -15,6 +15,7 @@ async def get_emoji_info(
     query_type: str,
     search_term: Optional[str] = None,
     limit: int = 10,
+    include_image: bool = False,
     context: Dict[str, Any] = None
 ) -> Dict[str, Any]:
     """
@@ -25,6 +26,7 @@ async def get_emoji_info(
                     "list_recent_emojis", "search_emoji", "search_sticker")
         search_term: Search term for emoji/sticker name (for "search_emoji" or "search_sticker")
         limit: Maximum number of results to return
+        include_image: Include emoji/sticker image for visual analysis (default: False)
         context: Context information (guild, etc.)
         
     Returns:
@@ -47,7 +49,7 @@ async def get_emoji_info(
             # List all server emojis
             emojis = []
             for emoji in guild.emojis[:limit]:
-                emojis.append({
+                emoji_data = {
                     "name": emoji.name,
                     "id": str(emoji.id),
                     "animated": emoji.animated,
@@ -55,7 +57,21 @@ async def get_emoji_info(
                     "available": emoji.available,
                     "managed": emoji.managed,
                     "require_colons": emoji.require_colons
-                })
+                }
+                
+                # Fetch emoji image for vision if requested
+                if include_image and emoji.available:
+                    from AI.tools.vision_utils import fetch_image_for_vision
+                    emoji_image = await fetch_image_for_vision(
+                        url=str(emoji.url),
+                        context=context,
+                        image_type="emoji"
+                    )
+                    if emoji_image:
+                        emoji_data["emoji_image"] = emoji_image
+                        log.info(f"Attached emoji image for {emoji.name}")
+                
+                emojis.append(emoji_data)
             
             # Include sticker count
             sticker_count = len(guild.stickers) if hasattr(guild, 'stickers') else 0
@@ -77,13 +93,27 @@ async def get_emoji_info(
             
             stickers = []
             for sticker in guild.stickers[:limit]:
-                stickers.append({
+                sticker_data = {
                     "name": sticker.name,
                     "id": str(sticker.id),
                     "description": sticker.description or "",
                     "url": sticker.url,
                     "format": str(sticker.format)
-                })
+                }
+                
+                # Fetch sticker image for vision if requested
+                if include_image:
+                    from AI.tools.vision_utils import fetch_image_for_vision
+                    sticker_image = await fetch_image_for_vision(
+                        url=sticker.url,
+                        context=context,
+                        image_type="sticker"
+                    )
+                    if sticker_image:
+                        sticker_data["sticker_image"] = sticker_image
+                        log.info(f"Attached sticker image for {sticker.name}")
+                
+                stickers.append(sticker_data)
             
             return {
                 "stickers": stickers,
@@ -101,13 +131,27 @@ async def get_emoji_info(
             
             for emoji in guild.emojis:
                 if search_lower in emoji.name.lower():
-                    matching_emojis.append({
+                    emoji_data = {
                         "name": emoji.name,
                         "id": str(emoji.id),
                         "animated": emoji.animated,
                         "url": str(emoji.url),
                         "available": emoji.available
-                    })
+                    }
+                    
+                    # Fetch emoji image for vision if requested
+                    if include_image and emoji.available:
+                        from AI.tools.vision_utils import fetch_image_for_vision
+                        emoji_image = await fetch_image_for_vision(
+                            url=str(emoji.url),
+                            context=context,
+                            image_type="emoji"
+                        )
+                        if emoji_image:
+                            emoji_data["emoji_image"] = emoji_image
+                            log.info(f"Attached emoji image for {emoji.name}")
+                    
+                    matching_emojis.append(emoji_data)
                     
                     if len(matching_emojis) >= limit:
                         break
@@ -134,13 +178,27 @@ async def get_emoji_info(
             
             for sticker in guild.stickers:
                 if search_lower in sticker.name.lower():
-                    matching_stickers.append({
+                    sticker_data = {
                         "name": sticker.name,
                         "id": str(sticker.id),
                         "description": sticker.description or "",
                         "url": sticker.url,
                         "format": str(sticker.format)
-                    })
+                    }
+                    
+                    # Fetch sticker image for vision if requested
+                    if include_image:
+                        from AI.tools.vision_utils import fetch_image_for_vision
+                        sticker_image = await fetch_image_for_vision(
+                            url=sticker.url,
+                            context=context,
+                            image_type="sticker"
+                        )
+                        if sticker_image:
+                            sticker_data["sticker_image"] = sticker_image
+                            log.info(f"Attached sticker image for {sticker.name}")
+                    
+                    matching_stickers.append(sticker_data)
                     
                     if len(matching_stickers) >= limit:
                         break
@@ -161,13 +219,27 @@ async def get_emoji_info(
             
             emojis = []
             for emoji in sorted_emojis:
-                emojis.append({
+                emoji_data = {
                     "name": emoji.name,
                     "id": str(emoji.id),
                     "animated": emoji.animated,
                     "url": str(emoji.url),
                     "created_at": emoji.created_at.isoformat() + "Z"
-                })
+                }
+                
+                # Fetch emoji image for vision if requested
+                if include_image and emoji.available:
+                    from AI.tools.vision_utils import fetch_image_for_vision
+                    emoji_image = await fetch_image_for_vision(
+                        url=str(emoji.url),
+                        context=context,
+                        image_type="emoji"
+                    )
+                    if emoji_image:
+                        emoji_data["emoji_image"] = emoji_image
+                        log.info(f"Attached emoji image for {emoji.name}")
+                
+                emojis.append(emoji_data)
             
             return {
                 "emojis": emojis,

@@ -15,7 +15,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "discord_query",
-            "description": "Query and manage Discord information: messages (#N or IDs), users (@mentions or names), channels, server stats, emojis/stickers, and polls. Supports querying (get/search/list) and message management (edit/delete). Always use this to get accurate Discord data - never guess. Examples: discord_query(resource='message', action='get', query={'short_id': 5}), discord_query(resource='message', action='edit', query={'message_id': '#5', 'new_content': 'Updated text'}), discord_query(resource='message', action='delete', query={'message_id': '#5', 'reason': 'Mistake'})",
+            "description": "Query and manage Discord information: messages (#N or IDs), users (@mentions or names), channels, server stats, emojis/stickers, and polls. Supports querying (get/search/list) and message management (edit/delete). Use 'include_image: true' in query to visually see user avatars or emoji images (requires vision). Always use this to get accurate Discord data - never guess. Examples: discord_query(resource='user', action='search', query={'name': 'João', 'include_image': true}), discord_query(resource='emoji', action='search', query={'search_term': 'happy', 'include_image': true, 'limit': 3}), discord_query(resource='message', action='get', query={'short_id': 5})",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -31,7 +31,7 @@ TOOL_DEFINITIONS = [
                     },
                     "query": {
                         "type": "object",
-                        "description": "Query parameters (flexible based on resource and action). Common parameters: 'id' or 'short_id' (for get), 'name' or 'search_term' (for search), 'limit' (for list), 'include_fields' (fields to include), 'new_content' (for edit), 'reason' (for delete)",
+                        "description": "Query parameters (flexible based on resource and action). Common parameters: 'id' or 'short_id' (for get), 'name' or 'search_term' (for search), 'limit' (for list), 'include_fields' (fields to include), 'include_image' (to visually see avatars/emojis), 'new_content' (for edit), 'reason' (for delete)",
                         "properties": {
                             "id": {
                                 "type": "string",
@@ -93,6 +93,10 @@ TOOL_DEFINITIONS = [
                             "end_index": {
                                 "type": "integer",
                                 "description": "End index for range queries"
+                            },
+                            "include_image": {
+                                "type": "boolean",
+                                "description": "Include visual image for you to 'see' (requires vision enabled). Works with resource='user' (fetches avatar image) or resource='emoji' (fetches emoji/sticker image). When true, downloads and processes the image so you can visually analyze it - perfect for questions like 'how does their avatar look?' or 'what does this emoji show?'. Works with any action (get/search/list). Default: false. Examples: discord_query(resource='user', action='search', query={'name': 'João', 'include_image': true}) to see João's avatar, discord_query(resource='emoji', action='search', query={'search_term': 'cat', 'include_image': true}) to see cat emojis visually."
                             }
                         }
                     }

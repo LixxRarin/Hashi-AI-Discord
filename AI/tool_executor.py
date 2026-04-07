@@ -420,7 +420,7 @@ class ToolExecutor:
                     })
             
             # Case 2: Message attachments (attachment_query with message_id)
-            elif "attachments" in result:
+            if "attachments" in result:
                 for att in result.get("attachments", []):
                     if att.get("_vision_image") and att.get("base64"):
                         extracted_images.append({
@@ -429,6 +429,59 @@ class ToolExecutor:
                             "detail": att.get("detail", "auto"),
                             "url": att.get("url", ""),
                             "filename": att.get("filename", "image")
+                        })
+            
+            # Case 3: Single user with avatar (discord_query resource=user, action=get)
+            if "user" in result and isinstance(result["user"], dict):
+                avatar_image = result["user"].get("avatar_image")
+                if avatar_image and avatar_image.get("_vision_image") and avatar_image.get("base64"):
+                    extracted_images.append({
+                        "base64": avatar_image["base64"],
+                        "format": avatar_image.get("format", "image/png"),
+                        "detail": avatar_image.get("detail", "auto"),
+                        "url": avatar_image.get("url", ""),
+                        "filename": f"avatar_{result['user'].get('username', 'user')}"
+                    })
+            
+            # Case 4: Multiple users with avatars (discord_query resource=user, action=search/list)
+            if "users" in result and isinstance(result["users"], list):
+                for user_entry in result["users"]:
+                    # Handle both formats: {"user": {...}} and direct user dict
+                    user_data = user_entry.get("user", user_entry) if isinstance(user_entry, dict) else {}
+                    avatar_image = user_data.get("avatar_image")
+                    if avatar_image and avatar_image.get("_vision_image") and avatar_image.get("base64"):
+                        extracted_images.append({
+                            "base64": avatar_image["base64"],
+                            "format": avatar_image.get("format", "image/png"),
+                            "detail": avatar_image.get("detail", "auto"),
+                            "url": avatar_image.get("url", ""),
+                            "filename": f"avatar_{user_data.get('username', 'user')}"
+                        })
+            
+            # Case 5: Emojis with images (discord_query resource=emoji)
+            if "emojis" in result and isinstance(result["emojis"], list):
+                for emoji in result["emojis"]:
+                    emoji_image = emoji.get("emoji_image")
+                    if emoji_image and emoji_image.get("_vision_image") and emoji_image.get("base64"):
+                        extracted_images.append({
+                            "base64": emoji_image["base64"],
+                            "format": emoji_image.get("format", "image/png"),
+                            "detail": emoji_image.get("detail", "auto"),
+                            "url": emoji_image.get("url", ""),
+                            "filename": f"emoji_{emoji.get('name', 'emoji')}"
+                        })
+            
+            # Case 6: Stickers with images (discord_query resource=emoji, query_type=sticker)
+            if "stickers" in result and isinstance(result["stickers"], list):
+                for sticker in result["stickers"]:
+                    sticker_image = sticker.get("sticker_image")
+                    if sticker_image and sticker_image.get("_vision_image") and sticker_image.get("base64"):
+                        extracted_images.append({
+                            "base64": sticker_image["base64"],
+                            "format": sticker_image.get("format", "image/png"),
+                            "detail": sticker_image.get("detail", "auto"),
+                            "url": sticker_image.get("url", ""),
+                            "filename": f"sticker_{sticker.get('name', 'sticker')}"
                         })
         
         except Exception as e:
