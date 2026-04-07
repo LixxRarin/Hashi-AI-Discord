@@ -461,19 +461,34 @@ class ChatService:
         # Check if we should add current message (avoid duplicates)
         # Always add if there are images, since images make it unique
         should_add_current = True
-        if truncated_history and truncated_history[-1]["role"] == "user" and not images:
-            last_history_content = truncated_history[-1]["content"]
+        if truncated_history and not images:
+            # When multiple messages are joined with \n, check if they're already in history individually
+            # This handles the race condition where messages arrive during LLM generation
+            current_messages = [msg.strip() for msg in user_content_processed.split('\n') if msg.strip()]
             
-            # Check if last history message has multimodal content (images)
-            # Multimodal content is stored as a list, text-only as string
-            last_msg_has_images = isinstance(last_history_content, list)
+            # Get recent user messages from history (last 10 to cover race conditions)
+            recent_user_messages = [
+                msg["content"] for msg in truncated_history[-10:]
+                if msg["role"] == "user"
+            ]
             
-            # Only skip if content matches AND the history message doesn't have images
-            # If history has images but current doesn't, still don't skip (different context)
-            if not last_msg_has_images:
-                if user_content_processed in last_history_content or last_history_content in user_content_processed:
-                    should_add_current = False
-                    func.log.debug("Skipping duplicate user message (no images)")
+            # Check if ALL current messages are already in history
+            all_in_history = True
+            for current_msg in current_messages:
+                found = False
+                for hist_msg in recent_user_messages:
+                    # Check if current message is in history (handle both raw and formatted content)
+                    if current_msg in hist_msg or hist_msg in current_msg:
+                        found = True
+                        break
+                
+                if not found:
+                    all_in_history = False
+                    break
+            
+            if all_in_history and len(current_messages) > 0:
+                should_add_current = False
+                func.log.debug(f"Skipping {len(current_messages)} message(s) already in history")
         
         # Insert history and user message at their configured positions
         # If positions weren't specified, add them at the end
@@ -914,7 +929,7 @@ class ChatService:
             # Log images being passed to _prepare_messages
             if processed_images:
                 func.log.debug(f"Passing {len(processed_images)} images to _prepare_messages()")
-            
+                
             prepared_messages = self._prepare_messages(
                 formatted_data, server_id, channel_id, ai_name, session, model, client,
                 message_author=message.author if hasattr(message, 'author') else None,

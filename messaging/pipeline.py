@@ -405,14 +405,28 @@ class MessagePipeline:
                 server_id, channel_id, ai_name, session_with_context.get("chat_id", "default")
             )
             
-            api_messages = await self.processor.prepare_for_api(
-                pending,
-                session_with_context,
-                history,
-                pending[0].raw_message.author if pending[0].raw_message else None
-            )
+            # Note: We don't use processor.prepare_for_api() here because
+            # chat_service.generate_response() handles message preparation internally.
+            # The raw content is passed to chat_service, which formats it properly.
             
-            formatted_content = "\n".join(msg.content for msg in pending)
+            # Extract RAW content from pending messages (not formatted)
+            # This prevents duplicate messages in the LLM context
+            raw_content_parts = []
+            for msg in pending:
+                if msg.raw_message and hasattr(msg.raw_message, 'content'):
+                    # Use the original Discord message content (unformatted)
+                    raw_content_parts.append(msg.raw_message.content)
+                else:
+                    # Fallback: extract raw content from formatted content
+                    # This handles edge cases where raw_message might not be available
+                    # Format: "[HH:MM] @username (Display Name) [ID: 123]: actual content"
+                    content = msg.content
+                    # Try to extract content after the last ": "
+                    if ": " in content:
+                        content = content.split(": ", 1)[-1]
+                    raw_content_parts.append(content)
+            
+            raw_content = "\n".join(raw_content_parts)
             
             # Collect all attachments from pending messages for vision support
             all_attachments = []
@@ -439,7 +453,7 @@ class MessagePipeline:
                 server_id,
                 channel_id,
                 pending[0].raw_message.author if pending[0].raw_message else None,
-                formatted_content,
+                raw_content,
                 all_attachments
             )
             
@@ -447,6 +461,11 @@ class MessagePipeline:
                 fake_msg.guild = real_guild
             
             fake_msg._bot_client = self.bot_client
+            
+            log.debug(
+                f"Created FakeMessage with raw content ({len(raw_content)} chars) "
+                f"for {len(pending)} pending message(s)"
+            )
             
             response = await chat_service.generate_response(
                 fake_msg,

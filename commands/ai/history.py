@@ -42,23 +42,39 @@ class HistoryManager(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        # Parse AI identifier (handles duplicate names in different channels)
+        from commands.shared.autocomplete import AutocompleteHelpers
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
-        
-        found_channel_id, session = found_ai_data
+        # Get AI data
+        if channel_id_hint:
+            # Direct channel lookup
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            if not channel_data or actual_ai_name not in channel_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id = channel_id_hint
+            session = channel_data[actual_ai_name]
+        else:
+            # Fallback to search across all channels
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id, session = found_ai_data
         
         # Get current chat_id from session
         current_chat_id = session.get("chat_id", "default")
         
         # Check if there's existing conversation history
         service = get_service()
-        existing_history = service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
+        existing_history = service.get_ai_history(server_id, found_channel_id, actual_ai_name, current_chat_id)
         
         # If there's no history or only 1 message, just inform the user
         if not existing_history or len(existing_history) <= 1:
@@ -87,7 +103,7 @@ class HistoryManager(commands.Cog):
         details_fields = [
             {
                 "name": "📊 Details",
-                "value": f"• **AI:** {ai_name}\n"
+                "value": f"• **AI:** {actual_ai_name}\n"
                         f"• **Channel:** <#{found_channel_id}>\n"
                         f"• **Chat ID:** `{chat_id_display}`\n"
                         f"• **Messages:** {len(existing_history)} in history"
@@ -103,16 +119,16 @@ class HistoryManager(commands.Cog):
         # Define confirmation callback
         async def on_confirm(confirm_interaction: discord.Interaction):
             # Clear the history
-            await service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
+            await service.clear_ai_history(server_id, found_channel_id, actual_ai_name, current_chat_id)
             
             # Create success embed
             success_embed = create_success_embed(
                 title="✅ History Cleared Successfully",
-                description=f"The conversation history for **{ai_name}** has been permanently deleted.",
+                description=f"The conversation history for **{actual_ai_name}** has been permanently deleted.",
                 fields=[
                     {
                         "name": "📊 Summary",
-                        "value": f"• **AI:** {ai_name}\n"
+                        "value": f"• **AI:** {actual_ai_name}\n"
                                 f"• **Channel:** <#{found_channel_id}>\n"
                                 f"• **Messages Cleared:** {len(existing_history)}\n"
                                 f"• **Cleared by:** {interaction.user.mention}"
@@ -126,7 +142,7 @@ class HistoryManager(commands.Cog):
                 view=None
             )
             
-            func.log.info(f"Cleared history for AI '{ai_name}' in server {server_id}, channel {found_channel_id}")
+            func.log.info(f"Cleared history for AI '{actual_ai_name}' in server {server_id}, channel {found_channel_id}")
         
         # Show double confirmation dialog
         await confirm_dangerous_action(

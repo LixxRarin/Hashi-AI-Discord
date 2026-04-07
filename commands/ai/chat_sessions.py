@@ -61,29 +61,44 @@ class ChatSessions(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
+        # Parse AI identifier
+        from commands.shared.autocomplete import AutocompleteHelpers
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        found_channel_id, session = found_ai_data
+        # Get AI data
+        if channel_id_hint:
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            if not channel_data or actual_ai_name not in channel_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id = channel_id_hint
+            session = channel_data[actual_ai_name]
+        else:
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id, session = found_ai_data
         channel_data = func.get_session_data(server_id, found_channel_id)
         
         old_chat_id = session.get("chat_id", "default")
         
         # Validate that the chat_id exists
         service = get_service()
-        available_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+        available_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
         
         if chat_id not in available_chats:
             await interaction.followup.send(
-                f"❌ **Error:** Chat ID not found for AI '{ai_name}'.\n\n"
+                f"❌ **Error:** Chat ID not found for AI '{actual_ai_name}'.\n\n"
                 f"**Available options:**\n"
-                f"• Use `/list_chats {ai_name}` to see existing chats\n"
-                f"• Use `/new_chat {ai_name}` to create a new chat",
+                f"• Use `/list_chats {actual_ai_name}` to see existing chats\n"
+                f"• Use `/new_chat {actual_ai_name}` to create a new chat",
                 ephemeral=True
             )
             return
@@ -92,7 +107,7 @@ class ChatSessions(commands.Cog):
         session["setup_has_already"] = False
         session["chat_id"] = chat_id
         
-        channel_data[ai_name] = session
+        channel_data[actual_ai_name] = session
         await func.update_session_data(server_id, found_channel_id, channel_data)
         
         # Initialize session messages if needed
@@ -123,15 +138,15 @@ class ChatSessions(commands.Cog):
         
         # Mark as setup if messages were sent
         if messages_sent or not greetings:
-            channel_data[ai_name]["setup_has_already"] = True
+            channel_data[actual_ai_name]["setup_has_already"] = True
             await func.update_session_data(server_id, found_channel_id, channel_data)
         
         # Get info about the chat
-        info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+        info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
         msg_count = info.get("message_count", 0)
         
         result_msg = f"✅ **Switched to existing chat session!**\n\n"
-        result_msg += f"**AI:** {ai_name}\n"
+        result_msg += f"**AI:** {actual_ai_name}\n"
         result_msg += f"**Channel:** <#{found_channel_id}>\n"
         result_msg += f"**Previous Chat ID:** `{old_chat_id[:40]}...`\n" if len(old_chat_id) > 40 else f"**Previous Chat ID:** `{old_chat_id}`\n"
         result_msg += f"**Current Chat ID:** `{chat_id[:40]}...`\n" if len(chat_id) > 40 else f"**Current Chat ID:** `{chat_id}`\n"
@@ -161,15 +176,30 @@ class ChatSessions(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
+        # Parse AI identifier
+        from commands.shared.autocomplete import AutocompleteHelpers
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        found_channel_id, session = found_ai_data
+        # Get AI data
+        if channel_id_hint:
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            if not channel_data or actual_ai_name not in channel_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id = channel_id_hint
+            session = channel_data[actual_ai_name]
+        else:
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id, session = found_ai_data
         channel_data = func.get_session_data(server_id, found_channel_id)
         
         old_chat_id = session.get("chat_id", "default")
@@ -177,11 +207,11 @@ class ChatSessions(commands.Cog):
         # Generate new chat ID
         if chat_name:
             service = get_service()
-            existing_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+            existing_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
             if chat_name in existing_chats:
                 await interaction.followup.send(
-                    f"❌ **Error:** A chat named '{chat_name}' already exists for AI '{ai_name}'.\n\n"
-                    f"💡 Choose a different name or use `/list_chats {ai_name}` to see existing chats.",
+                    f"❌ **Error:** A chat named '{chat_name}' already exists for AI '{actual_ai_name}'.\n\n"
+                    f"💡 Choose a different name or use `/list_chats {actual_ai_name}` to see existing chats.",
                     ephemeral=True
                 )
                 return
@@ -193,11 +223,11 @@ class ChatSessions(commands.Cog):
         session["setup_has_already"] = False
         session["chat_id"] = new_chat_id
         
-        channel_data[ai_name] = session
+        channel_data[actual_ai_name] = session
         await func.update_session_data(server_id, found_channel_id, channel_data)
         
         service = get_service()
-        service.set_ai_history(server_id, found_channel_id, ai_name, [], new_chat_id)
+        service.set_ai_history(server_id, found_channel_id, actual_ai_name, [], new_chat_id)
         
         # Update greeting_index if provided
         if greeting_index is not None:
@@ -215,14 +245,14 @@ class ChatSessions(commands.Cog):
                     return
                 
                 session["config"]["greeting_index"] = greeting_index
-                channel_data[ai_name] = session
+                channel_data[actual_ai_name] = session
                 await func.update_session_data(server_id, found_channel_id, channel_data)
         
         # Send greeting if requested
         messages_sent = False
         if send_greeting:
             channel_data = func.get_session_data(server_id, found_channel_id)
-            session = channel_data[ai_name]
+            session = channel_data[actual_ai_name]
             
             greetings = await service.initialize_session_messages(
                 session, server_id, found_channel_id, new_chat_id
@@ -248,11 +278,11 @@ class ChatSessions(commands.Cog):
         # Mark as setup
         if messages_sent or not send_greeting:
             channel_data = func.get_session_data(server_id, found_channel_id)
-            channel_data[ai_name]["setup_has_already"] = True
+            channel_data[actual_ai_name]["setup_has_already"] = True
             await func.update_session_data(server_id, found_channel_id, channel_data)
         
         result_msg = f"✅ **New chat session created!**\n\n"
-        result_msg += f"**AI:** {ai_name}\n"
+        result_msg += f"**AI:** {actual_ai_name}\n"
         result_msg += f"**Channel:** <#{found_channel_id}>\n"
         result_msg += f"**Previous Chat ID:** `{old_chat_id[:40]}...`\n" if len(old_chat_id) > 40 else f"**Previous Chat ID:** `{old_chat_id}`\n"
         result_msg += f"**New Chat ID:** `{new_chat_id[:40]}...`\n" if len(new_chat_id) > 40 else f"**New Chat ID:** `{new_chat_id}`\n"
@@ -271,23 +301,38 @@ class ChatSessions(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
+        # Parse AI identifier
+        from commands.shared.autocomplete import AutocompleteHelpers
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        found_channel_id, session = found_ai_data
+        # Get AI data
+        if channel_id_hint:
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            if not channel_data or actual_ai_name not in channel_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id = channel_id_hint
+            session = channel_data[actual_ai_name]
+        else:
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id, session = found_ai_data
         
         # Get all chat IDs
         service = get_service()
-        chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+        chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
         
         if not chat_ids:
             await interaction.followup.send(
-                f"❌ No chat sessions found for AI '{ai_name}'.",
+                f"❌ No chat sessions found for AI '{actual_ai_name}'.",
                 ephemeral=True
             )
             return
@@ -298,7 +343,7 @@ class ChatSessions(commands.Cog):
         # Sort chats: active first, then by updated_at descending
         sorted_chats = []
         for chat_id in chat_ids:
-            info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+            info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
             sorted_chats.append({
                 "chat_id": chat_id,
                 "info": info,
@@ -347,7 +392,7 @@ class ChatSessions(commands.Cog):
                 title = chat_id
             
             # Build description with status and key info
-            description = f"{status_emoji} {status_text} • {info['message_count']} messages • AI: {ai_name}"
+            description = f"{status_emoji} {status_text} • {info['message_count']} messages • AI: {actual_ai_name}"
             
             # Create embed
             embed = discord.Embed(
@@ -427,23 +472,38 @@ class ChatSessions(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
+        # Parse AI identifier
+        from commands.shared.autocomplete import AutocompleteHelpers
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        found_channel_id, session = found_ai_data
+        # Get AI data
+        if channel_id_hint:
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            if not channel_data or actual_ai_name not in channel_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id = channel_id_hint
+            session = channel_data[actual_ai_name]
+        else:
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id, session = found_ai_data
         
         # Get chat info
         service = get_service()
-        available_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+        available_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
         
         if chat_id not in available_chats:
             await interaction.followup.send(
-                f"❌ Chat '{chat_id}' not found for AI '{ai_name}'.",
+                f"❌ Chat '{chat_id}' not found for AI '{actual_ai_name}'.",
                 ephemeral=True
             )
             return
@@ -460,7 +520,7 @@ class ChatSessions(commands.Cog):
             return
         
         # Get chat info for confirmation
-        info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+        info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
         
         # Get character card thumbnail if available
         channel_obj = interaction.guild.get_channel(int(found_channel_id))
@@ -485,7 +545,7 @@ class ChatSessions(commands.Cog):
         details_fields = [
             {
                 "name": "📊 Chat Details",
-                "value": f"• **AI:** {ai_name}\n"
+                "value": f"• **AI:** {actual_ai_name}\n"
                         f"• **Channel:** <#{found_channel_id}>\n"
                         f"• **Chat ID:** `{chat_id_display}`\n"
                         f"• **Messages:** {info['message_count']}\n"
@@ -505,7 +565,7 @@ class ChatSessions(commands.Cog):
             # Delete the chat
             try:
                 success = await service.history_manager.delete_chat(
-                    server_id, found_channel_id, ai_name, chat_id
+                    server_id, found_channel_id, actual_ai_name, chat_id
                 )
                 
                 if success:
@@ -655,15 +715,28 @@ class ChatSessions(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
-        
-        found_channel_id, session = found_ai_data
+        from commands.shared.autocomplete import AutocompleteHelpers
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
+
+        if channel_id_hint:
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            if not channel_data or actual_ai_name not in channel_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id = channel_id_hint
+            session = channel_data[actual_ai_name]
+        else:
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            found_channel_id, session = found_ai_data
         service = get_service()
         
         if chat_id:
@@ -677,7 +750,7 @@ class ChatSessions(commands.Cog):
                 )
                 return
             
-            info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+            info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
             active_chat_id = session.get("chat_id", "default")
             
             # Format timestamps
@@ -713,7 +786,7 @@ class ChatSessions(commands.Cog):
                 title = chat_id
             
             # Build compact description
-            description = f"{status_emoji} {status_text} • {info['message_count']} messages • AI: {ai_name}"
+            description = f"{status_emoji} {status_text} • {info['message_count']} messages • AI: {actual_ai_name}"
             
             # Build embed
             embed = discord.Embed(
@@ -761,11 +834,11 @@ class ChatSessions(commands.Cog):
             
         else:
             # Show general info for all chats (overview)
-            chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+            chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
             
             if not chat_ids:
                 await interaction.followup.send(
-                    f"❌ No chat sessions found for AI '{ai_name}'.",
+                    f"❌ No chat sessions found for AI '{actual_ai_name}'.",
                     ephemeral=True
                 )
                 return
@@ -775,7 +848,7 @@ class ChatSessions(commands.Cog):
             # Calculate total messages
             total_messages = 0
             for cid in chat_ids:
-                info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, cid)
+                info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, cid)
                 total_messages += info["message_count"]
             
             # Get active chat name
@@ -786,7 +859,7 @@ class ChatSessions(commands.Cog):
             # Build embed with simplified layout
             embed = discord.Embed(
                 title="Chat Overview",
-                description=f"AI: {ai_name} • Channel: <#{found_channel_id}>",
+                description=f"AI: {actual_ai_name} • Channel: <#{found_channel_id}>",
                 color=discord.Color.purple()
             )
             
@@ -804,7 +877,7 @@ class ChatSessions(commands.Cog):
             # Sessions field - list chats with status
             sessions_list = ""
             for i, cid in enumerate(chat_ids[:5]):
-                info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, cid)
+                info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, cid)
                 indicator = "🟢" if cid == active_chat_id else "⚪"
                 
                 # Format chat name

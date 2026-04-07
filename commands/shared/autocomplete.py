@@ -25,6 +25,7 @@ class AutocompleteHelpers:
         Autocomplete for ALL AI names in the server.
         
         Shows all AIs regardless of whether they have character cards.
+        Returns value in format: ai_name|||channel_id to uniquely identify AIs with duplicate names.
         """
         try:
             server_id = str(interaction.guild.id)
@@ -46,12 +47,30 @@ class AutocompleteHelpers:
                     if current.lower() in ai_name.lower():
                         provider = ai_data.get("provider", "openai").upper()
                         display_name = f"{ai_name} [{provider}] (#{channel_name})"
-                        choices.append(app_commands.Choice(name=display_name[:100], value=ai_name))
+                        # Use special separator to encode both ai_name and channel_id
+                        value = f"{ai_name}|||{channel_id_str}"
+                        choices.append(app_commands.Choice(name=display_name[:100], value=value))
             
             return choices[:25]
         except Exception as e:
             func.log.error(f"Error in ai_name_all autocomplete: {e}")
             return []
+    
+    @staticmethod
+    def parse_ai_identifier(ai_identifier: str) -> tuple[str, str | None]:
+        """
+        Parse AI identifier from autocomplete.
+        
+        Args:
+            ai_identifier: Either "ai_name" or "ai_name|||channel_id"
+            
+        Returns:
+            Tuple of (ai_name, channel_id or None)
+        """
+        if "|||" in ai_identifier:
+            parts = ai_identifier.split("|||", 1)
+            return parts[0], parts[1]
+        return ai_identifier, None
     
     @staticmethod
     async def ai_name_with_cards(
@@ -62,6 +81,7 @@ class AutocompleteHelpers:
         Autocomplete for AI names that have character cards.
         
         Only shows AIs that have a character_card configured.
+        Returns value in format: ai_name|||channel_id to uniquely identify AIs with duplicate names.
         """
         try:
             server_id = str(interaction.guild.id)
@@ -87,7 +107,9 @@ class AutocompleteHelpers:
                     if current.lower() in ai_name.lower():
                         provider = ai_data.get("provider", "openai").upper()
                         display_name = f"{ai_name} [{provider}] (#{channel_name})"
-                        choices.append(app_commands.Choice(name=display_name[:100], value=ai_name))
+                        # Use special separator to encode both ai_name and channel_id
+                        value = f"{ai_name}|||{channel_id_str}"
+                        choices.append(app_commands.Choice(name=display_name[:100], value=value))
             
             return choices[:25]
         except Exception as e:
