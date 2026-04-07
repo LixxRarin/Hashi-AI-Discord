@@ -880,7 +880,7 @@ class MessageSender:
                     webhook = discord.Webhook.from_url(webhook_url, session=http_session)
                     message = await fetch_message_cached(channel, first_msg_id)
                     if message:
-                        await webhook.edit_message(int(first_msg_id), content="Generating...")
+                        await webhook.edit_message(int(first_msg_id), content="> Generating...")
                         log.debug(f"Edited webhook message {first_msg_id} to show 'Generating...'")
         
         except discord.NotFound:

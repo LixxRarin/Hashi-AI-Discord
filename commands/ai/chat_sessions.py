@@ -643,15 +643,36 @@ class ChatSessions(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
+        # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+        ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        found_channel_id, session = found_ai_data
+        # Get AI data - use optimized lookup if channel_id is available
+        if channel_id_hint:
+            # Direct lookup - faster, no iteration
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            session = channel_data.get(ai_name) if channel_data else None
+            
+            if not session:
+                await interaction.followup.send(
+                    f"❌ AI '{ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id = channel_id_hint
+        else:
+            # Fallback: Search all channels (for manual input without autocomplete)
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+            
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id, session = found_ai_data
+        
         channel_data = func.get_session_data(server_id, found_channel_id)
         
         # Validate new name length

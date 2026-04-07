@@ -106,18 +106,37 @@ class SlashCommands(commands.Cog):
         
         # Option 1: Load from AI name
         if ai_name:
-            # Get AI session data
-            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+            # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+            ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
             
-            if not found_ai_data:
-                await interaction.followup.send(
-                    f"❌ AI '{ai_name}' not found in this server.\n\n"
-                    f"💡 Use `/list_ais` to see available AIs.",
-                    ephemeral=True
-                )
-                return
-            
-            found_channel_id, session = found_ai_data
+            # Get AI session data - use optimized lookup if channel_id is available
+            if channel_id_hint:
+                # Direct lookup - faster, no iteration
+                channel_data = func.get_session_data(server_id, channel_id_hint)
+                session = channel_data.get(ai_name) if channel_data else None
+                
+                if not session:
+                    await interaction.followup.send(
+                        f"❌ AI '{ai_name}' not found in this server.\n\n"
+                        f"💡 Use `/list_ais` to see available AIs.",
+                        ephemeral=True
+                    )
+                    return
+                
+                found_channel_id = channel_id_hint
+            else:
+                # Fallback: Search all channels (for manual input without autocomplete)
+                found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+                
+                if not found_ai_data:
+                    await interaction.followup.send(
+                        f"❌ AI '{ai_name}' not found in this server.\n\n"
+                        f"💡 Use `/list_ais` to see available AIs.",
+                        ephemeral=True
+                    )
+                    return
+                
+                found_channel_id, session = found_ai_data
             
             # Verify session data is valid
             if session is None:
@@ -460,24 +479,55 @@ class SlashCommands(commands.Cog):
     async def copy_config(self, interaction: discord.Interaction, from_ai_name: str, to_ai_name: str):
         server_id = str(interaction.guild.id)
         
-        from_ai_data = func.get_ai_session_data_from_all_channels(server_id, from_ai_name)
-        to_ai_data = func.get_ai_session_data_from_all_channels(server_id, to_ai_name)
-
-        if not from_ai_data:
-            await interaction.response.send_message(
-                f"⚠️ AI '{from_ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
-        if not to_ai_data:
-            await interaction.response.send_message(
-                f"⚠️ AI '{to_ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
-
-        from_channel_id, from_session = from_ai_data
-        to_channel_id, to_session = to_ai_data
+        # Parse both AI identifiers from autocomplete (format: "ai_name|||channel_id")
+        from_ai_name, from_channel_id_hint = AutocompleteHelpers.parse_ai_identifier(from_ai_name)
+        to_ai_name, to_channel_id_hint = AutocompleteHelpers.parse_ai_identifier(to_ai_name)
+        
+        # Get source AI data - use optimized lookup if channel_id is available
+        if from_channel_id_hint:
+            channel_data = func.get_session_data(server_id, from_channel_id_hint)
+            from_session = channel_data.get(from_ai_name) if channel_data else None
+            
+            if not from_session:
+                await interaction.response.send_message(
+                    f"⚠️ AI '{from_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            from_channel_id = from_channel_id_hint
+        else:
+            from_ai_data = func.get_ai_session_data_from_all_channels(server_id, from_ai_name)
+            if not from_ai_data:
+                await interaction.response.send_message(
+                    f"⚠️ AI '{from_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            from_channel_id, from_session = from_ai_data
+        
+        # Get target AI data - use optimized lookup if channel_id is available
+        if to_channel_id_hint:
+            channel_data = func.get_session_data(server_id, to_channel_id_hint)
+            to_session = channel_data.get(to_ai_name) if channel_data else None
+            
+            if not to_session:
+                await interaction.response.send_message(
+                    f"⚠️ AI '{to_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            to_channel_id = to_channel_id_hint
+        else:
+            to_ai_data = func.get_ai_session_data_from_all_channels(server_id, to_ai_name)
+            if not to_ai_data:
+                await interaction.response.send_message(
+                    f"⚠️ AI '{to_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            to_channel_id, to_session = to_ai_data
         
         # Verify session data is valid
         if from_session is None:
@@ -524,16 +574,35 @@ class SlashCommands(commands.Cog):
     async def mute(self, interaction: discord.Interaction, ai_name: str, user: discord.Member):
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+        ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        if not found_ai_data:
-            await interaction.response.send_message(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
-        
-        found_channel_id, session = found_ai_data
+        # Get AI data - use optimized lookup if channel_id is available
+        if channel_id_hint:
+            # Direct lookup - faster, no iteration
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            session = channel_data.get(ai_name) if channel_data else None
+            
+            if not session:
+                await interaction.response.send_message(
+                    f"❌ AI '{ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id = channel_id_hint
+        else:
+            # Fallback: Search all channels (for manual input without autocomplete)
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+            
+            if not found_ai_data:
+                await interaction.response.send_message(
+                    f"❌ AI '{ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id, session = found_ai_data
         
         # Verify session data is valid
         if session is None:
@@ -570,16 +639,35 @@ class SlashCommands(commands.Cog):
     async def unmute(self, interaction: discord.Interaction, ai_name: str, user: discord.Member):
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+        ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        if not found_ai_data:
-            await interaction.response.send_message(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
-        
-        found_channel_id, session = found_ai_data
+        # Get AI data - use optimized lookup if channel_id is available
+        if channel_id_hint:
+            # Direct lookup - faster, no iteration
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            session = channel_data.get(ai_name) if channel_data else None
+            
+            if not session:
+                await interaction.response.send_message(
+                    f"❌ AI '{ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id = channel_id_hint
+        else:
+            # Fallback: Search all channels (for manual input without autocomplete)
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+            
+            if not found_ai_data:
+                await interaction.response.send_message(
+                    f"❌ AI '{ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id, session = found_ai_data
         
         # Verify session data is valid
         if session is None:
@@ -615,16 +703,35 @@ class SlashCommands(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         server_id = str(interaction.guild.id)
         
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+        ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
-        
-        found_channel_id, session = found_ai_data
+        # Get AI data - use optimized lookup if channel_id is available
+        if channel_id_hint:
+            # Direct lookup - faster, no iteration
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            session = channel_data.get(ai_name) if channel_data else None
+            
+            if not session:
+                await interaction.followup.send(
+                    f"❌ AI '{ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id = channel_id_hint
+        else:
+            # Fallback: Search all channels (for manual input without autocomplete)
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+            
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id, session = found_ai_data
         
         # Verify session data is valid
         if session is None:
