@@ -14,6 +14,7 @@ from discord.ext import commands
 
 import utils.func as func
 from AI.chat_service import get_service
+from messaging.store import get_store
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.webhook_utils import WebhookUtils
 from utils.pagination import PaginatedView
@@ -91,7 +92,7 @@ class ChatSessions(commands.Cog):
         
         # Validate that the chat_id exists
         service = get_service()
-        available_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
+        available_chats = await get_store(server_id, found_channel_id).list_chat_ids(server_id, found_channel_id, actual_ai_name)
         
         if chat_id not in available_chats:
             await interaction.followup.send(
@@ -142,7 +143,7 @@ class ChatSessions(commands.Cog):
             await func.update_session_data(server_id, found_channel_id, channel_data)
         
         # Get info about the chat
-        info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
+        info = await get_store(server_id, found_channel_id).get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
         msg_count = info.get("message_count", 0)
         
         result_msg = f"✅ **Switched to existing chat session!**\n\n"
@@ -207,7 +208,7 @@ class ChatSessions(commands.Cog):
         # Generate new chat ID
         if chat_name:
             service = get_service()
-            existing_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
+            existing_chats = await get_store(server_id, found_channel_id).list_chat_ids(server_id, found_channel_id, actual_ai_name)
             if chat_name in existing_chats:
                 await interaction.followup.send(
                     f"❌ **Error:** A chat named '{chat_name}' already exists for AI '{actual_ai_name}'.\n\n"
@@ -328,7 +329,7 @@ class ChatSessions(commands.Cog):
         
         # Get all chat IDs
         service = get_service()
-        chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
+        chat_ids = await get_store(server_id, found_channel_id).list_chat_ids(server_id, found_channel_id, actual_ai_name)
         
         if not chat_ids:
             await interaction.followup.send(
@@ -343,7 +344,7 @@ class ChatSessions(commands.Cog):
         # Sort chats: active first, then by updated_at descending
         sorted_chats = []
         for chat_id in chat_ids:
-            info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
+            info = await get_store(server_id, found_channel_id).get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
             sorted_chats.append({
                 "chat_id": chat_id,
                 "info": info,
@@ -499,7 +500,7 @@ class ChatSessions(commands.Cog):
         
         # Get chat info
         service = get_service()
-        available_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
+        available_chats = await get_store(server_id, found_channel_id).list_chat_ids(server_id, found_channel_id, actual_ai_name)
         
         if chat_id not in available_chats:
             await interaction.followup.send(
@@ -520,7 +521,7 @@ class ChatSessions(commands.Cog):
             return
         
         # Get chat info for confirmation
-        info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
+        info = await get_store(server_id, found_channel_id).get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
         
         # Get character card thumbnail if available
         channel_obj = interaction.guild.get_channel(int(found_channel_id))
@@ -564,7 +565,8 @@ class ChatSessions(commands.Cog):
         async def on_confirm(confirm_interaction: discord.Interaction):
             # Delete the chat
             try:
-                success = await service.history_manager.delete_chat(
+                store = get_store(server_id, found_channel_id)
+                success = await store.delete_chat(
                     server_id, found_channel_id, actual_ai_name, chat_id
                 )
                 
@@ -686,7 +688,8 @@ class ChatSessions(commands.Cog):
         # Rename the chat
         service = get_service()
         try:
-            success = await service.history_manager.rename_chat(
+            store = get_store(server_id, found_channel_id)
+            success = await store.rename_chat(
                 server_id, found_channel_id, ai_name, old_name, new_name
             )
             
@@ -762,7 +765,7 @@ class ChatSessions(commands.Cog):
         
         if chat_id:
             # Show detailed info for specific chat
-            available_chats = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+            available_chats = await get_store(server_id, found_channel_id).list_chat_ids(server_id, found_channel_id, ai_name)
             
             if chat_id not in available_chats:
                 await interaction.followup.send(
@@ -771,7 +774,7 @@ class ChatSessions(commands.Cog):
                 )
                 return
             
-            info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
+            info = await get_store(server_id, found_channel_id).get_chat_info(server_id, found_channel_id, actual_ai_name, chat_id)
             active_chat_id = session.get("chat_id", "default")
             
             # Format timestamps
@@ -855,7 +858,7 @@ class ChatSessions(commands.Cog):
             
         else:
             # Show general info for all chats (overview)
-            chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, actual_ai_name)
+            chat_ids = await get_store(server_id, found_channel_id).list_chat_ids(server_id, found_channel_id, actual_ai_name)
             
             if not chat_ids:
                 await interaction.followup.send(
@@ -869,7 +872,7 @@ class ChatSessions(commands.Cog):
             # Calculate total messages
             total_messages = 0
             for cid in chat_ids:
-                info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, cid)
+                info = await get_store(server_id, found_channel_id).get_chat_info(server_id, found_channel_id, actual_ai_name, cid)
                 total_messages += info["message_count"]
             
             # Get active chat name
@@ -898,7 +901,7 @@ class ChatSessions(commands.Cog):
             # Sessions field - list chats with status
             sessions_list = ""
             for i, cid in enumerate(chat_ids[:5]):
-                info = service.history_manager.get_chat_info(server_id, found_channel_id, actual_ai_name, cid)
+                info = await get_store(server_id, found_channel_id).get_chat_info(server_id, found_channel_id, actual_ai_name, cid)
                 indicator = "🟢" if cid == active_chat_id else "⚪"
                 
                 # Format chat name

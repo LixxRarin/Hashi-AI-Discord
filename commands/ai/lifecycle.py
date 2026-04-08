@@ -22,6 +22,7 @@ from typing import Optional
 
 import utils.func as func
 from AI.chat_service import get_service
+from messaging.store import get_store
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.avatar_utils import AvatarUtils
 from commands.shared.webhook_utils import WebhookUtils
@@ -198,11 +199,12 @@ class AILifecycle(commands.Cog):
         # Count total chats and messages
         service = get_service()
         try:
-            chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
+            store = get_store(server_id, found_channel_id)
+            chat_ids = await store.list_chat_ids(server_id, found_channel_id, ai_name)
             total_chats = len(chat_ids)
             total_messages = 0
             for chat_id in chat_ids:
-                info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
+                info = await store.get_chat_info(server_id, found_channel_id, ai_name, chat_id)
                 total_messages += info.get("message_count", 0)
         except:
             total_chats = 0

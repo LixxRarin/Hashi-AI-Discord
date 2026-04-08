@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import logging
+import os
 import socket
 import time
 from typing import Any, Dict, Optional, Callable, Awaitable, TypeVar
@@ -135,64 +136,6 @@ session_cache: Dict[str, Any] = {}
 config_yaml = load_config()
 
 
-
-
-def get_conversations_file() -> str:
-    """
-    Get the unified conversations file path.
-    This is the NEW file that replaces conversation_history.json, message_tracking.json,
-    and generation_cache.json.
-    
-    Returns:
-        str: Path to the conversations file
-    """
-    return "data/conversations.json"
-
-
-
-
-def get_session_file() -> str:
-    """
-    Get the session file path from configuration.
-    
-    Returns:
-        str: Path to the session file
-    """
-    config = load_config()
-    return config.get("Data", {}).get("session_file", "data/session.json")
-
-
-def get_api_connections_file() -> str:
-    """
-    Get the API connections file path from configuration.
-    
-    Returns:
-        str: Path to the API connections file
-    """
-    config = load_config()
-    return config.get("Data", {}).get("api_connections_file", "data/api_connections.json")
-
-
-def get_character_cards_file() -> str:
-    """
-    Get the character cards file path from configuration.
-    
-    Returns:
-        str: Path to the character cards file
-    """
-    config = load_config()
-    return config.get("Data", {}).get("character_cards_file", "data/character_cards.json")
-
-
-def get_debug_config_file() -> str:
-    """
-    Get the debug config file path from configuration.
-    
-    Returns:
-        str: Path to the debug config file
-    """
-    config = load_config()
-    return config.get("Data", {}).get("debug_config_file", "data/debug_config.json")
 
 
 
@@ -345,9 +288,26 @@ def is_channel_active(server_id: str, channel_id: str) -> bool:
 
 
 async def load_session_cache() -> None:
-    """Loads session data from session.json into memory cache"""
+    """Loads session data from hierarchical structure into memory cache"""
     global session_cache
-    session_cache = await asyncio.to_thread(read_json, get_session_file()) or {}
+    session_cache = {}
+
+    from utils.data_paths import DataPaths
+    data_paths = DataPaths()
+
+    # Scan all server directories
+    for server_id in data_paths.list_servers():
+        session_cache[server_id] = {"channels": {}}
+
+        # Scan all channel directories in this server
+        for channel_id in data_paths.list_channels(server_id):
+            # Load session file for this channel
+            session_file = data_paths.get_session_file(server_id, channel_id)
+            if os.path.exists(session_file):
+                channel_data = await asyncio.to_thread(read_json, session_file)
+                if channel_data:
+                    session_cache[server_id]["channels"][channel_id] = channel_data
+
     log.info(f"Loaded session cache with {len(session_cache)} servers")
 
 
@@ -358,39 +318,37 @@ async def update_session_data(server_id: str, channel_id: str, new_data: Dict[st
     Args:
         server_id: Server ID
         channel_id: Channel ID
-        new_data: New session data
+        new_data: New session data (None to delete)
     """
+    from utils.data_paths import DataPaths
+    data_paths = DataPaths()
+
     # Update in-memory cache
     if server_id not in session_cache:
         session_cache[server_id] = {"channels": {}}
     if "channels" not in session_cache[server_id]:
         session_cache[server_id]["channels"] = {}
-    
+
     # Handle None (deletion) vs update
     if new_data is None:
-        # Remove the key from cache when deleting
+        # Remove from cache
         if channel_id in session_cache[server_id]["channels"]:
             del session_cache[server_id]["channels"][channel_id]
+
+        # Delete file
+        session_file = data_paths.get_session_file(server_id, channel_id)
+        if os.path.exists(session_file):
+            await asyncio.to_thread(os.remove, session_file)
+            log.debug(f"Deleted session file for channel {channel_id}")
     else:
-        # Update the cache with new data
+        # Update cache
         session_cache[server_id]["channels"][channel_id] = new_data
 
-    # Write directly to file
-    session_data = await asyncio.to_thread(read_json, get_session_file()) or {}
-    
-    if server_id not in session_data:
-        session_data[server_id] = {"channels": {}}
-    if "channels" not in session_data[server_id]:
-        session_data[server_id]["channels"] = {}
-    
-    if new_data is None:  # If new_data is None, it means we are removing the channel
-        if channel_id in session_data[server_id]["channels"]:
-            del session_data[server_id]["channels"][channel_id]
-    else:
-        session_data[server_id]["channels"][channel_id] = new_data
-    
-    await asyncio.to_thread(write_json, get_session_file(), session_data)
-    log.debug(f"Updated session data for channel {channel_id}")
+        # Write to per-channel file
+        session_file = data_paths.get_session_file(server_id, channel_id)
+        data_paths.ensure_directory(session_file)
+        await asyncio.to_thread(write_json, session_file, new_data)
+        log.debug(f"Updated session data for channel {channel_id}")
 
 
 def get_session_data(server_id: str, channel_id: str) -> Optional[Dict[str, Any]]:
@@ -449,37 +407,64 @@ async def remove_session_data(server_id: str, channel_id: str) -> None:
 
 async def load_api_connections() -> Dict[str, Dict[str, Any]]:
     """
-    Load API connections from api_connections.json file.
-    
+    Load API connections from all servers.
+
     Returns:
         Dict[str, Dict[str, Any]]: Dictionary of connections by server
     """
-    return await asyncio.to_thread(read_json, get_api_connections_file()) or {}
+    from utils.data_paths import DataPaths
+
+    data_paths = DataPaths()
+    all_connections = {}
+
+    for server_id in data_paths.list_servers():
+        connections_file = data_paths.get_api_connections_file(server_id)
+        if os.path.exists(connections_file):
+            server_connections = await asyncio.to_thread(read_json, connections_file)
+            if server_connections:
+                all_connections[server_id] = server_connections
+
+    return all_connections
 
 
 async def save_api_connections(data: Dict[str, Dict[str, Any]]) -> None:
     """
-    Save API connections to api_connections.json file.
-    
+    Save API connections per server.
+
     Args:
-        data: Dictionary of connections to save
+        data: Dictionary of connections by server to save
     """
-    await asyncio.to_thread(write_json, get_api_connections_file(), data)
+    from utils.data_paths import DataPaths
+
+    data_paths = DataPaths()
+
+    for server_id, server_connections in data.items():
+        connections_file = data_paths.get_api_connections_file(server_id)
+        data_paths.ensure_directory(connections_file)
+        await asyncio.to_thread(write_json, connections_file, server_connections)
 
 
 def get_api_connection(server_id: str, connection_name: str) -> Optional[Dict[str, Any]]:
     """
     Get a specific API connection.
-    
+
     Args:
         server_id: Server ID
         connection_name: Connection name
-        
+
     Returns:
         Optional[Dict[str, Any]]: Connection data or None if not found
     """
-    connections = read_json(get_api_connections_file()) or {}
-    return connections.get(server_id, {}).get(connection_name)
+    from utils.data_paths import DataPaths
+
+    data_paths = DataPaths()
+    connections_file = data_paths.get_api_connections_file(server_id)
+
+    if not os.path.exists(connections_file):
+        return None
+
+    connections = read_json(connections_file) or {}
+    return connections.get(connection_name)
 
 
 async def create_api_connection(
@@ -711,15 +696,23 @@ async def delete_api_connection(server_id: str, connection_name: str) -> bool:
 def list_api_connections(server_id: str) -> Dict[str, Any]:
     """
     List all API connections for a server.
-    
+
     Args:
         server_id: Server ID
-        
+
     Returns:
         Dict[str, Any]: Dictionary of server connections
     """
-    connections = read_json(get_api_connections_file()) or {}
-    return connections.get(server_id, {})
+    from utils.data_paths import DataPaths
+
+    data_paths = DataPaths()
+    connections_file = data_paths.get_api_connections_file(server_id)
+
+    if not os.path.exists(connections_file):
+        return {}
+
+    connections = read_json(connections_file) or {}
+    return connections
 
 
 def get_ais_using_connection(server_id: str, connection_name: str) -> list[tuple[str, str]]:
@@ -794,26 +787,29 @@ async def delete_server_session_data(server_id: str) -> bool:
         bool: True if deleted successfully, False otherwise
     """
     global session_cache
-    
+
     try:
         # Remove from in-memory cache
         if server_id in session_cache:
             del session_cache[server_id]
             log.info("Removed server from session cache")
-        
-        # Update persistent storage
-        session_file = get_session_file()
-        data = await asyncio.to_thread(read_json, session_file) or {}
-        
-        if server_id in data:
-            del data[server_id]
-            await asyncio.to_thread(write_json, session_file, data)
-            log.info(f"Deleted session data from {session_file}")
-            return True
-        else:
-            log.debug("No session data found for server")
-            return True  # Not an error if data doesn't exist
-            
+
+        # Delete all channel session files for this server
+        from utils.data_paths import DataPaths
+        data_paths = DataPaths()
+
+        deleted_count = 0
+        for channel_id in data_paths.list_channels(server_id):
+            session_file = data_paths.get_session_file(server_id, channel_id)
+            if os.path.exists(session_file):
+                await asyncio.to_thread(os.remove, session_file)
+                deleted_count += 1
+
+        if deleted_count > 0:
+            log.info(f"Deleted {deleted_count} session file(s) for server {server_id}")
+
+        return True
+
     except Exception as e:
         log.error(f"Error deleting session data: {e}")
         return False
@@ -910,12 +906,22 @@ async def cleanup_server_data(server_id: str, server_name: str = None) -> Dict[s
         log.error(error_msg)
         results["success"] = False
         results["character_cards"] = {"success": False, "error": str(e)}
-    
+
     # 4. Clean conversation history
     try:
         from messaging.store import get_store
-        store = get_store()
-        results["conversations"] = await store.delete_server_conversations(server_id)
+        from utils.data_paths import DataPaths
+
+        data_paths = DataPaths()
+        channels = data_paths.list_channels(server_id)
+
+        total_deleted = 0
+        for channel_id in channels:
+            store = get_store(server_id, channel_id)
+            deleted = await store.delete_server_conversations(server_id)
+            total_deleted += deleted
+
+        results["conversations"] = total_deleted
     except Exception as e:
         error_msg = f"Conversations cleanup failed: {e}"
         results["errors"].append(error_msg)
@@ -998,11 +1004,11 @@ async def cleanup_channel_data(server_id: str, channel_id: str, channel_name: st
         results["errors"].append(error_msg)
         log.error(error_msg)
         results["success"] = False
-    
+
     # 2. Clean conversation history for this channel
     try:
         from messaging.store import get_store
-        store = get_store()
+        store = get_store(server_id, channel_id)
         results["conversations"] = await store.delete_channel_conversations(server_id, channel_id)
     except Exception as e:
         error_msg = f"Conversations cleanup failed: {e}"

@@ -12,7 +12,7 @@ yaml.preserve_quotes = True
 yaml.encoding = "utf-8"
 
 # Default configuration content
-DEFAULT_CONFIG_CONTENT = r"""version: "1.4.2" # Don't touch here
+DEFAULT_CONFIG_CONTENT = r"""version: "1.5.0" # Don't touch here
 
 # Discord Bot Configuration
 Discord:
@@ -22,26 +22,9 @@ Discord:
 
 # Data Files Configuration
 Data:
-  session_file: "data/session.json"
-  # Path to the file where session data is stored.
-  # This file stores the active AI sessions for each channel.
-
-  conversations_file: "data/conversations.json"
-  # Path to the unified conversations file.
-  # This file stores ALL conversation history, message tracking, and generation cache.
-  # Replaces: conversation_history.json, message_tracking.json, generation_cache.json
-
-  api_connections_file: "data/api_connections.json"
-  # Path to the file where API connections are stored.
-  # This file stores the API keys, models, and LLM parameters for each connection.
-
-  character_cards_file: "data/character_cards.json"
-  # Path to the file where character cards registry is stored.
-  # This file stores the mapping of character cards to AIs.
-
-  debug_config_file: "data/debug_config.json"
-  # Path to the file where debug configuration is stored.
-  # This file stores the debug settings for each server.
+  data_dir: "data/"
+  # Base directory for all data files.
+  # Files are organized hierarchically: data/{server_id}/{channel_id}/
 
 # Bot Interaction Settings
 Options:

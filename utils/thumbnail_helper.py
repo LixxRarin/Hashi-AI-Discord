@@ -48,34 +48,54 @@ async def upload_thumbnail_to_discord(
         
         # Determine target channel
         target_channel = channel  # Default fallback
-        
+        is_debug_channel = False
+
         if server_id:
             # Try to get debug channel for this server
             try:
                 import utils.func as func
-                debug_config = func.read_json(func.get_debug_config_file()) or {}
-                server_config = debug_config.get(server_id, {})
-                
-                if server_config.get("enabled", False) and server_config.get("debug_channel_id"):
-                    debug_channel_id = server_config["debug_channel_id"]
-                    debug_channel = channel.guild.get_channel(int(debug_channel_id))
-                    
-                    if debug_channel:
-                        target_channel = debug_channel
-            except Exception:
+                from utils.data_paths import DataPaths
+                import os
+
+                data_paths = DataPaths()
+                debug_config_file = data_paths.get_debug_config_file(server_id)
+
+                if os.path.exists(debug_config_file):
+                    server_config = func.read_json(debug_config_file) or {}
+
+                    if server_config.get("enabled", False) and server_config.get("debug_channel_id"):
+                        debug_channel_id = server_config["debug_channel_id"]
+                        debug_channel = channel.guild.get_channel(int(debug_channel_id))
+
+                        if debug_channel:
+                            target_channel = debug_channel
+                            is_debug_channel = True
+                            log.debug(f"Using debug channel {debug_channel_id} for thumbnail upload")
+            except Exception as e:
+                log.debug(f"Could not get debug channel: {e}")
                 pass  # Use fallback channel
-        
+
         # Upload image to Discord
         file = discord.File(image_path, filename="thumbnail.png")
-        
+
         # Send to target channel
         temp_message = await target_channel.send(file=file)
-        
+
         # Extract CDN URL from the uploaded attachment
         if temp_message.attachments:
             cdn_url = temp_message.attachments[0].url
-        
-            log.debug("Uploaded thumbnail to Discord CDN")
+
+            # IMPORTANT: Only delete if NOT in debug channel
+            if is_debug_channel:
+                # Keep the message in debug channel - DO NOT DELETE
+                log.debug(f"Uploaded thumbnail to debug channel (kept message with attachment)")
+            else:
+                # Delete the message in normal channels
+                try:
+                    await temp_message.delete()
+                    log.debug("Uploaded thumbnail to Discord CDN (deleted temp message)")
+                except discord.HTTPException:
+                    pass  # Ignore if we can't delete
 
             return cdn_url
         else:

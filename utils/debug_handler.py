@@ -133,33 +133,41 @@ class DiscordLogHandler(logging.Handler):
     def _get_config(self) -> list:
         """
         Get all enabled debug channel configurations with caching.
-        
+
         Returns:
             List of configuration dictionaries (empty list if none configured)
         """
         current_time = time.time()
-        
+
         # Use cache if still valid
         if self._config_cache is not None and (current_time - self._config_cache_time) < self._config_cache_ttl:
             return self._config_cache
-        
+
         # Load configuration
         try:
-            debug_config = func.read_json(func.get_debug_config_file()) or {}
-            
-            # Collect all enabled configurations
+            from utils.data_paths import DataPaths
+            import os
+
+            data_paths = DataPaths()
             enabled_configs = []
-            for server_id, config in debug_config.items():
+
+            # Iterate through all servers
+            for server_id in data_paths.list_servers():
+                debug_config_file = data_paths.get_debug_config_file(server_id)
+                if not os.path.exists(debug_config_file):
+                    continue
+
+                config = func.read_json(debug_config_file) or {}
                 if config.get("enabled", False) and config.get("debug_channel_id"):
                     # Add server_id to config for reference
                     config_copy = config.copy()
                     config_copy["server_id"] = server_id
                     enabled_configs.append(config_copy)
-            
+
             self._config_cache = enabled_configs
             self._config_cache_time = current_time
             return enabled_configs
-            
+
         except Exception as e:
             func.log.error(f"Error loading debug config: {e}")
             return []

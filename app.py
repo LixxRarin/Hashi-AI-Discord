@@ -60,17 +60,7 @@ class BridgeBot(commands.Bot):
         # Ensure data directory exists
         os.makedirs("data", exist_ok=True)
 
-        # Ensure session.json exists
-        session_file = func.get_session_file()
-        if not os.path.exists(session_file):
-            func.write_json(session_file, {})
-
-        # Ensure api_connections.json exists
-        api_connections_file = func.get_api_connections_file()
-        if not os.path.exists(api_connections_file):
-            func.write_json(api_connections_file, {})
-
-        # Load session cache
+        # Load session cache (from hierarchical structure)
         await func.load_session_cache()
 
         func.log.debug("Initializing Message System")
@@ -508,7 +498,7 @@ async def on_raw_message_delete(payload: discord.RawMessageDeleteEvent):
             
             # Handle conversation history based on tracking setting
             from messaging.store import get_store
-            store = get_store()
+            store = get_store(server_id, channel_id)
             
             if track_deletes:
                 # Mark as deleted (keep in history)
@@ -724,7 +714,7 @@ async def on_raw_message_edit(payload: discord.RawMessageUpdateEvent):
             
             # Retrieve stored message to get edit tracking info
             from messaging.store import get_store
-            store = get_store()
+            store = get_store(server_id, channel_id)
             
             stored_message = await store.get_message_by_discord_id(
                 server_id, channel_id, ai_name, message_id, chat_id

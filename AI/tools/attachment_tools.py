@@ -253,11 +253,11 @@ async def get_attachment_content(
             try:
                 from messaging.short_id_manager import get_short_id_manager_sync
                 from messaging.store import get_store
-                
+
                 short_id = int(message_id[1:])
                 manager = get_short_id_manager_sync()
-                store = get_store()
-                
+                store = get_store(server_id, channel_id)
+
                 # Get AI name from context
                 ai_name = context.get("ai_name")
                 chat_id = context.get("chat_id", "default")

@@ -11,6 +11,7 @@ from discord import app_commands
 
 import utils.func as func
 from AI.chat_service import get_service
+from messaging.store import get_store
 
 
 class AutocompleteHelpers:
@@ -202,16 +203,16 @@ class AutocompleteHelpers:
                 return []
             
             found_channel_id, session = found_ai_data
-            
+
             # Get available chat_ids
-            service = get_service()
-            chat_ids = service.history_manager.list_chat_ids(server_id, found_channel_id, ai_name)
-            
+            store = get_store(server_id, found_channel_id)
+            chat_ids = await store.list_chat_ids(server_id, found_channel_id, ai_name)
+
             choices = []
             for cid in chat_ids:
                 if current.lower() in cid.lower():
                     # Get chat info
-                    info = service.history_manager.get_chat_info(server_id, found_channel_id, ai_name, cid)
+                    info = await store.get_chat_info(server_id, found_channel_id, ai_name, cid)
                     msg_count = info.get("message_count", 0)
                     display_name = f"{cid[:30]}... ({msg_count} msgs)" if len(cid) > 30 else f"{cid} ({msg_count} msgs)"
                     choices.append(app_commands.Choice(name=display_name, value=cid))

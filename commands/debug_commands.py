@@ -37,21 +37,27 @@ class DebugCommands(commands.Cog):
     async def cog_load(self):
         """Called when the cog is loaded. Initialize debug handler if configured."""
         try:
-            # Load debug configuration
-            debug_config = func.read_json(func.get_debug_config_file()) or {}
-            
+            from utils.data_paths import DataPaths
+
+            data_paths = DataPaths()
+
             # Check if any server has debug enabled
             has_enabled_debug = False
             min_level = logging.CRITICAL  # Start with highest level
-            
-            for server_id, config in debug_config.items():
+
+            for server_id in data_paths.list_servers():
+                debug_config_file = data_paths.get_debug_config_file(server_id)
+                if not os.path.exists(debug_config_file):
+                    continue
+
+                config = func.read_json(debug_config_file) or {}
                 if config.get("enabled", False) and config.get("debug_channel_id"):
                     has_enabled_debug = True
                     # Find the lowest (most verbose) log level across all configs
                     level_name = config.get("log_level", "INFO")
                     level = getattr(logging, level_name, logging.INFO)
                     min_level = min(min_level, level)
-            
+
             # Initialize handler if debug is enabled
             if has_enabled_debug:
                 handler = self._get_or_create_handler()
@@ -106,45 +112,50 @@ class DebugCommands(commands.Cog):
     ):
         """Configure the debug channel for receiving logs."""
         await interaction.response.defer(ephemeral=True)
-        
+
         server_id = str(interaction.guild.id)
-        
-        # Load existing config
-        debug_config = func.read_json(func.get_debug_config_file()) or {}
-        
-        # Get or create server config
-        if server_id not in debug_config:
-            debug_config[server_id] = {}
-        
+
+        # Load existing config for this server
+        from utils.data_paths import DataPaths
+
+        data_paths = DataPaths()
+        debug_config_file = data_paths.get_debug_config_file(server_id)
+        data_paths.ensure_directory(debug_config_file)
+
+        server_config = func.read_json(debug_config_file) or {}
+
         # Update configuration
-        debug_config[server_id]["debug_channel_id"] = str(channel.id)
-        debug_config[server_id]["enabled"] = enabled
-        
+        server_config["debug_channel_id"] = str(channel.id)
+        server_config["enabled"] = enabled
+
         if log_level:
-            debug_config[server_id]["log_level"] = log_level.value
-        elif "log_level" not in debug_config[server_id]:
-            debug_config[server_id]["log_level"] = "INFO"
-        
+            server_config["log_level"] = log_level.value
+        elif "log_level" not in server_config:
+            server_config["log_level"] = "INFO"
+
         # Save configuration
-        func.write_json(func.get_debug_config_file(), debug_config)
-        
+        func.write_json(debug_config_file, server_config)
+
         # Get or create handler
         handler = self._get_or_create_handler()
-        
+
         # Invalidate cache to pick up new configuration
         handler.invalidate_cache()
-        
+
         # Set handler level to minimum across all enabled configs
         min_level = logging.CRITICAL
-        for srv_id, cfg in debug_config.items():
-            if cfg.get("enabled", False):
-                lvl_name = cfg.get("log_level", "INFO")
-                lvl = getattr(logging, lvl_name, logging.INFO)
-                min_level = min(min_level, lvl)
+        for srv_id in data_paths.list_servers():
+            cfg_file = data_paths.get_debug_config_file(srv_id)
+            if os.path.exists(cfg_file):
+                cfg = func.read_json(cfg_file) or {}
+                if cfg.get("enabled", False):
+                    lvl_name = cfg.get("log_level", "INFO")
+                    lvl = getattr(logging, lvl_name, logging.INFO)
+                    min_level = min(min_level, lvl)
         handler.setLevel(min_level)
-        
+
         # Get the log level name for display
-        level_name = debug_config[server_id]["log_level"]
+        level_name = server_config["log_level"]
         
         # Send test message
         if enabled:
@@ -179,10 +190,10 @@ class DebugCommands(commands.Cog):
         # Send confirmation
         status_emoji = "✅" if enabled else "⚠️"
         status_text = "enabled" if enabled else "disabled"
-        
+
         await interaction.followup.send(
             f"{status_emoji} Debug logging {status_text} for {channel.mention}\n"
-            f"**Log Level:** {debug_config[server_id]['log_level']}\n\n"
+            f"**Log Level:** {server_config['log_level']}\n\n"
             f"💡 Use `/debug_level` to change the log level\n"
             f"💡 Use `/toggle_debug` to enable/disable logging",
             ephemeral=True
@@ -205,33 +216,48 @@ class DebugCommands(commands.Cog):
     ):
         """Change the debug log level."""
         server_id = str(interaction.guild.id)
-        
-        # Load config
-        debug_config = func.read_json(func.get_debug_config_file()) or {}
-        
-        if server_id not in debug_config or not debug_config[server_id].get("debug_channel_id"):
+
+        # Load config for this server
+        from utils.data_paths import DataPaths
+
+        data_paths = DataPaths()
+        debug_config_file = data_paths.get_debug_config_file(server_id)
+
+        if not os.path.exists(debug_config_file):
             await interaction.response.send_message(
                 "❌ Debug channel not configured. Use `/set_debug_channel` first.",
                 ephemeral=True
             )
             return
-        
+
+        server_config = func.read_json(debug_config_file) or {}
+
+        if not server_config.get("debug_channel_id"):
+            await interaction.response.send_message(
+                "❌ Debug channel not configured. Use `/set_debug_channel` first.",
+                ephemeral=True
+            )
+            return
+
         # Update level
-        old_level = debug_config[server_id].get("log_level", "INFO")
-        debug_config[server_id]["log_level"] = level.value
-        func.write_json(func.get_debug_config_file(), debug_config)
-        
+        old_level = server_config.get("log_level", "INFO")
+        server_config["log_level"] = level.value
+        func.write_json(debug_config_file, server_config)
+
         # Update handler
         handler = self._get_or_create_handler()
         handler.invalidate_cache()
-        
+
         # Set handler level to minimum across all enabled configs
         min_level = logging.CRITICAL
-        for srv_id, cfg in debug_config.items():
-            if cfg.get("enabled", False):
-                lvl_name = cfg.get("log_level", "INFO")
-                lvl = getattr(logging, lvl_name, logging.INFO)
-                min_level = min(min_level, lvl)
+        for srv_id in data_paths.list_servers():
+            cfg_file = data_paths.get_debug_config_file(srv_id)
+            if os.path.exists(cfg_file):
+                cfg = func.read_json(cfg_file) or {}
+                if cfg.get("enabled", False):
+                    lvl_name = cfg.get("log_level", "INFO")
+                    lvl = getattr(logging, lvl_name, logging.INFO)
+                    min_level = min(min_level, lvl)
         handler.setLevel(min_level)
         
         await interaction.response.send_message(
@@ -247,34 +273,49 @@ class DebugCommands(commands.Cog):
     async def toggle_debug(self, interaction: discord.Interaction):
         """Toggle debug logging on/off."""
         server_id = str(interaction.guild.id)
-        
-        # Load config
-        debug_config = func.read_json(func.get_debug_config_file()) or {}
-        
-        if server_id not in debug_config or not debug_config[server_id].get("debug_channel_id"):
+
+        # Load config for this server
+        from utils.data_paths import DataPaths
+
+        data_paths = DataPaths()
+        debug_config_file = data_paths.get_debug_config_file(server_id)
+
+        if not os.path.exists(debug_config_file):
             await interaction.response.send_message(
                 "❌ Debug channel not configured. Use `/set_debug_channel` first.",
                 ephemeral=True
             )
             return
-        
+
+        server_config = func.read_json(debug_config_file) or {}
+
+        if not server_config.get("debug_channel_id"):
+            await interaction.response.send_message(
+                "❌ Debug channel not configured. Use `/set_debug_channel` first.",
+                ephemeral=True
+            )
+            return
+
         # Toggle enabled status
-        current_status = debug_config[server_id].get("enabled", False)
+        current_status = server_config.get("enabled", False)
         new_status = not current_status
-        debug_config[server_id]["enabled"] = new_status
-        func.write_json(func.get_debug_config_file(), debug_config)
-        
+        server_config["enabled"] = new_status
+        func.write_json(debug_config_file, server_config)
+
         # Update handler
         handler = self._get_or_create_handler()
         handler.invalidate_cache()
-        
+
         # Recalculate handler level based on remaining enabled configs
         min_level = logging.CRITICAL
-        for srv_id, cfg in debug_config.items():
-            if cfg.get("enabled", False):
-                lvl_name = cfg.get("log_level", "INFO")
-                lvl = getattr(logging, lvl_name, logging.INFO)
-                min_level = min(min_level, lvl)
+        for srv_id in data_paths.list_servers():
+            cfg_file = data_paths.get_debug_config_file(srv_id)
+            if os.path.exists(cfg_file):
+                cfg = func.read_json(cfg_file) or {}
+                if cfg.get("enabled", False):
+                    lvl_name = cfg.get("log_level", "INFO")
+                    lvl = getattr(logging, lvl_name, logging.INFO)
+                    min_level = min(min_level, lvl)
         handler.setLevel(min_level)
         
         status_emoji = "✅" if new_status else "⚠️"
@@ -295,12 +336,18 @@ class DebugCommands(commands.Cog):
     async def debug_status(self, interaction: discord.Interaction):
         """Display debug system status."""
         await interaction.response.defer(ephemeral=True)
-        
+
         server_id = str(interaction.guild.id)
-        
-        # Load config
-        debug_config = func.read_json(func.get_debug_config_file()) or {}
-        server_config = debug_config.get(server_id, {})
+
+        # Load config for this server
+        from utils.data_paths import DataPaths
+
+        data_paths = DataPaths()
+        debug_config_file = data_paths.get_debug_config_file(server_id)
+
+        server_config = {}
+        if os.path.exists(debug_config_file):
+            server_config = func.read_json(debug_config_file) or {}
         
         # Create embed
         embed = discord.Embed(
@@ -494,10 +541,13 @@ class DebugCommands(commands.Cog):
             
             # Count API connections
             try:
-                api_connections_file = func.get_api_connections_file()
-                if os.path.exists(api_connections_file):
-                    connections_data = func.read_json(api_connections_file) or {}
-                    for server_id, server_conns in connections_data.items():
+                from utils.data_paths import DataPaths
+                data_paths = DataPaths()
+
+                for server_id in data_paths.list_servers():
+                    connections_file = data_paths.get_api_connections_file(server_id)
+                    if os.path.exists(connections_file):
+                        server_conns = func.read_json(connections_file) or {}
                         for conn_name, conn_data in server_conns.items():
                             stats["total_connections"] += 1
                             provider = conn_data.get("provider", "unknown")
@@ -507,12 +557,16 @@ class DebugCommands(commands.Cog):
             
             # Count character cards
             try:
-                cards_file = func.get_character_cards_file()
-                if os.path.exists(cards_file):
-                    cards_data = func.read_json(cards_file) or {}
-                    for server_id, server_cards in cards_data.items():
+                from utils.data_paths import DataPaths
+                data_paths = DataPaths()
+
+                # Iterate through all servers and count their cards
+                for server_id in data_paths.list_servers():
+                    cards_file = data_paths.get_character_cards_file(server_id)
+                    if os.path.exists(cards_file):
+                        server_cards = func.read_json(cards_file) or {}
                         stats["total_cards"] += len(server_cards)
-                
+
                 # Count cards in use
                 for server_data in func.session_cache.values():
                     for channel_data in server_data.get("channels", {}).values():
@@ -537,23 +591,34 @@ class DebugCommands(commands.Cog):
         stats = {}
         
         try:
-            # Data files
-            files_to_check = {
-                "session": "data/session.json",
-                "conversations": "data/conversations.json",
-                "api_connections": func.get_api_connections_file(),
-                "character_cards": func.get_character_cards_file(),
-                "debug_config": func.get_debug_config_file()
-            }
-            
-            for key, path in files_to_check.items():
-                if os.path.exists(path):
-                    stats[f"{key}_size"] = os.path.getsize(path)
-                else:
-                    stats[f"{key}_size"] = 0
-            
-            # Calculate total data size
-            stats["total_data_size"] = sum(v for k, v in stats.items() if k.endswith("_size"))
+            # Calculate total character cards size from all servers
+            from utils.data_paths import DataPaths
+            data_paths = DataPaths()
+
+            total_cards_size = 0
+            for server_id in data_paths.list_servers():
+                cards_file = data_paths.get_character_cards_file(server_id)
+                if os.path.exists(cards_file):
+                    total_cards_size += os.path.getsize(cards_file)
+
+            stats["character_cards_size"] = total_cards_size
+
+            # Calculate total data size from hierarchical structure
+            from utils.data_paths import DataPaths
+            data_paths = DataPaths()
+            total_size = 0
+
+            # Sum all files in data directory
+            if os.path.exists(data_paths.base_dir):
+                for root, dirs, files in os.walk(data_paths.base_dir):
+                    for file in files:
+                        file_path = os.path.join(root, file)
+                        try:
+                            total_size += os.path.getsize(file_path)
+                        except:
+                            pass
+
+            stats["total_data_size"] = total_size
             
         except Exception as e:
             func.log.error(f"Error collecting storage stats: {e}")
@@ -746,13 +811,24 @@ class DebugCommands(commands.Cog):
     async def clear_debug(self, interaction: discord.Interaction, limit: int = 100):
         """Clear messages from the debug channel."""
         await interaction.response.defer(ephemeral=True)
-        
+
         server_id = str(interaction.guild.id)
-        
-        # Load config
-        debug_config = func.read_json(func.get_debug_config_file()) or {}
-        server_config = debug_config.get(server_id, {})
-        
+
+        # Load config for this server
+        from utils.data_paths import DataPaths
+
+        data_paths = DataPaths()
+        debug_config_file = data_paths.get_debug_config_file(server_id)
+
+        if not os.path.exists(debug_config_file):
+            await interaction.followup.send(
+                "❌ Debug channel not configured.",
+                ephemeral=True
+            )
+            return
+
+        server_config = func.read_json(debug_config_file) or {}
+
         if not server_config or not server_config.get("debug_channel_id"):
             await interaction.followup.send(
                 "❌ Debug channel not configured.",

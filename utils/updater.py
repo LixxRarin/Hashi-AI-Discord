@@ -24,16 +24,16 @@ if not os.path.exists("version.txt"):
 
 def update_session_file(file_path: Optional[str] = None) -> None:
     """
-    Update the session.json file:
-    - Add missing keys to existing AI sessions (with default values)
-    - Remove deprecated keys from sessions
-    - Clean up null channel data
-    - Remove obsolete LLM parameters from config (now in api_connections.json)
-    - DO NOT overwrite existing values
+    DEPRECATED: This function was used to migrate from centralized to hierarchical structure.
+    Migration is complete. This function is now a no-op.
+
+    The session data is now stored in hierarchical structure:
+    data/{server_id}/{channel_id}/session.json
+
+    Use DataPaths.get_session_file(server_id, channel_id) to access session files.
     """
-    # Get file path from config if not provided
-    if file_path is None:
-        file_path = func.get_session_file()
+    func.log.debug("update_session_file() called but is deprecated (migration complete)")
+    return
 
     # Check if the session file exists; if not, create an empty session data dictionary
     if not os.path.exists(file_path):

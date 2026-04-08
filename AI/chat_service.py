@@ -26,27 +26,18 @@ from expressions import get_expression_registry
 
 class ChatService:
     """Central orchestrator for AI operations including conversation history, message preparation, and response processing."""
-    
+
     def __init__(self):
         """Initialize the chat service."""
-        from messaging.store import get_store
-        self.store = get_store()
         self.registry = get_registry()
-    
-    @property
-    def history_manager(self):
-        """
-        Expose store as history_manager.
-        
-        Existing code calls service.history_manager.list_chat_ids() etc,
-        so this property makes those calls work.
-        """
-        return self.store
-    
+
     def get_ai_history(self, server_id: str, channel_id: str, ai_name: str, chat_id: str = "default") -> List[Dict[str, str]]:
         """Get conversation history for a specific AI and chat."""
+        from messaging.store import get_store
+
         try:
-            chat = self.store._data.get(server_id, {}).get(channel_id, {}).get(ai_name, {}).get("chats", {}).get(chat_id)
+            store = get_store(server_id, channel_id)
+            chat = store._data.get(ai_name, {}).get("chats", {}).get(chat_id)
             
             if chat:
                 if hasattr(chat, 'get_messages_for_api'):
@@ -79,19 +70,22 @@ class ChatService:
         Returns:
             True if successful and persisted
         """
-        success = await self.store.clear_history(server_id, channel_id, ai_name, chat_id, keep_greeting=False, immediate=immediate)
-        
+        from messaging.store import get_store
+
+        store = get_store(server_id, channel_id)
+        success = await store.clear_history(server_id, channel_id, ai_name, chat_id, keep_greeting=False, immediate=immediate)
+
         if not success:
             return False
-        
+
         for msg in messages:
             if msg["role"] == "user":
-                await self.store.add_user_message(server_id, channel_id, ai_name, msg["content"], "system", chat_id)
+                await store.add_user_message(server_id, channel_id, ai_name, msg["content"], "system", chat_id)
             elif msg["role"] == "assistant":
-                await self.store.add_assistant_message(server_id, channel_id, ai_name, msg["content"], [], chat_id, short_id=None)
-        
+                await store.add_assistant_message(server_id, channel_id, ai_name, msg["content"], [], chat_id, short_id=None)
+
         if immediate:
-            return await self.store.save_immediate()
+            return await store.save_immediate()
         return True
     
     async def append_to_history(self, server_id: str, channel_id: str, ai_name: str, role: str, content: str, chat_id: str = "default") -> None:
@@ -134,11 +128,14 @@ class ChatService:
                     remove_emojis=False,
                     custom_patterns=[]
                 )
-        
+
+        from messaging.store import get_store
+        store = get_store(server_id, channel_id)
+
         if role == "user":
-            await self.store.add_user_message(server_id, channel_id, ai_name, content, "system", chat_id)
+            await store.add_user_message(server_id, channel_id, ai_name, content, "system", chat_id)
         elif role == "assistant":
-            await self.store.add_assistant_message(server_id, channel_id, ai_name, content, [], chat_id, short_id=None)
+            await store.add_assistant_message(server_id, channel_id, ai_name, content, [], chat_id, short_id=None)
     
     async def clear_ai_history(self, server_id: str, channel_id: str, ai_name: str, chat_id: Optional[str] = None, keep_greeting: bool = True, immediate: bool = False) -> bool:
         """Clear conversation history for a specific AI. If chat_id is None, clears all chats.
@@ -154,7 +151,10 @@ class ChatService:
         Returns:
             True if successful
         """
-        success = await self.store.clear_history(server_id, channel_id, ai_name, chat_id, keep_greeting=False, immediate=immediate)
+        from messaging.store import get_store
+        store = get_store(server_id, channel_id)
+
+        success = await store.clear_history(server_id, channel_id, ai_name, chat_id, keep_greeting=False, immediate=immediate)
         
         if not success:
             return False
@@ -189,10 +189,10 @@ class ChatService:
                         await self.append_to_history(server_id, channel_id, ai_name, "assistant", greeting_text, target_chat_id)
                     else:
                         func.log.warning("No greeting text found")
-            
+
             if immediate:
-                return await self.store.save_immediate()
-        
+                return await store.save_immediate()
+
         return success
     
     def _get_client(self, provider: str):

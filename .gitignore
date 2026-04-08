@@ -4,7 +4,9 @@ config.yml
 config/
 character_cards/*
 !character_cards/hashi.png
-
+.*
+!.gitignore
+!.github/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -179,3 +181,6 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+data/.backup_*
+data/.migration_complete

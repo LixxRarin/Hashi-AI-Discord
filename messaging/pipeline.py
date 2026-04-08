@@ -25,14 +25,13 @@ log = logging.getLogger(__name__)
 
 class MessagePipeline:
     """Main orchestrator for the messaging system providing a clean flow: Discord → Intake → Buffer → Timing → Processor → API → Store → Discord"""
-    
+
     def __init__(
         self,
         buffer: Optional[MessageBuffer] = None,
         intake: Optional[MessageIntake] = None,
         timing: Optional[TimingController] = None,
         processor: Optional[MessageProcessor] = None,
-        store: Optional[ConversationStore] = None,
         response_manager: Optional[ResponseManager] = None,
         bot_client: Optional[Any] = None
     ):
@@ -41,13 +40,13 @@ class MessagePipeline:
         self.intake = intake or get_intake()
         self.timing = timing or get_timing_controller()
         self.processor = processor or get_processor()
-        self.store = store or get_store()
         self.response_manager = response_manager or get_response_manager()
         self.bot_client = bot_client
-    
+
     async def initialize(self) -> None:
         """Initialize the pipeline and load data."""
-        await self.store.load()
+        # Stores are now loaded lazily per channel when first accessed
+        pass
     
     def _check_wakeup_patterns(
         self,
@@ -191,7 +190,8 @@ class MessagePipeline:
                 )
             
             # Save to conversation history immediately
-            await self.store.add_user_message(
+            store = get_store(metadata.server_id, metadata.channel_id)
+            await store.add_user_message(
                 metadata.server_id,
                 metadata.channel_id,
                 ai_name,
@@ -373,8 +373,9 @@ class MessagePipeline:
                                     is_reply_to_bot = True
                             except Exception:
                                 pass
-            
-            history = await self.store.get_history(
+
+            store = get_store(server_id, channel_id)
+            history = await store.get_history(
                 server_id, channel_id, ai_name, session_with_context.get("chat_id", "default")
             )
             
@@ -399,9 +400,10 @@ class MessagePipeline:
                 return None
         
         await self.buffer.set_processing(server_id, channel_id, ai_name, True)
-        
+
         try:
-            history = await self.store.get_history(
+            store = get_store(server_id, channel_id)
+            history = await store.get_history(
                 server_id, channel_id, ai_name, session_with_context.get("chat_id", "default")
             )
             
@@ -490,7 +492,8 @@ class MessagePipeline:
                         await self.processor.short_id_manager.skip_next_id(
                             server_id, channel_id, ai_name
                         )
-                        await self.store.add_assistant_message(
+                        store = get_store(server_id, channel_id)
+                        await store.add_assistant_message(
                             server_id,
                             channel_id,
                             ai_name,
@@ -570,12 +573,13 @@ class MessagePipeline:
                 if ignore_type == "pure":
                     # Pure ignore: save <IGNORE> to history, handle sleep mode
                     log.debug("Expression system: AI sent pure <IGNORE>, skipping message")
-                    
+
                     await self.processor.short_id_manager.skip_next_id(
                         server_id, channel_id, ai_name
                     )
-                    
-                    await self.store.add_assistant_message(
+
+                    store = get_store(server_id, channel_id)
+                    await store.add_assistant_message(
                         server_id,
                         channel_id,
                         ai_name,
@@ -662,8 +666,9 @@ class MessagePipeline:
                 await self.processor.short_id_manager.skip_next_id(
                     server_id, channel_id, ai_name
                 )
-            
-            await self.store.add_assistant_message(
+
+            store = get_store(server_id, channel_id)
+            await store.add_assistant_message(
                 server_id,
                 channel_id,
                 ai_name,
@@ -920,18 +925,20 @@ class MessagePipeline:
         return {
             "buffer": self.buffer.get_stats(),
             "timing": self.timing.get_stats(),
-            "store": self.store.get_stats(),
             "response_manager": self.response_manager.get_stats()
         }
-    
+
     async def shutdown(self) -> None:
         """Shutdown the pipeline gracefully."""
         # Stop all monitoring
         await self.timing.stop_all_monitoring()
-        
-        # Save conversation store
-        await self.store.save_immediate()
-        
+
+        # Save all conversation stores
+        from messaging.store import _store_cache
+        for (server_id, channel_id), store in _store_cache.items():
+            await store.save_immediate()
+            log.debug(f"Saved store for {server_id}/{channel_id}")
+
         log.debug("MessagePipeline shutdown complete")
 
 

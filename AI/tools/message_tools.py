@@ -59,11 +59,11 @@ async def get_message_info(
         from messaging.store import get_store
         from messaging.short_id_manager import get_short_id_manager
 
-        store = get_store()
+        store = get_store(server_id, channel_id)
         short_id_manager = get_short_id_manager()
-        
-        # Get chat from store
-        chat = store._data.get(server_id, {}).get(channel_id, {}).get(ai_name, {}).get("chats", {}).get(chat_id)
+
+        # Get chat from store (store is now scoped to channel)
+        chat = store._data.get(ai_name, {}).get("chats", {}).get(chat_id)
         
         if not chat:
             return {

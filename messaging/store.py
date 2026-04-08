@@ -209,42 +209,55 @@ class Chat:
 class ConversationStore:
     """
     Unified storage for conversation history.
-    
+
     This replaces conversation_history.json with a cleaner,
     more structured approach.
-    
+
     Structure:
-        server_id -> channel_id -> ai_name -> chats -> chat_id -> Chat
-    
+        ai_name -> chats -> chat_id -> Chat
+
     Example:
-        store = ConversationStore("data/conversations.json")
+        store = ConversationStore(server_id, channel_id)
         await store.load()
-        
+
         # Add messages
         store.add_user_message(server_id, channel_id, ai_name, "Hello!", "123")
         store.add_assistant_message(server_id, channel_id, ai_name, "Hi!", ["456"])
-        
+
         # Get history
         history = store.get_history(server_id, channel_id, ai_name)
-        
+
         # Save
         await store.save()
     """
-    
-    def __init__(self, file_path: str = "data/conversations.json"):
+
+    def __init__(self, server_id: str, channel_id: str, data_paths=None):
         """
         Initialize the conversation store.
-        
+
         Args:
-            file_path: Path to the conversations file
+            server_id: Discord server (guild) ID
+            channel_id: Discord channel ID
+            data_paths: DataPaths instance (creates new one if not provided)
         """
-        self.file_path = file_path
+        from utils.data_paths import DataPaths
+
+        self.server_id = server_id
+        self.channel_id = channel_id
+        self.data_paths = data_paths or DataPaths()
+        self.file_path = self.data_paths.get_conversations_file(server_id, channel_id)
         self._data: Dict[str, Dict[str, Dict[str, Dict[str, Any]]]] = {}
         self._lock = asyncio.Lock()
         self._save_task: Optional[asyncio.Task] = None
         self._debounce_delay = 1.0
+        self._loaded = False
         
-    
+
+    async def _ensure_loaded(self) -> None:
+        """Ensure data is loaded from disk."""
+        if not self._loaded:
+            await self.load()
+
     def _ensure_path(
         self,
         server_id: str,
@@ -252,18 +265,15 @@ class ConversationStore:
         ai_name: str
     ) -> Dict[str, Any]:
         """Ensure the path exists and return the AI data."""
-        if server_id not in self._data:
-            self._data[server_id] = {}
-        if channel_id not in self._data[server_id]:
-            self._data[server_id][channel_id] = {}
-        if ai_name not in self._data[server_id][channel_id]:
-            self._data[server_id][channel_id][ai_name] = {
+        # Since this store is scoped to a specific channel, we only need ai_name level
+        if ai_name not in self._data:
+            self._data[ai_name] = {
                 "active_chat": "default",
                 "chats": {}
             }
-        
-        return self._data[server_id][channel_id][ai_name]
-    
+
+        return self._data[ai_name]
+
     def _ensure_chat(
         self,
         server_id: str,
@@ -273,90 +283,91 @@ class ConversationStore:
     ) -> Chat:
         """Ensure the chat exists and return it."""
         ai_data = self._ensure_path(server_id, channel_id, ai_name)
-        
+
         if chat_id not in ai_data["chats"]:
             ai_data["chats"][chat_id] = Chat()
-        
+
         chat_data = ai_data["chats"][chat_id]
         if isinstance(chat_data, dict):
             # Convert dict to Chat object
             chat = Chat.from_dict(chat_data)
             ai_data["chats"][chat_id] = chat
             return chat
-        
+
         return chat_data
     
     async def load(self) -> None:
         """Load conversations from file."""
         if not os.path.exists(self.file_path):
+            self._loaded = True
             return
-        
+
         try:
             async with self._lock:
                 with open(self.file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-                
-                for server_id, server_data in data.items():
-                    for channel_id, channel_data in server_data.items():
-                        for ai_name, ai_data in channel_data.items():
-                            self._ensure_path(server_id, channel_id, ai_name)
-                            self._data[server_id][channel_id][ai_name] = {
-                                "active_chat": ai_data.get("active_chat", "default"),
-                                "chats": {
-                                    chat_id: Chat.from_dict(chat_data)
-                                    for chat_id, chat_data in ai_data.get("chats", {}).items()
-                                }
-                            }
-            
+
+                # Data structure is now: ai_name -> ai_data
+                for ai_name, ai_data in data.items():
+                    self._ensure_path(self.server_id, self.channel_id, ai_name)
+                    self._data[ai_name] = {
+                        "active_chat": ai_data.get("active_chat", "default"),
+                        "chats": {
+                            chat_id: Chat.from_dict(chat_data)
+                            for chat_id, chat_data in ai_data.get("chats", {}).items()
+                        }
+                    }
+
             self._restore_all_short_id_mappings()
-            
+            self._loaded = True
+
         except Exception as e:
             log.error("Error loading conversations: %s", e)
+            self._loaded = True  # Mark as loaded even on error to avoid retry loops
     
     def _restore_all_short_id_mappings(self) -> None:
         """
         Restore short ID mappings for all loaded conversations.
-        
+
         This rebuilds the mapping cache from conversation history,
         making the mapping file optional. Now supports BOTH user and bot messages.
-        
+
         NOTE: This is a synchronous method called during load().
         It directly accesses the manager's internal state for performance.
         """
         from messaging.short_id_manager import get_short_id_manager_sync
         manager = get_short_id_manager_sync()
-        
+
         restored_count = 0
-        
-        for server_id, server_data in self._data.items():
-            for channel_id, channel_data in server_data.items():
-                for ai_name, ai_data in channel_data.items():
-                    for chat in ai_data["chats"].values():
-                        for msg in chat.messages:
-                            # Restore mapping for ANY message with short_id and discord_id(s)
-                            if msg.short_id:
-                                mapping = manager._ensure_path(server_id, channel_id, ai_name)
-                                
-                                if msg.role == "user" and msg.discord_id:
-                                    # User message - has single discord_id
-                                    mapping["discord_to_short"][msg.discord_id] = msg.short_id
-                                    mapping["short_to_discord"][msg.short_id] = msg.discord_id
-                                    restored_count += 1
-                                    
-                                    # Update next_id if needed
-                                    if msg.short_id >= mapping["next_id"]:
-                                        mapping["next_id"] = msg.short_id + 1
-                                        
-                                elif msg.role == "assistant" and msg.discord_ids and len(msg.discord_ids) > 0:
-                                    # Bot message - has list of discord_ids (multi-part)
-                                    # Map the first discord_id to the short_id
-                                    first_discord_id = msg.discord_ids[0]
-                                    mapping["discord_to_short"][first_discord_id] = msg.short_id
-                                    mapping["short_to_discord"][msg.short_id] = first_discord_id
-                                    restored_count += 1
-                                    
-                                    if msg.short_id >= mapping["next_id"]:
-                                        mapping["next_id"] = msg.short_id + 1
+
+        # Data structure is now: ai_name -> ai_data
+        for ai_name, ai_data in self._data.items():
+            for chat in ai_data["chats"].values():
+                for msg in chat.messages:
+                    # Restore mapping for ANY message with short_id and discord_id(s)
+                    if msg.short_id:
+                        mapping = manager._ensure_path(self.server_id, self.channel_id, ai_name)
+
+                        if msg.role == "user" and msg.discord_id:
+                            # User message - has single discord_id
+                            mapping["discord_to_short"][msg.discord_id] = msg.short_id
+                            mapping["short_to_discord"][msg.short_id] = msg.discord_id
+                            restored_count += 1
+
+                            # Update next_id if needed
+                            if msg.short_id >= mapping["next_id"]:
+                                mapping["next_id"] = msg.short_id + 1
+
+                        elif msg.role == "assistant" and msg.discord_ids and len(msg.discord_ids) > 0:
+                            # Bot message - has list of discord_ids (multi-part)
+                            # Map the first discord_id to the short_id
+                            first_discord_id = msg.discord_ids[0]
+                            mapping["discord_to_short"][first_discord_id] = msg.short_id
+                            mapping["short_to_discord"][msg.short_id] = first_discord_id
+                            restored_count += 1
+
+                            if msg.short_id >= mapping["next_id"]:
+                                mapping["next_id"] = msg.short_id + 1
         
         if restored_count > 0:
             log.debug(f"Restored {restored_count} short ID mappings")
@@ -375,33 +386,30 @@ class ConversationStore:
     
     async def save_immediate(self) -> bool:
         """Save conversations to file immediately.
-        
+
         Returns:
             True if save successful, False otherwise
         """
         try:
             async with self._lock:
                 # Convert to serializable format
+                # Data structure is now: ai_name -> ai_data
                 data = {}
-                for server_id, server_data in self._data.items():
-                    data[server_id] = {}
-                    for channel_id, channel_data in server_data.items():
-                        data[server_id][channel_id] = {}
-                        for ai_name, ai_data in channel_data.items():
-                            data[server_id][channel_id][ai_name] = {
-                                "active_chat": ai_data["active_chat"],
-                                "chats": {
-                                    chat_id: chat.to_dict()
-                                    for chat_id, chat in ai_data["chats"].items()
-                                }
-                            }
-                
+                for ai_name, ai_data in self._data.items():
+                    data[ai_name] = {
+                        "active_chat": ai_data["active_chat"],
+                        "chats": {
+                            chat_id: chat.to_dict()
+                            for chat_id, chat in ai_data["chats"].items()
+                        }
+                    }
+
                 # Ensure directory exists
-                os.makedirs(os.path.dirname(self.file_path), exist_ok=True)
-                
+                self.data_paths.ensure_directory(self.file_path)
+
                 with open(self.file_path, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False)
-            
+
             return True
         except Exception as e:
             log.error("Error saving conversations: %s", e)
@@ -991,7 +999,7 @@ class ConversationStore:
         )
         return msg.content if msg else None
     
-    def list_chat_ids(
+    async def list_chat_ids(
         self,
         server_id: str,
         channel_id: str,
@@ -999,22 +1007,25 @@ class ConversationStore:
     ) -> List[str]:
         """
         List all chat IDs for a specific AI.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
-            
+
         Returns:
             List of chat IDs sorted by update time (most recent first)
         """
         try:
-            ai_data = self._data.get(server_id, {}).get(channel_id, {}).get(ai_name, {})
+            # Ensure data is loaded
+            await self._ensure_loaded()
+
+            ai_data = self._data.get(ai_name, {})
             chats = ai_data.get("chats", {})
-            
+
             if not chats:
                 return []
-            
+
             # Sort by updated_at timestamp (most recent first)
             chat_items = []
             for chat_id, chat in chats.items():
@@ -1025,15 +1036,15 @@ class ConversationStore:
                 else:
                     updated_at = 0
                 chat_items.append((chat_id, updated_at))
-            
+
             chat_items.sort(key=lambda x: x[1], reverse=True)
             return [chat_id for chat_id, _ in chat_items]
-            
+
         except Exception as e:
             log.error(f"Error listing chat IDs: {e}")
             return []
     
-    def get_chat_info(
+    async def get_chat_info(
         self,
         server_id: str,
         channel_id: str,
@@ -1042,13 +1053,13 @@ class ConversationStore:
     ) -> Dict[str, Any]:
         """
         Get detailed information about a specific chat.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             chat_id: Chat ID
-            
+
         Returns:
             Dictionary with chat information:
             - chat_id: Chat ID
@@ -1059,15 +1070,18 @@ class ConversationStore:
             - last_messages: Last 3 messages (role and preview)
         """
         try:
+            # Ensure data is loaded
+            await self._ensure_loaded()
+
             chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
-            
+
             # Get greeting (first assistant message)
             greeting = None
             for msg in chat.messages:
                 if msg.role == "assistant":
                     greeting = msg.content[:100] + "..." if len(msg.content) > 100 else msg.content
                     break
-            
+
             # Get last 3 messages
             last_messages = []
             for msg in chat.messages[-3:]:
@@ -1077,7 +1091,7 @@ class ConversationStore:
                     "preview": preview,
                     "timestamp": msg.timestamp
                 })
-            
+
             return {
                 "chat_id": chat_id,
                 "message_count": chat.metadata.message_count,
@@ -1447,88 +1461,93 @@ class ConversationStore:
     
     async def delete_server_conversations(self, server_id: str) -> bool:
         """
-        Delete all conversation history for a server.
-        
+        Delete all conversation history for this store's channel.
+
+        Note: Since each store is scoped to a specific channel,
+        this deletes all AI conversations in this channel.
+
         Args:
-            server_id: Discord server ID
-            
+            server_id: Discord server ID (for validation)
+
         Returns:
             bool: True if deleted successfully, False otherwise
         """
         async with self._lock:
             try:
-                if server_id in self._data:
-                    # Count data before deletion for logging
-                    channel_count = len(self._data[server_id])
-                    ai_count = sum(len(channel_data) for channel_data in self._data[server_id].values())
-                    
-                    # Delete server data
-                    del self._data[server_id]
-                    
-                    # Schedule save
-                    self.schedule_save()
-                    
-                    log.info(
-                        f"Deleted conversation history for server {server_id}: "
-                        f"{channel_count} channel(s), {ai_count} AI(s)"
-                    )
-                    return True
-                else:
-                    log.debug("No conversation history found for server")
-                    return True  # Not an error if data doesn't exist
-                    
+                # Count data before deletion for logging
+                ai_count = len(self._data)
+                total_chats = sum(len(ai_data.get("chats", {})) for ai_data in self._data.values())
+
+                # Clear all data
+                self._data.clear()
+
+                # Schedule save
+                self.schedule_save()
+
+                log.info(
+                    f"Deleted conversation history for channel {self.channel_id}: "
+                    f"{ai_count} AI(s), {total_chats} chat(s)"
+                )
+                return True
+
             except Exception as e:
                 log.error(f"Error deleting conversations: {e}")
                 return False
-    
+
     async def delete_channel_conversations(self, server_id: str, channel_id: str) -> bool:
         """
-        Delete all conversation history for a specific channel.
-        
+        Delete all conversation history for this channel.
+
         Args:
-            server_id: Discord server ID
-            channel_id: Discord channel ID
-            
+            server_id: Discord server ID (for validation)
+            channel_id: Discord channel ID (for validation)
+
         Returns:
             bool: True if deleted successfully, False otherwise
         """
+        # Validate that this is the correct store
+        if self.server_id != server_id or self.channel_id != channel_id:
+            log.error(f"Store mismatch: expected {self.server_id}/{self.channel_id}, got {server_id}/{channel_id}")
+            return False
+
         async with self._lock:
             try:
-                if server_id in self._data and channel_id in self._data[server_id]:
-                    # Count data before deletion for logging
-                    ai_count = len(self._data[server_id][channel_id])
-                    
-                    # Delete channel data
-                    del self._data[server_id][channel_id]
-                    
-                    # Clean up empty server entries
-                    if not self._data[server_id]:
-                        del self._data[server_id]
-                    
-                    # Schedule save
-                    self.schedule_save()
-                    
-                    log.info(
-                        f"Deleted conversation history for channel {channel_id} in server {server_id}: "
-                        f"{ai_count} AI(s)"
-                    )
-                    return True
-                else:
-                    log.debug(f"No conversation history found for channel {channel_id}")
-                    return True  # Not an error if data doesn't exist
-                    
+                # Count data before deletion for logging
+                ai_count = len(self._data)
+
+                # Clear all data
+                self._data.clear()
+
+                # Schedule save
+                self.schedule_save()
+
+                log.info(f"Deleted conversation history for channel: {ai_count} AI(s)")
+                return True
+
             except Exception as e:
-                log.error(f"Error deleting conversations for channel {channel_id}: {e}")
+                log.error(f"Error deleting conversations: {e}")
                 return False
 
 
-# Global store instance
-_global_store: Optional[ConversationStore] = None
+# Global store instances per channel
+_store_cache: Dict[Tuple[str, str], ConversationStore] = {}
 
 
-def get_store(file_path: str = "data/conversations.json") -> ConversationStore:
-    """Get the global conversation store instance."""
-    global _global_store
-    if _global_store is None:
-        _global_store = ConversationStore(file_path)
-    return _global_store
+def get_store(server_id: str, channel_id: str) -> ConversationStore:
+    """
+    Get the conversation store instance for a specific channel.
+
+    Args:
+        server_id: Discord server (guild) ID
+        channel_id: Discord channel ID
+
+    Returns:
+        ConversationStore instance for this channel
+    """
+    global _store_cache
+    key = (server_id, channel_id)
+
+    if key not in _store_cache:
+        _store_cache[key] = ConversationStore(server_id, channel_id)
+
+    return _store_cache[key]

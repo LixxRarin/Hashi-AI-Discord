@@ -686,8 +686,8 @@ class MessageActionsView(ui.View):
             # Remove only the last assistant message from history (preserve user message and all IDs)
             from messaging.store import get_store
             from AI.chat_service import get_service
-            
-            store = get_store()
+
+            store = get_store(self.server_id, self.channel_id)
             chat_service = get_service()
             current_chat_id = self.session.get("chat_id", "default")
             

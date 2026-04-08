@@ -21,16 +21,14 @@ from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
 
-MEMORY_DIR = Path("data/memory")
-
 
 def _count_tokens(text: str) -> int:
     """
     Count tokens using tiktoken.
-    
+
     Args:
         text: Text to count tokens for
-        
+
     Returns:
         int: Number of tokens
     """
@@ -47,89 +45,56 @@ def _count_tokens(text: str) -> int:
 def _get_memory_path(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> Path:
     """
     Get memory file path for server, channel, AI and chat.
-    
+
     Args:
         server_id: Discord server ID
         channel_id: Discord channel ID
         ai_name: AI name
         chat_id: Chat ID
-        
+
     Returns:
         Path: Path to memory file
     """
-    MEMORY_DIR.mkdir(parents=True, exist_ok=True)
-    
-    # Sanitize names to prevent path traversal
-    safe_server_id = "".join(c for c in server_id if c.isalnum() or c in "_-")
-    safe_channel_id = "".join(c for c in channel_id if c.isalnum() or c in "_-")
-    safe_ai_name = "".join(c for c in ai_name if c.isalnum() or c in "_-")
-    safe_chat_id = "".join(c for c in chat_id if c.isalnum() or c in "_-")
-    
-    return MEMORY_DIR / f"{safe_server_id}_{safe_channel_id}_{safe_ai_name}_{safe_chat_id}.json"
+    from utils.data_paths import DataPaths
+
+    data_paths = DataPaths()
+    memory_file = data_paths.get_memory_file(server_id, channel_id, ai_name, chat_id)
+
+    # Ensure directory exists
+    data_paths.ensure_directory(memory_file)
+
+    return Path(memory_file)
 
 
 def _load_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> List[Dict[str, Any]]:
     """
-    Load memory entries from file with automatic migration from old format.
-    
+    Load memory entries from file.
+
     Args:
         server_id: Discord server ID
         channel_id: Discord channel ID
         ai_name: AI name
         chat_id: Chat ID
-        
+
     Returns:
         List of memory entries
     """
-    # Try new format first
     path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
-    
+
     if not path.exists():
-        # Fallback to old format for migration
-        safe_ai_name = "".join(c for c in ai_name if c.isalnum() or c in "_-")
-        safe_chat_id = "".join(c for c in chat_id if c.isalnum() or c in "_-")
-        old_path = MEMORY_DIR / f"{safe_ai_name}_{safe_chat_id}.json"
-        
-        if old_path.exists():
-            log.info(f"Migrating old memory file: {old_path.name} -> {path.name}")
-            try:
-                with open(old_path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                
-                # Validate structure
-                if not isinstance(data, list):
-                    log.error(f"Invalid memory file structure in old format for chat {chat_id}")
-                    return []
-                
-                # Save to new format (migration)
-                _save_memory(server_id, channel_id, ai_name, chat_id, data)
-                log.info(f"Successfully migrated memory file to new format")
-                
-                # Keep old file as backup (don't delete automatically)
-                return data
-                
-            except json.JSONDecodeError as e:
-                log.error(f"Failed to parse old memory file for chat {chat_id}: {e}")
-                return []
-            except Exception as e:
-                log.error(f"Failed to migrate old memory file for chat {chat_id}: {e}")
-                return []
-        
-        # No file exists in either format
         return []
-    
-    # Load from new format
+
     try:
         with open(path, 'r', encoding='utf-8') as f:
             data = json.load(f)
-            
+
         # Validate structure
         if not isinstance(data, list):
             log.error(f"Invalid memory file structure for channel {channel_id}/chat {chat_id}")
             return []
-        
+
         return data
-        
+
     except json.JSONDecodeError as e:
         log.error(f"Failed to parse memory file for channel {channel_id}/chat {chat_id}: {e}")
         return []

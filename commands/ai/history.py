@@ -284,8 +284,8 @@ class HistoryManager(commands.Cog):
             (discord_deleted, history_removed, failed_ids)
         """
         service = get_service()
-        store = get_store()
-        
+        store = get_store(server_id, channel_id)
+
         # 1. Get full history from store (single source of truth)
         full_history = await store.get_full_history(server_id, channel_id, ai_name, chat_id)
         
@@ -390,8 +390,8 @@ class HistoryManager(commands.Cog):
             (discord_deleted, history_removed, failed_ids)
         """
         service = get_service()
-        store = get_store()
-        
+        store = get_store(server_id, channel_id)
+
         # 1. Get full history from store
         full_history = await store.get_full_history(server_id, channel_id, ai_name, chat_id)
         
