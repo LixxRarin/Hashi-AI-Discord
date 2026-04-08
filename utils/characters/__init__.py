@@ -1,0 +1,1 @@
+"""Character card utilities module"""
