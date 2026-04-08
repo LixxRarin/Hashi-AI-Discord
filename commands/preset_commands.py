@@ -100,7 +100,7 @@ class PresetCommands(commands.Cog):
                 f"📦 **Name:** `{preset_name}`\n"
                 f"📝 **Description:** {description if description else 'None'}\n"
                 f"👤 **Author:** {author}\n"
-                f"🤖 **Source AI:** {ai_name}\n\n"
+                f"🤖 **Source AI:** {actual_ai_name}\n\n"
                 f"💡 Use `/preset_apply {preset_name} <ai_name>` to apply this preset to another AI.",
                 ephemeral=True
             )
@@ -126,29 +126,32 @@ class PresetCommands(commands.Cog):
     ):
         """Apply a saved preset to an AI."""
         server_id = str(interaction.guild.id)
-        
+
+        # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
+
         # Get AI session data
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
         
         if not found_ai_data:
             await interaction.response.send_message(
-                f"❌ AI '{ai_name}' not found in this server.",
+                f"❌ AI '{actual_ai_name}' not found in this server.",
                 ephemeral=True
             )
             return
-        
+
         found_channel_id, session = found_ai_data
-        
+
         if session is None:
             await interaction.response.send_message(
-                f"❌ AI '{ai_name}' session data is invalid or corrupted.",
+                f"❌ AI '{actual_ai_name}' session data is invalid or corrupted.",
                 ephemeral=True
             )
             return
-        
+
         # Load the preset
         preset_config = self.config_manager.load_preset(preset_name)
-        
+
         if preset_config is None:
             await interaction.response.send_message(
                 f"❌ Preset '{preset_name}' not found.\n\n"
@@ -156,17 +159,28 @@ class PresetCommands(commands.Cog):
                 ephemeral=True
             )
             return
-        
+
         # Apply the preset to the AI
         channel_data = func.get_session_data(server_id, found_channel_id)
-        channel_data[ai_name]["config"] = preset_config
-        
-        await func.update_session_data(server_id, found_channel_id, channel_data)
-        
+
+        if not channel_data or actual_ai_name not in channel_data:
+            await interaction.response.send_message(
+                f"❌ Failed to load AI data. Please try again.",
+                ephemeral=True
+            )
+            return
+
+        # Update the config (make a copy to ensure proper update)
+        import copy
+        updated_channel_data = copy.deepcopy(channel_data)
+        updated_channel_data[actual_ai_name]["config"] = preset_config
+
+        await func.update_session_data(server_id, found_channel_id, updated_channel_data)
+
         await interaction.response.send_message(
             f"✅ **Preset applied successfully!**\n\n"
             f"📦 **Preset:** `{preset_name}`\n"
-            f"🤖 **Applied to:** {ai_name}\n\n"
+            f"🤖 **Applied to:** {actual_ai_name}\n\n"
             f"💡 The AI's configuration has been updated with the preset settings.",
             ephemeral=True
         )

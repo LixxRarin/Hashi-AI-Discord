@@ -29,15 +29,8 @@ class GeminiClient(BaseAIClient):
         return genai
 
     def count_tokens(self, text: str, model: str) -> int:
-        """Count the number of tokens in a text string using Gemini's token counter."""
-        try:
-            model_instance = genai.GenerativeModel(model)
-            result = model_instance.count_tokens(text)
-            return result.total_tokens
-        except Exception as e:
-            func.log.warning(f"Error counting tokens with Gemini, using fallback: {e}")
-            # Fallback: rough estimate (1 token ≈ 4 characters)
-            return len(text) // 4
+        """Count the number of tokens in a text string using tiktoken."""
+        return self.count_tokens_with_tiktoken(text, model)
 
     def prepare_multimodal_content(
         self,
@@ -124,14 +117,15 @@ class GeminiClient(BaseAIClient):
                     tools=gemini_tools
                 )
 
-            # Generate response
+            # Generate response (wrap in asyncio.to_thread to avoid blocking)
+            import asyncio
             if len(gemini_messages) == 1 and isinstance(gemini_messages[0], list):
                 # Single message with multimodal content
-                response = model.generate_content(gemini_messages[0])
+                response = await asyncio.to_thread(model.generate_content, gemini_messages[0])
             else:
                 # Chat conversation
                 chat = model.start_chat(history=gemini_messages[:-1] if len(gemini_messages) > 1 else [])
-                response = chat.send_message(gemini_messages[-1])
+                response = await asyncio.to_thread(chat.send_message, gemini_messages[-1])
 
             # Handle tool calls
             if tools and response.candidates[0].content.parts:
@@ -195,12 +189,13 @@ class GeminiClient(BaseAIClient):
             # Convert messages
             gemini_messages = self._convert_messages_to_gemini(messages_copy)
 
-            # Generate response
+            # Generate response (wrap in asyncio.to_thread to avoid blocking)
+            import asyncio
             if len(gemini_messages) == 1:
-                response = model.generate_content(gemini_messages[0])
+                response = await asyncio.to_thread(model.generate_content, gemini_messages[0])
             else:
                 chat = model.start_chat(history=gemini_messages[:-1])
-                response = chat.send_message(gemini_messages[-1])
+                response = await asyncio.to_thread(chat.send_message, gemini_messages[-1])
 
             content = response.text
             if not content:
@@ -307,8 +302,9 @@ class GeminiClient(BaseAIClient):
                 })
 
         if function_responses:
-            # Send function responses back to model
+            # Send function responses back to model (wrap in asyncio.to_thread to avoid blocking)
             from google.generativeai.types import content_types
+            import asyncio
 
             response_parts = [
                 content_types.to_part({
@@ -321,7 +317,7 @@ class GeminiClient(BaseAIClient):
             ]
 
             chat = model.start_chat(history=gemini_messages[:-1] if len(gemini_messages) > 1 else [])
-            final_response = chat.send_message(response_parts)
+            final_response = await asyncio.to_thread(chat.send_message, response_parts)
 
             return final_response.text if final_response.text else None
 
@@ -386,6 +382,7 @@ class GeminiClient(BaseAIClient):
         """Validates a Gemini API token by making a simple API call with 1-hour caching."""
         import hashlib
         import time
+        import asyncio
 
         token_hash = hashlib.sha256(token.encode()).hexdigest()[:16]
         cache_key = (self.provider_name, token_hash, base_url or "")
@@ -397,8 +394,8 @@ class GeminiClient(BaseAIClient):
 
         try:
             genai.configure(api_key=token)
-            # Try to list models as a validation check
-            list(genai.list_models())
+            # Try to list models as a validation check (wrap in asyncio.to_thread to avoid blocking)
+            await asyncio.to_thread(lambda: list(genai.list_models()))
             BaseAIClient._token_validation_cache[cache_key] = (True, time.time())
             return True
         except Exception as e:

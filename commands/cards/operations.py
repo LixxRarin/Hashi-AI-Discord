@@ -82,14 +82,14 @@ class AIOperations(commands.Cog):
             return
 
         source_channel_id, source_session = found_ai_data
-        
+
         # Determine new AI name
         if not new_ai_name:
-            new_ai_name = ai_name
-        
+            new_ai_name = actual_ai_name
+
         # Check if AI already exists in target channel
         target_channel_data = func.get_session_data(server_id, target_channel_id) or {}
-        
+
         # Generate unique name if needed
         if new_ai_name in target_channel_data:
             counter = 2
@@ -98,7 +98,7 @@ class AIOperations(commands.Cog):
                 counter += 1
             new_ai_name = f"{base_name}_{counter}"
             await interaction.followup.send(
-                f"⚠️ AI name '{ai_name}' already exists in target channel. Using '{new_ai_name}' instead.",
+                f"⚠️ AI name '{actual_ai_name}' already exists in target channel. Using '{new_ai_name}' instead.",
                 ephemeral=True
             )
         
@@ -161,7 +161,7 @@ class AIOperations(commands.Cog):
                 webhook_obj = await target_channel.create_webhook(
                     name=display_name,
                     avatar=avatar_bytes if avatar_bytes else None,
-                    reason=f"Copied from AI '{ai_name}'"
+                    reason=f"Copied from AI '{actual_ai_name}'"
                 )
                 new_session["webhook_url"] = webhook_obj.url
                 func.log.info("Created webhook for copied AI")
@@ -193,7 +193,7 @@ class AIOperations(commands.Cog):
         new_chat_id = new_session.get("chat_id", "default")
         
         if copy_history:
-            source_history = await service.get_ai_history(server_id, source_channel_id, ai_name, source_chat_id)
+            source_history = await service.get_ai_history(server_id, source_channel_id, actual_ai_name, source_chat_id)
             if source_history:
                 # Copy history to new AI
                 new_history = copy.deepcopy(source_history)
@@ -231,9 +231,9 @@ class AIOperations(commands.Cog):
         # Build success message
         source_channel_obj = interaction.guild.get_channel(int(source_channel_id))
         source_channel_name = source_channel_obj.name if source_channel_obj else f"Channel {source_channel_id}"
-        
+
         success_msg = f"✅ **AI copied successfully!**\n\n"
-        success_msg += f"**Source AI:** {ai_name} (#{source_channel_name})\n"
+        success_msg += f"**Source AI:** {actual_ai_name} (#{source_channel_name})\n"
         success_msg += f"**New AI:** {new_ai_name}\n"
         success_msg += f"**Target Channel:** {target_channel.mention}\n"
         success_msg += f"**Mode:** {target_mode.capitalize()}\n"
