@@ -9,7 +9,7 @@
 
 </div>
 
-> This is an improved fork of the original [Hashi Character.AI Discord Bot](https://github.com/LixxRarin/Hashi-CharacterAI-Discord), completely rewritten to support multiple AI providers (OpenAI, DeepSeek, Claude, Ollama, Custom Endpoint), Character Card V3, and advanced conversation management features!
+> This is an improved fork of the original [Hashi Character.AI Discord Bot](https://github.com/LixxRarin/Hashi-CharacterAI-Discord), completely rewritten to support multiple AI providers (OpenAI, DeepSeek, Claude, Google Gemini, Ollama, Custom Endpoint), Character Card V3, and advanced conversation management features!
 
 Project Hashi allows AI personas to interact with users in your Discord server using various AI providers. Perfect for bringing AI personalities to your community with full control over their behavior and appearance.
 
@@ -42,7 +42,7 @@ Project Hashi allows AI personas to interact with users in your Discord server u
 ## 🌟 Features
 
 ### Core Features
-- **Multi-Provider Support** - Use OpenAI, DeepSeek, or any compatible API
+- **Multi-Provider Support** - Use OpenAI, DeepSeek, Claude, Google Gemini, or any compatible API
 - **Character Card V3** - Full support for Character Card V3 specification with lorebooks and assets
 - **Intelligent Response Filter** - LLM-based system that decides when the AI should respond based on conversation context
 - **Reply System** - AI can reply to specific Discord messages using `<REPLY:message_id>` syntax

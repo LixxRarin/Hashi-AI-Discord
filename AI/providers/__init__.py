@@ -10,10 +10,12 @@ from AI.providers.openai import OpenAIClient
 from AI.providers.claude import ClaudeClient
 from AI.providers.deepseek import DeepSeekClient
 from AI.providers.ollama import OllamaClient
+from AI.providers.gemini import GeminiClient
 
 __all__ = [
     'OpenAIClient',
     'ClaudeClient',
     'DeepSeekClient',
     'OllamaClient',
+    'GeminiClient',
 ]
