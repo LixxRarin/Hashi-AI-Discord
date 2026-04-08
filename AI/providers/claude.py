@@ -207,11 +207,17 @@ class ClaudeClient(BaseAIClient):
             
             if system_message:
                 api_params["system"] = system_message
-            
+
+            # Merge custom_extra_body FIRST (before thinking)
+            # This ensures thinking parameters take precedence and won't be overwritten
+            custom_extra = llm_params.get("custom_extra_body")
+            if custom_extra:
+                api_params.update(custom_extra)
+
             # Add thinking if enabled (without beta header - may be stable now)
             think_switch = llm_params.get("think_switch", False)
             thinking_enabled = False
-            
+
             if think_switch:
                 try:
                     think_depth = llm_params.get("think_depth", 3)
@@ -219,29 +225,24 @@ class ClaudeClient(BaseAIClient):
                         think_depth * 2000,  # 2000 tokens per level
                         api_params["max_tokens"]  # Don't exceed max_tokens
                     )
-                    
+
                     # Configure thinking - API returns thinking content when available
                     # The save_thinking_in_history setting controls response processing, not API behavior
                     api_params["thinking"] = {
                         "type": "enabled",
                         "budget_tokens": budget_tokens
                     }
-                    
+
                     thinking_enabled = True
-                    
+
                     # Remove temperature when thinking is enabled (may not be compatible)
                     if "temperature" in api_params:
                         del api_params["temperature"]
-                    
+
                     func.log.debug(f"Extended thinking enabled with budget_tokens={budget_tokens}")
                 except Exception as e:
                     func.log.warning(f"Failed to configure thinking parameters: {e}")
                     thinking_enabled = False
-            
-            # Merge custom_extra_body if provided
-            custom_extra = llm_params.get("custom_extra_body")
-            if custom_extra:
-                api_params.update(custom_extra)
             
             # Add tools if provided (convert to Anthropic format)
             if tools:
@@ -453,28 +454,15 @@ class ClaudeClient(BaseAIClient):
                 
                 # Execute all tool calls
                 tool_results = await executor.execute_tool_calls(tool_call_objects, tool_context or {})
-                
-                # Build assistant message with all content blocks (including thinking)
-                # Must preserve thinking blocks for reasoning continuity
+
+                # Build assistant message with content blocks (exclude thinking blocks)
+                # Note: Thinking blocks may not be accepted by API when sent back in message history
                 assistant_content = []
                 for block in response.content:
                     if block.type == "text":
                         assistant_content.append({
                             "type": "text",
                             "text": block.text
-                        })
-                    elif block.type == "thinking":
-                        # Preserve thinking blocks with signature for verification
-                        assistant_content.append({
-                            "type": "thinking",
-                            "thinking": block.thinking,
-                            "signature": block.signature
-                        })
-                    elif block.type == "redacted_thinking":
-                        # Preserve redacted thinking blocks (encrypted content)
-                        assistant_content.append({
-                            "type": "redacted_thinking",
-                            "data": block.data
                         })
                     elif block.type == "tool_use":
                         assistant_content.append({
@@ -483,6 +471,8 @@ class ClaudeClient(BaseAIClient):
                             "name": block.name,
                             "input": block.input
                         })
+                    # Skip thinking and redacted_thinking blocks
+                    # (API may reject them in message history, causing "Improperly formed request" errors)
                 
                 current_messages.append({
                     "role": "assistant",
@@ -547,10 +537,17 @@ class ClaudeClient(BaseAIClient):
                 })
                 
                 func.log.debug(f"Prepared {len(current_messages)} messages (including tool results from round {round_num + 1})")
-                
+
                 # Make next API call with tool results
                 api_params_next = api_params.copy()
                 api_params_next["messages"] = current_messages
+
+                # Remove thinking parameter for subsequent tool calls
+                # (thinking blocks are already in message history, re-sending the parameter may cause API errors)
+                if "thinking" in api_params_next:
+                    del api_params_next["thinking"]
+                    func.log.debug("Removed thinking parameter from subsequent tool call request")
+
                 # Keep tools available for potential additional calls
                 anthropic_tools = self._convert_tools_to_anthropic_format(tools)
                 api_params_next["tools"] = anthropic_tools

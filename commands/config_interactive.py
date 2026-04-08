@@ -50,36 +50,39 @@ class ConfigInteractiveCommands(commands.Cog):
     ):
         """
         Interactive configuration command.
-        
+
         Opens a UI for configuring AI settings organized by category.
         """
         server_id = str(interaction.guild.id)
-        
+
+        # Parse AI identifier (autocomplete returns "ai_name|||channel_id")
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
+
         # Find AI
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+
         if not found_ai_data:
             await interaction.response.send_message(
-                f"❌ AI '{ai_name}' not found in this server.",
+                f"❌ AI '{actual_ai_name}' not found in this server.",
                 ephemeral=True
             )
             return
-        
+
         found_channel_id, session = found_ai_data
-        
+
         if session is None:
             await interaction.response.send_message(
-                f"❌ AI '{ai_name}' session data is invalid or corrupted.",
+                f"❌ AI '{actual_ai_name}' session data is invalid or corrupted.",
                 ephemeral=True
             )
             return
-        
+
         # Create initial embed using standardized helper
-        embed = create_category_selection_embed(ai_name)
-        
+        embed = create_category_selection_embed(actual_ai_name)
+
         # Create view
         view = ConfigCategorySelectView(
-            ai_name=ai_name,
+            ai_name=actual_ai_name,
             server_id=server_id,
             channel_id=found_channel_id,
             session=session

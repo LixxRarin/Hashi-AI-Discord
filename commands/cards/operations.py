@@ -65,19 +65,22 @@ class AIOperations(commands.Cog):
     ):
         """Copy an AI to another channel with various options."""
         await interaction.response.defer(ephemeral=True)
-        
+
         server_id = str(interaction.guild.id)
         target_channel_id = str(target_channel.id)
-        
+
+        # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
+
         # Get source AI
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
         if not found_ai_data:
             await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.",
+                f"❌ AI '{actual_ai_name}' not found in this server.",
                 ephemeral=True
             )
             return
-        
+
         source_channel_id, source_session = found_ai_data
         
         # Determine new AI name

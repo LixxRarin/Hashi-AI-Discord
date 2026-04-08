@@ -52,32 +52,35 @@ class PresetCommands(commands.Cog):
     ):
         """Save an AI's current configuration as a preset."""
         server_id = str(interaction.guild.id)
-        
+
+        # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
+
         # Get AI session data
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        
+        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+
         if not found_ai_data:
             await interaction.response.send_message(
-                f"❌ AI '{ai_name}' not found in this server.",
+                f"❌ AI '{actual_ai_name}' not found in this server.",
                 ephemeral=True
             )
             return
-        
+
         found_channel_id, session = found_ai_data
-        
+
         if session is None:
             await interaction.response.send_message(
-                f"❌ AI '{ai_name}' session data is invalid or corrupted.",
+                f"❌ AI '{actual_ai_name}' session data is invalid or corrupted.",
                 ephemeral=True
             )
             return
-        
+
         # Get the config from the session
         config = session.get("config", {})
-        
+
         if not config:
             await interaction.response.send_message(
-                f"❌ AI '{ai_name}' has no configuration to save.",
+                f"❌ AI '{actual_ai_name}' has no configuration to save.",
                 ephemeral=True
             )
             return

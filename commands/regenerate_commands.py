@@ -40,10 +40,10 @@ class RegenerateCommands(commands.Cog):
     ):
         """Regenerate the last AI response."""
         await interaction.response.defer(ephemeral=True)
-        
+
         server_id = str(interaction.guild.id)
         channel_id = str(interaction.channel.id)
-        
+
         # Try to detect AI name if not provided
         if not ai_name:
             channel_data = func.get_session_data(server_id, channel_id)
@@ -63,7 +63,10 @@ class RegenerateCommands(commands.Cog):
                     ephemeral=True
                 )
                 return
-        
+        else:
+            # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+            ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
+
         # Verify AI exists
         found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
         if not found_ai_data:
