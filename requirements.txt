@@ -16,3 +16,4 @@ discord-rpc
 docker>=7.0.0
 PyPDF2
 python-docx
+google-generativeai
