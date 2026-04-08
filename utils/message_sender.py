@@ -608,7 +608,7 @@ class MessageSender:
             button_config = session.get("config", {}).get("message_action_buttons", {})
             if button_config.get("enabled", False):
                 try:
-                    from utils.message_actions import MessageActionsView
+                    from utils.discord.message_actions import MessageActionsView
                     
                     view = MessageActionsView(
                         bot=bot,
@@ -822,7 +822,7 @@ class MessageSender:
         Returns:
             Clean text without special syntax tags
         """
-        from utils.text_processor import remove_reply_tags
+        from utils.text.processor import remove_reply_tags
         
         # Remove reply tags (can't change reply reference when editing)
         clean_text = remove_reply_tags(text)

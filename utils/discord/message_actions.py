@@ -220,7 +220,7 @@ class EditMessageModal(ui.Modal):
             chat_service = get_service()
             
             current_chat_id = self.session.get("chat_id", "default")
-            history = chat_service.get_ai_history(
+            history = await chat_service.get_ai_history(
                 self.server_id,
                 self.channel_id,
                 self.ai_name,
@@ -942,7 +942,7 @@ class MessageActionsView(ui.View):
             chat_service = get_service()
             
             current_chat_id = self.session.get("chat_id", "default")
-            history = chat_service.get_ai_history(
+            history = await chat_service.get_ai_history(
                 self.server_id,
                 self.channel_id,
                 self.ai_name,

@@ -268,10 +268,10 @@ class MessagePipeline:
         session_with_context["server_id"] = server_id
         session_with_context["channel_id"] = channel_id
         session_with_context["ai_name"] = ai_name
-        
-        if await self.buffer.is_processing(server_id, channel_id, ai_name):
-            return None
-        
+
+        # Processing flag is now set in timing.py BEFORE calling this callback
+        # No need to check here - it would block legitimate responses
+
         pending = await self.buffer.get_pending(server_id, channel_id, ai_name)
         
         if not pending:

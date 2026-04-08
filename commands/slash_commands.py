@@ -10,54 +10,37 @@ from utils.pagination import PaginatedView
 
 # Import AI module to trigger provider registration
 import AI
-from AI.provider_registry import get_registry
+from AI.core.registry import get_registry
+
+
+# Module-level autocomplete functions (must be defined before class)
+async def ai_name_all_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for all AI names."""
+    return await AutocompleteHelpers.ai_name_all(interaction, current)
+
+
+async def card_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for card names."""
+    return await AutocompleteHelpers.card_name(interaction, current)
+
+
+async def connection_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for API connection names."""
+    return await AutocompleteHelpers.connection_name(interaction, current)
 
 
 class SlashCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    
-    async def ai_name_all_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for all AI names."""
-        return await AutocompleteHelpers.ai_name_all(interaction, current)
-    
-    async def card_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for card names."""
-        return await AutocompleteHelpers.card_name(interaction, current)
-    
-    async def connection_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete function for API connection names."""
-        try:
-            server_id = str(interaction.guild.id)
-            connections = func.list_api_connections(server_id)
-            
-            if not connections:
-                return []
-            
-            choices = []
-            for conn_name, conn_data in connections.items():
-                if current.lower() in conn_name.lower():
-                    provider = conn_data.get("provider", "unknown").upper()
-                    model = conn_data.get("model", "unknown")
-                    display_name = f"{conn_name} [{provider}] ({model})"
-                    choices.append(app_commands.Choice(name=display_name[:100], value=conn_name))
-            
-            return choices[:25]
-        except Exception as e:
-            func.log.error(f"Error in connection_name_autocomplete: {e}")
-            return []
 
     @app_commands.command(name="character_info", description="Show detailed Character Card V3 information.")
     @app_commands.describe(

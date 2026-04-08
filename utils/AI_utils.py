@@ -7,9 +7,7 @@ import aiohttp
 import discord
 
 from utils.http_client import create_http_session
-import AI.openai_client as openai_client
-import AI.deepseek_client as deepseek_client
-from AI.chat_service import get_service
+from AI.services.chat_service import get_service
 from AI.response_queue import get_queue
 import utils.func as func
 

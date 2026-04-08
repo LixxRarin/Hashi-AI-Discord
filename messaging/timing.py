@@ -348,14 +348,24 @@ class TimingController:
                     )
                     
                     if should_respond:
+                        # SET PROCESSING FLAG IMMEDIATELY to prevent race condition
+                        # This must happen BEFORE the callback to close the race window
+                        await buffer.set_processing(server_id, channel_id, ai_name, True)
+
                         # Call response callback with try/finally to ensure cleanup
                         try:
                             # Call response callback (makes API call)
                             await response_callback()
+                        except Exception as e:
+                            log.error(f"Error in response callback: {e}")
+                            # Reset processing flag on error so AI can retry
+                            await buffer.set_processing(server_id, channel_id, ai_name, False)
+                            raise  # Re-raise to maintain error handling
                         finally:
                             # Mark that we just responded (starts cooldown to prevent spam)
                             # This is in finally to ensure it runs even if callback fails
                             await self.mark_response_sent(server_id, channel_id, ai_name)
+                            # Note: processing flag is reset in pipeline.py finally block
                         
                         # Check if there are still messages in buffer
                         remaining_count = await buffer.get_count(server_id, channel_id, ai_name)

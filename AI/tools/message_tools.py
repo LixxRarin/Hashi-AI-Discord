@@ -62,6 +62,9 @@ async def get_message_info(
         store = get_store(server_id, channel_id)
         short_id_manager = get_short_id_manager()
 
+        # Ensure store data is loaded from disk
+        await store._ensure_loaded()
+
         # Get chat from store (store is now scoped to channel)
         chat = store._data.get(ai_name, {}).get("chats", {}).get(chat_id)
         
@@ -373,11 +376,11 @@ async def edit_own_message(
                 }
             
             # Update conversation history
-            from AI.chat_service import get_service
+            from AI.services.chat_service import get_service
             chat_service = get_service()
             
             current_chat_id = session.get("chat_id", "default")
-            history = chat_service.get_ai_history(
+            history = await chat_service.get_ai_history(
                 server_id,
                 channel_id,
                 ai_name,
@@ -607,7 +610,7 @@ async def delete_message(
                     response_manager.clear(server_id, channel_id, ai_name)
                 
                 # Update conversation history
-                from AI.chat_service import get_service
+                from AI.services.chat_service import get_service
                 chat_service = get_service()
                 
                 current_chat_id = session.get("chat_id", "default")

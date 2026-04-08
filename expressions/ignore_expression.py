@@ -204,7 +204,7 @@ Example: "<IGNORE> Sorry" will not send anything and will not be saved."""
             return False
         
         # Import here to avoid circular dependency
-        from utils.text_processor import remove_thinking_tags
+        from utils.text.processor import remove_thinking_tags
         
         # Strip thinking tags first (they don't count as "content")
         text_without_thinking = remove_thinking_tags(text)

@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 import utils.func as func
-from utils.ai_config_manager import get_ai_config_manager
+from utils.config.ai_manager import get_ai_config_manager
 
 
 class BackupCommands(commands.Cog):

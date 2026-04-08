@@ -14,28 +14,29 @@ from pathlib import Path
 from typing import Optional, Dict, List, Tuple, Any
 
 import utils.func as func
-from AI.chat_service import get_service
+from AI.services.chat_service import get_service
 from AI.tools.memory_tools import _count_tokens
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.avatar_utils import AvatarUtils
 from commands.shared.webhook_utils import WebhookUtils
 
 
+# Module-level autocomplete functions (must be defined before class)
+async def ai_name_all_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for all AI names."""
+    return await AutocompleteHelpers.ai_name_all(interaction, current)
+
+
 class AIOperations(commands.Cog):
     """Handles advanced AI operations like copying between channels."""
-    
+
     def __init__(self, bot):
         self.bot = bot
         self.avatar_utils = AvatarUtils()
         self.webhook_utils = WebhookUtils()
-    
-    async def ai_name_all_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for all AI names."""
-        return await AutocompleteHelpers.ai_name_all(interaction, current)
     
     @app_commands.command(name="copy_ai", description="Copy an AI to another channel")
     @app_commands.default_permissions(administrator=True)
@@ -189,7 +190,7 @@ class AIOperations(commands.Cog):
         new_chat_id = new_session.get("chat_id", "default")
         
         if copy_history:
-            source_history = service.get_ai_history(server_id, source_channel_id, ai_name, source_chat_id)
+            source_history = await service.get_ai_history(server_id, source_channel_id, ai_name, source_chat_id)
             if source_history:
                 # Copy history to new AI
                 new_history = copy.deepcopy(source_history)
@@ -239,26 +240,27 @@ class AIOperations(commands.Cog):
         if source_session.get("character_card"):
             card_name = source_session.get("character_card_name", "Unknown")
             success_msg += f"**Character Card:** {card_name}\n"
-        
+
         success_msg += f"\n💡 The AI is now active in {target_channel.mention}!"
-        
+
         await interaction.followup.send(success_msg, ephemeral=True)
-    
-    async def card_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for card names."""
-        return await AutocompleteHelpers.card_name(interaction, current)
-    
-    async def ai_name_with_cards_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for AI names with character cards."""
-        return await AutocompleteHelpers.ai_name_with_cards(interaction, current)
+
+
+# Additional autocomplete functions for view_greetings command
+async def card_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for card names."""
+    return await AutocompleteHelpers.card_name(interaction, current)
+
+
+async def ai_name_with_cards_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for AI names with character cards."""
+    return await AutocompleteHelpers.ai_name_with_cards(interaction, current)
     
     @app_commands.command(name="view_greetings", description="View greetings from a character card")
     @app_commands.default_permissions(administrator=True)

@@ -15,23 +15,24 @@ from typing import Optional, List
 import utils.func as func
 from commands.shared.autocomplete import AutocompleteHelpers
 from utils.pagination import PaginatedView
-from utils.thumbnail_helper import upload_thumbnail_to_discord
-from utils.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.media.thumbnails import upload_thumbnail_to_discord
+from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
+
+
+# Module-level autocomplete functions (must be defined before class)
+async def card_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for card names."""
+    return await AutocompleteHelpers.card_name(interaction, current)
 
 
 class CardRegistry(commands.Cog):
     """Manages the central registry of character cards."""
-    
+
     def __init__(self, bot):
         self.bot = bot
-    
-    async def card_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for card names."""
-        return await AutocompleteHelpers.card_name(interaction, current)
     
     @app_commands.command(name="import_card", description="Import and register a character card")
     @app_commands.default_permissions(administrator=True)
@@ -353,7 +354,7 @@ class CardRegistry(commands.Cog):
             success = await func.unregister_character_card(server_id, card_name)
             
             if not success:
-                from utils.confirmation_ui import create_error_embed
+                from utils.discord.confirmation_ui import create_error_embed
                 error_embed = create_error_embed(
                     title="❌ Removal Failed",
                     description="Failed to remove card from registry. Check logs for details."

@@ -240,7 +240,7 @@ class ConversationStore:
             channel_id: Discord channel ID
             data_paths: DataPaths instance (creates new one if not provided)
         """
-        from utils.data_paths import DataPaths
+        from utils.core.paths import DataPaths
 
         self.server_id = server_id
         self.channel_id = channel_id
@@ -541,7 +541,7 @@ class ConversationStore:
     ) -> str:
         """
         Add a user message to the conversation.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
@@ -561,10 +561,11 @@ class ConversationStore:
             reply_to_author: Display name of reply target author
             reply_to_is_bot: True if replying to bot message
             raw_content: Unformatted message content (for accurate edit tracking)
-            
+
         Returns:
             Message ID
         """
+        await self._ensure_loaded()
         async with self._lock:
             chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
             
@@ -607,7 +608,7 @@ class ConversationStore:
     ) -> str:
         """
         Add an assistant message to the conversation.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
@@ -617,10 +618,11 @@ class ConversationStore:
             chat_id: Chat ID
             short_id: Short ID for this message (for reply references)
             raw_content: Unformatted message content (for accurate edit tracking)
-            
+
         Returns:
             Message ID
         """
+        await self._ensure_loaded()
         async with self._lock:
             chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
             
@@ -650,17 +652,18 @@ class ConversationStore:
     ) -> List[Dict[str, str]]:
         """
         Get conversation history in API format.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             chat_id: Chat ID
             consolidate: Whether to consolidate sequential messages
-            
+
         Returns:
             List of messages in API format (role + content)
         """
+        await self._ensure_loaded()
         async with self._lock:
             chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
             messages = chat.messages
@@ -699,16 +702,17 @@ class ConversationStore:
     ) -> List[Message]:
         """
         Get full conversation history with all metadata.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             chat_id: Chat ID
-            
+
         Returns:
             List of Message objects
         """
+        await self._ensure_loaded()
         async with self._lock:
             chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
             return chat.messages.copy()
@@ -724,7 +728,7 @@ class ConversationStore:
     ) -> bool:
         """
         Clear conversation history.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
@@ -732,10 +736,11 @@ class ConversationStore:
             chat_id: Chat ID (None = clear all chats)
             keep_greeting: Keep first assistant message
             immediate: If True, save immediately to disk instead of scheduling
-            
+
         Returns:
             True if cleared successfully
         """
+        await self._ensure_loaded()
         async with self._lock:
             try:
                 ai_data = self._ensure_path(server_id, channel_id, ai_name)
@@ -808,16 +813,17 @@ class ConversationStore:
     ) -> bool:
         """
         Remove the last user-assistant exchange (for regeneration).
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             chat_id: Chat ID
-            
+
         Returns:
             True if removed successfully
         """
+        await self._ensure_loaded()
         async with self._lock:
             try:
                 chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
@@ -862,19 +868,20 @@ class ConversationStore:
     ) -> bool:
         """
         Mark a message as deleted without removing it from history.
-        
+
         This preserves the message for LLM context while indicating deletion.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             discord_id: Discord message ID
             chat_id: Chat ID
-            
+
         Returns:
             True if marked successfully
         """
+        await self._ensure_loaded()
         async with self._lock:
             try:
                 chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
@@ -907,20 +914,21 @@ class ConversationStore:
     ) -> Optional[Message]:
         """
         Get a message by its short ID.
-        
+
         This allows the bot to look up its own messages or user messages
         by their short ID for reply references.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             short_id: Short ID to look up
             chat_id: Chat ID
-            
+
         Returns:
             Message object if found, None otherwise
         """
+        await self._ensure_loaded()
         async with self._lock:
             chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
             
@@ -941,20 +949,21 @@ class ConversationStore:
     ) -> Optional[Message]:
         """
         Get a message from history by discord_id.
-        
+
         This is used for edit tracking to retrieve the stored message
         with edit/delete state before reformatting.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             discord_id: Discord message ID to find
             chat_id: Chat ID
-            
+
         Returns:
             Message object if found, None otherwise
         """
+        await self._ensure_loaded()
         async with self._lock:
             try:
                 chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
@@ -1148,19 +1157,20 @@ class ConversationStore:
     ) -> bool:
         """
         Delete a specific chat.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             chat_id: Chat ID to delete
-            
+
         Returns:
             True if deleted successfully
-            
+
         Raises:
             ValueError: If trying to delete active chat or chat doesn't exist
         """
+        await self._ensure_loaded()
         async with self._lock:
             try:
                 # Check if chat exists
@@ -1200,20 +1210,21 @@ class ConversationStore:
     ) -> bool:
         """
         Rename a chat.
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             old_chat_id: Current chat ID
             new_chat_id: New chat ID
-            
+
         Returns:
             True if renamed successfully
-            
+
         Raises:
             ValueError: If new ID already exists or old chat doesn't exist
         """
+        await self._ensure_loaded()
         async with self._lock:
             try:
                 ai_data = self._ensure_path(server_id, channel_id, ai_name)
@@ -1285,7 +1296,7 @@ class ConversationStore:
     ) -> bool:
         """
         Update the content of a message by discord_id.
-        
+
         Behavior:
         - Searches in user messages (discord_id) and bot messages (discord_ids)
         - Updates the 'content' field and optionally 'raw_content'
@@ -1293,7 +1304,7 @@ class ConversationStore:
         - Preserves: timestamp, author, short_id, attachments, etc.
         - Updates metadata.updated_at
         - Schedules automatic save
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
@@ -1303,15 +1314,16 @@ class ConversationStore:
             chat_id: Chat ID (default: "default")
             mark_as_edited: Mark as edited and preserve original content
             new_raw_content: New unformatted content (for accurate edit tracking)
-            
+
         Returns:
             True if found and updated, False otherwise
-            
+
         Edge Cases:
             - Message doesn't exist: returns False
             - Consolidated message: updates only the specific message
             - Multiple AIs: each maintains its own history
         """
+        await self._ensure_loaded()
         async with self._lock:
             try:
                 chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
@@ -1372,28 +1384,29 @@ class ConversationStore:
     ) -> bool:
         """
         Remove a message from history by discord_id.
-        
+
         Behavior:
         - Removes from chat.messages list
         - Updates metadata.message_count and updated_at
         - Does NOT remove short_id mapping (for historical references)
         - Schedules automatic save
-        
+
         Args:
             server_id: Server ID
             channel_id: Channel ID
             ai_name: AI name
             discord_id: Discord message ID to delete
             chat_id: Chat ID (default: "default")
-            
+
         Returns:
             True if found and deleted, False otherwise
-            
+
         Edge Cases:
             - Message doesn't exist: returns False
             - Message is greeting (index 0): returns False (protected)
             - Message has replies: replies keep reply_to_id (orphaned)
         """
+        await self._ensure_loaded()
         async with self._lock:
             try:
                 chat = self._ensure_chat(server_id, channel_id, ai_name, chat_id)
@@ -1438,8 +1451,9 @@ class ConversationStore:
                 log.error(f"Error deleting message {discord_id}: {e}")
                 return False
     
-    def get_stats(self) -> Dict[str, Any]:
+    async def get_stats(self) -> Dict[str, Any]:
         """Get conversation statistics."""
+        await self._ensure_loaded()
         total_messages = 0
         total_chats = 0
         total_ais = 0

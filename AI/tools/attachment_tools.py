@@ -110,7 +110,7 @@ async def _process_direct_url(
         Dict with processed file data or error
     """
     try:
-        from utils.attachment_processor import get_attachment_processor
+        from utils.media.attachments import get_attachment_processor
         import os
         
         # Extract filename from URL
@@ -348,7 +348,7 @@ async def get_attachment_content(
             filtered_attachments = attachments_data
         
         # Process attachments
-        from utils.attachment_processor import get_attachment_processor
+        from utils.media.attachments import get_attachment_processor
         
         processor = get_attachment_processor()
         processed_attachments = []

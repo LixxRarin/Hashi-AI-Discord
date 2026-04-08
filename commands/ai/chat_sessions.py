@@ -13,37 +13,38 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
-from AI.chat_service import get_service
+from AI.services.chat_service import get_service
 from messaging.store import get_store
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.webhook_utils import WebhookUtils
 from utils.pagination import PaginatedView
-from utils.thumbnail_helper import get_character_card_thumbnail_url
-from utils.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.media.thumbnails import get_character_card_thumbnail_url
+from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
+
+
+# Module-level autocomplete functions (must be defined before class)
+async def ai_name_all_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for all AI names."""
+    return await AutocompleteHelpers.ai_name_all(interaction, current)
+
+
+async def chat_id_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for chat IDs."""
+    return await AutocompleteHelpers.chat_id(interaction, current)
 
 
 class ChatSessions(commands.Cog):
     """Commands for managing AI chat sessions."""
-    
+
     def __init__(self, bot):
         self.bot = bot
         self.webhook_utils = WebhookUtils()
-    
-    async def ai_name_all_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for all AI names."""
-        return await AutocompleteHelpers.ai_name_all(interaction, current)
-    
-    async def chat_id_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for chat IDs."""
-        return await AutocompleteHelpers.chat_id(interaction, current)
     
     @app_commands.command(name="switch_chat", description="Switch to an existing chat session for an AI")
     @app_commands.default_permissions(administrator=True)
@@ -595,7 +596,7 @@ class ChatSessions(commands.Cog):
                     func.log.info(f"Deleted chat '{chat_id}' for AI '{ai_name}' in server {server_id}")
                 else:
                     # Failed to delete
-                    from utils.confirmation_ui import create_error_embed
+                    from utils.discord.confirmation_ui import create_error_embed
                     error_embed = create_error_embed(
                         title="❌ Delete Failed",
                         description="Failed to delete the chat session. Check logs for details."
@@ -606,7 +607,7 @@ class ChatSessions(commands.Cog):
                     )
             except ValueError as e:
                 # Error during deletion
-                from utils.confirmation_ui import create_error_embed
+                from utils.discord.confirmation_ui import create_error_embed
                 error_embed = create_error_embed(
                     title="❌ Error",
                     description=f"An error occurred: {str(e)}"

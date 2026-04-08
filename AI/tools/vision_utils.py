@@ -8,8 +8,8 @@ This module provides utilities for downloading and processing images
 import logging
 import base64
 from typing import Dict, Any, Optional
-from utils.media_processor import ImageProcessor
-from utils.ai_config_manager import get_vision_config
+from utils.media.processor import ImageProcessor
+from utils.config.ai_manager import get_vision_config
 
 log = logging.getLogger(__name__)
 

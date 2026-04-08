@@ -250,7 +250,7 @@ class ToolExecutor:
             int: Number of tokens
         """
         try:
-            from AI.base_client import BaseAIClient
+            from AI.core.base_client import BaseAIClient
             # Get appropriate encoding for model/provider
             encoding = BaseAIClient.get_tiktoken_encoding(model, provider)
             return len(encoding.encode(text))
@@ -314,7 +314,7 @@ class ToolExecutor:
         # Convert token limit to character limit using tiktoken
         # Sample text to estimate chars per token for this model
         try:
-            from AI.base_client import BaseAIClient
+            from AI.core.base_client import BaseAIClient
             encoding = BaseAIClient.get_tiktoken_encoding(model, provider)
             # Use a representative sample to estimate chars/token ratio
             sample = "The quick brown fox jumps over the lazy dog. " * 10

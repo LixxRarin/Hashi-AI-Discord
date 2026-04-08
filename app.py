@@ -64,9 +64,14 @@ class BridgeBot(commands.Bot):
         await func.load_session_cache()
 
         func.log.debug("Initializing Message System")
-        
+
+        # Initialize message cache early to prevent rate limiting
+        from utils.message_cache import get_message_cache
+        cache = get_message_cache()
+        func.log.info(f"Message cache pre-initialized (max_size={cache.max_size}, ttl={cache.ttl}s)")
+
         # Initialize AI Configuration Manager
-        from utils.ai_config_manager import initialize_ai_config
+        from utils.config.ai_manager import initialize_ai_config
         await initialize_ai_config()
         
         # Initialize new message pipeline (this also loads the conversation store)
@@ -190,7 +195,7 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
     This function bridge the new pipeline with existing Discord sending logic.
     """
     try:
-        from AI.chat_service import get_service
+        from AI.services.chat_service import get_service
         from utils.message_cache import fetch_message_cached, get_message_cache
         
         chat_service = get_service()
@@ -329,7 +334,7 @@ async def _generate_ai_response(bot, message, server_id, channel_id, ai_name, se
                 try:
                     button_config = session.get("config", {}).get("message_action_buttons", {})
                     if button_config.get("enabled", False):
-                        from utils.message_actions import attach_buttons_with_webhook_compatibility
+                        from utils.discord.message_actions import attach_buttons_with_webhook_compatibility
                         
                         # Attach buttons with webhook mode compatibility
                         control_msg_id = await attach_buttons_with_webhook_compatibility(

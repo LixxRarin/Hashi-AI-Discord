@@ -10,30 +10,31 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
-from utils.config_ui_components import ConfigCategorySelectView, create_category_selection_embed
+from utils.discord.config_ui import ConfigCategorySelectView, create_category_selection_embed
 from commands.shared.autocomplete import AutocompleteHelpers
+
+
+# Module-level autocomplete functions (must be defined before class)
+async def ai_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for AI names."""
+    return await AutocompleteHelpers.ai_name_all(interaction, current)
 
 
 class ConfigInteractiveCommands(commands.Cog):
     """
     Simplified interactive configuration system.
-    
+
     Features:
     - Single /config command
     - Fixed, well-organized categories
     - Simple navigation: category → config → edit
     """
-    
+
     def __init__(self, bot):
         self.bot = bot
-    
-    async def ai_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for AI names."""
-        return await AutocompleteHelpers.ai_name_all(interaction, current)
     
     @app_commands.command(
         name="config",

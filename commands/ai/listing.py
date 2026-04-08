@@ -11,8 +11,8 @@ from typing import Dict, List, Optional
 
 import utils.func as func
 from utils.pagination import PaginatedView
-from utils.thumbnail_helper import upload_thumbnail_to_discord
-from AI.provider_registry import get_registry
+from utils.media.thumbnails import upload_thumbnail_to_discord
+from AI.core.registry import get_registry
 
 
 class AIListing(commands.Cog):

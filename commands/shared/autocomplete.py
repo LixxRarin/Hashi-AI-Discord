@@ -10,7 +10,7 @@ import discord
 from discord import app_commands
 
 import utils.func as func
-from AI.chat_service import get_service
+from AI.services.chat_service import get_service
 from messaging.store import get_store
 
 
@@ -233,7 +233,7 @@ class AutocompleteHelpers:
         Shows all available configuration presets with their descriptions.
         """
         try:
-            from utils.ai_config_manager import get_ai_config_manager
+            from utils.config.ai_manager import get_ai_config_manager
             config_manager = get_ai_config_manager()
             presets = config_manager.list_presets()
             

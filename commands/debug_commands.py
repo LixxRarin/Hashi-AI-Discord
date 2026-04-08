@@ -23,7 +23,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
-from utils.debug_handler import DiscordLogHandler
+from utils.core.debug import DiscordLogHandler
 
 
 class DebugCommands(commands.Cog):
@@ -37,7 +37,7 @@ class DebugCommands(commands.Cog):
     async def cog_load(self):
         """Called when the cog is loaded. Initialize debug handler if configured."""
         try:
-            from utils.data_paths import DataPaths
+            from utils.core.paths import DataPaths
 
             data_paths = DataPaths()
 
@@ -116,7 +116,7 @@ class DebugCommands(commands.Cog):
         server_id = str(interaction.guild.id)
 
         # Load existing config for this server
-        from utils.data_paths import DataPaths
+        from utils.core.paths import DataPaths
 
         data_paths = DataPaths()
         debug_config_file = data_paths.get_debug_config_file(server_id)
@@ -218,7 +218,7 @@ class DebugCommands(commands.Cog):
         server_id = str(interaction.guild.id)
 
         # Load config for this server
-        from utils.data_paths import DataPaths
+        from utils.core.paths import DataPaths
 
         data_paths = DataPaths()
         debug_config_file = data_paths.get_debug_config_file(server_id)
@@ -275,7 +275,7 @@ class DebugCommands(commands.Cog):
         server_id = str(interaction.guild.id)
 
         # Load config for this server
-        from utils.data_paths import DataPaths
+        from utils.core.paths import DataPaths
 
         data_paths = DataPaths()
         debug_config_file = data_paths.get_debug_config_file(server_id)
@@ -340,7 +340,7 @@ class DebugCommands(commands.Cog):
         server_id = str(interaction.guild.id)
 
         # Load config for this server
-        from utils.data_paths import DataPaths
+        from utils.core.paths import DataPaths
 
         data_paths = DataPaths()
         debug_config_file = data_paths.get_debug_config_file(server_id)
@@ -532,7 +532,7 @@ class DebugCommands(commands.Cog):
             
             # Get registered providers from registry
             try:
-                from AI.provider_registry import get_registry
+                from AI.core.registry import get_registry
                 registry = get_registry()
                 stats["registered_providers"] = registry.list_providers()
             except Exception as e:
@@ -541,7 +541,7 @@ class DebugCommands(commands.Cog):
             
             # Count API connections
             try:
-                from utils.data_paths import DataPaths
+                from utils.core.paths import DataPaths
                 data_paths = DataPaths()
 
                 for server_id in data_paths.list_servers():
@@ -557,7 +557,7 @@ class DebugCommands(commands.Cog):
             
             # Count character cards
             try:
-                from utils.data_paths import DataPaths
+                from utils.core.paths import DataPaths
                 data_paths = DataPaths()
 
                 # Iterate through all servers and count their cards
@@ -592,7 +592,7 @@ class DebugCommands(commands.Cog):
         
         try:
             # Calculate total character cards size from all servers
-            from utils.data_paths import DataPaths
+            from utils.core.paths import DataPaths
             data_paths = DataPaths()
 
             total_cards_size = 0
@@ -604,7 +604,7 @@ class DebugCommands(commands.Cog):
             stats["character_cards_size"] = total_cards_size
 
             # Calculate total data size from hierarchical structure
-            from utils.data_paths import DataPaths
+            from utils.core.paths import DataPaths
             data_paths = DataPaths()
             total_size = 0
 
@@ -815,7 +815,7 @@ class DebugCommands(commands.Cog):
         server_id = str(interaction.guild.id)
 
         # Load config for this server
-        from utils.data_paths import DataPaths
+        from utils.core.paths import DataPaths
 
         data_paths = DataPaths()
         debug_config_file = data_paths.get_debug_config_file(server_id)

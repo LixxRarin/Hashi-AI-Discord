@@ -10,7 +10,7 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
-from utils.api_ui_components import (
+from utils.discord.api_ui import (
     APIConnectionListView,
     create_connection_list_embed
 )

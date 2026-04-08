@@ -31,12 +31,13 @@ class ChatService:
         """Initialize the chat service."""
         self.registry = get_registry()
 
-    def get_ai_history(self, server_id: str, channel_id: str, ai_name: str, chat_id: str = "default") -> List[Dict[str, str]]:
+    async def get_ai_history(self, server_id: str, channel_id: str, ai_name: str, chat_id: str = "default") -> List[Dict[str, str]]:
         """Get conversation history for a specific AI and chat."""
         from messaging.store import get_store
 
         try:
             store = get_store(server_id, channel_id)
+            await store._ensure_loaded()
             chat = store._data.get(ai_name, {}).get("chats", {}).get(chat_id)
             
             if chat:
@@ -222,7 +223,7 @@ class ChatService:
             result = result.replace(f"{{{{{key}}}}}", str(value))
         return result
     
-    def _build_context_components(
+    async def _build_context_components(
         self,
         config: Dict,
         card_data: Dict,
@@ -275,7 +276,7 @@ class ChatService:
         
         # Lorebook entries
         if config.get("use_lorebook", True) and card_data.get("character_book"):
-            history = self.get_ai_history(server_id, channel_id, ai_name, chat_id)
+            history = await self.get_ai_history(server_id, channel_id, ai_name, chat_id)
             recent_messages = [msg.get("content", "") for msg in history[-10:]]
             
             lorebook_entries = process_lorebook(
@@ -361,7 +362,7 @@ class ChatService:
         
         return components
     
-    def _prepare_messages(
+    async def _prepare_messages(
         self,
         user_content: str,
         server_id: str,
@@ -384,7 +385,7 @@ class ChatService:
         user_name = self._get_user_name_for_cbs(config, message_author)
         
         # Build all context components
-        components = self._build_context_components(
+        components = await self._build_context_components(
             config, card_data, char_name, user_name, session,
             ai_name, chat_id, client, model, server_id, channel_id
         )
@@ -418,7 +419,7 @@ class ChatService:
                     conv_messages.append({"role": "system", "content": component_content})
         
         # Get conversation history
-        history = self.get_ai_history(server_id, channel_id, ai_name, chat_id)
+        history = await self.get_ai_history(server_id, channel_id, ai_name, chat_id)
         
         # Token management
         context_size = llm_params.get("context_size", 16000)
@@ -929,8 +930,8 @@ class ChatService:
             # Log images being passed to _prepare_messages
             if processed_images:
                 func.log.debug(f"Passing {len(processed_images)} images to _prepare_messages()")
-                
-            prepared_messages = self._prepare_messages(
+
+            prepared_messages = await self._prepare_messages(
                 formatted_data, server_id, channel_id, ai_name, session, model, client,
                 message_author=message.author if hasattr(message, 'author') else None,
                 chat_id=chat_id,

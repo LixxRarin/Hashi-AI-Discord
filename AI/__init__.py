@@ -6,27 +6,27 @@ Simply importing this module will trigger the auto-registration of all providers
 
 Usage:
     import AI  # All providers are now registered
-    
-    from AI.provider_registry import get_registry
+
+    from AI.core.registry import get_registry
     registry = get_registry()
     client = registry.get_client("openai")
 """
 
 # Import all clients to trigger their auto-registration
-from AI.openai_client import OpenAIClient
-from AI.deepseek_client import DeepSeekClient
-from AI.ollama_client import OllamaClient
-from AI.claude_client import ClaudeClient
+from AI.providers.openai import OpenAIClient
+from AI.providers.deepseek import DeepSeekClient
+from AI.providers.ollama import OllamaClient
+from AI.providers.claude import ClaudeClient
 
 # Import registry for convenience
-from AI.provider_registry import get_registry, register_provider
+from AI.core.registry import get_registry, register_provider
 
 # Export commonly used items
 __all__ = [
     'OpenAIClient',
+    'ClaudeClient',
     'DeepSeekClient',
     'OllamaClient',
-    'ClaudeClient',
     'get_registry',
     'register_provider',
 ]

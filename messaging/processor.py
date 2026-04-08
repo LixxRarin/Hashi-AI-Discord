@@ -10,7 +10,7 @@ import datetime
 from typing import Dict, Any, List, Optional, TYPE_CHECKING
 from messaging.buffer import PendingMessage
 from messaging.short_id_manager import get_short_id_manager_sync
-from utils.media_processor import MediaProcessor
+from utils.media.processor import MediaProcessor
 from expressions import get_expression_registry
 
 if TYPE_CHECKING:
@@ -293,7 +293,7 @@ class MessageProcessor:
             return []
         
         # Get vision configuration
-        from utils.ai_config_manager import get_vision_config
+        from utils.config.ai_manager import get_vision_config
         vision_config = get_vision_config(session, server_id)
         
         # Process attachments
@@ -518,7 +518,7 @@ class MessageProcessor:
             Cleaned response
         """
         try:
-            import utils.text_processor as text_processor
+            import utils.text.processor as text_processor
             import utils.func as func
             
             config = session.get("config", {})
@@ -583,7 +583,7 @@ class MessageProcessor:
             Response ready for display
         """
         try:
-            import utils.text_processor as text_processor
+            import utils.text.processor as text_processor
             
             config = session.get("config", {})
             

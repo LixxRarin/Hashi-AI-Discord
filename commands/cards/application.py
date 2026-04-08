@@ -10,43 +10,44 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
-from AI.chat_service import get_service
+from AI.services.chat_service import get_service
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.avatar_utils import AvatarUtils
 from commands.shared.webhook_utils import WebhookUtils
 
 
+# Module-level autocomplete functions (must be defined before class)
+async def ai_name_all_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for all AI names."""
+    return await AutocompleteHelpers.ai_name_all(interaction, current)
+
+
+async def ai_name_with_cards_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for AI names with character cards."""
+    return await AutocompleteHelpers.ai_name_with_cards(interaction, current)
+
+
+async def card_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for card names."""
+    return await AutocompleteHelpers.card_name(interaction, current)
+
+
 class CardApplication(commands.Cog):
     """Commands for applying character cards to AIs."""
-    
+
     def __init__(self, bot):
         self.bot = bot
         self.avatar_utils = AvatarUtils()
         self.webhook_utils = WebhookUtils()
-    
-    async def ai_name_all_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for all AI names."""
-        return await AutocompleteHelpers.ai_name_all(interaction, current)
-    
-    async def ai_name_with_cards_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for AI names with character cards."""
-        return await AutocompleteHelpers.ai_name_with_cards(interaction, current)
-    
-    async def card_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for card names."""
-        return await AutocompleteHelpers.card_name(interaction, current)
     
     @app_commands.command(name="select_greeting", description="Select which greeting to use for a character")
     @app_commands.default_permissions(administrator=True)
@@ -114,7 +115,7 @@ class CardApplication(commands.Cog):
         # Check if there's existing conversation history
         service = get_service()
         current_chat_id = session.get("chat_id", "default")
-        existing_history = service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
+        existing_history = await service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
         
         # If there's existing history, ask for confirmation
         if existing_history and len(existing_history) > 1:
@@ -394,7 +395,7 @@ class CardApplication(commands.Cog):
         # Check if there's existing conversation history
         service = get_service()
         current_chat_id = session.get("chat_id", "default")
-        existing_history = service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
+        existing_history = await service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
         
         # If clear_history is True and there's existing history, ask for confirmation
         confirm_msg = None

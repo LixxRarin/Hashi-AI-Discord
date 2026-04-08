@@ -11,27 +11,28 @@ from discord.ext import commands
 from typing import Optional, Tuple, List
 
 import utils.func as func
-from AI.chat_service import get_service
+from AI.services.chat_service import get_service
 from messaging.response import get_response_manager
 from messaging.store import get_store
 from commands.shared.autocomplete import AutocompleteHelpers
-from utils.confirmation_ui import confirm_dangerous_action, create_success_embed
-from utils.thumbnail_helper import get_character_card_thumbnail_url
+from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.media.thumbnails import get_character_card_thumbnail_url
+
+
+# Module-level autocomplete functions (must be defined before class)
+async def ai_name_all_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for all AI names."""
+    return await AutocompleteHelpers.ai_name_all(interaction, current)
 
 
 class HistoryManager(commands.Cog):
     """Commands for managing AI conversation history."""
-    
+
     def __init__(self, bot):
         self.bot = bot
-    
-    async def ai_name_all_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for all AI names."""
-        return await AutocompleteHelpers.ai_name_all(interaction, current)
     
     @app_commands.command(name="clear_history", description="Clear conversation history for an AI")
     @app_commands.default_permissions(administrator=True)
@@ -74,7 +75,7 @@ class HistoryManager(commands.Cog):
         
         # Check if there's existing conversation history
         service = get_service()
-        existing_history = service.get_ai_history(server_id, found_channel_id, actual_ai_name, current_chat_id)
+        existing_history = await service.get_ai_history(server_id, found_channel_id, actual_ai_name, current_chat_id)
         
         # If there's no history or only 1 message, just inform the user
         if not existing_history or len(existing_history) <= 1:

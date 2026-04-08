@@ -11,7 +11,7 @@ from colorama import Fore, init, Style
 from packaging import version
 
 import utils.func as func
-from utils.config_updater import ConfigManager
+from utils.config.updater import ConfigManager
 
 # Initialize colorama for cross-platform colored output
 init(autoreset=True)
@@ -347,7 +347,7 @@ def _get_provider_info() -> str:
     try:
         # Import AI module to ensure providers are registered
         import AI
-        from AI.provider_registry import get_registry
+        from AI.core.registry import get_registry
         
         registry = get_registry()
         providers_metadata = registry.get_all_metadata()

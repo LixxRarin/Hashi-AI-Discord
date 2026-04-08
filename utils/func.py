@@ -11,7 +11,7 @@ from colorama import Fore, Style, init
 
 from utils.persistence import read_json, write_json
 
-from utils.func_character_cards import (
+from utils.characters.cards import (
     register_character_card,
     unregister_character_card,
     list_character_cards,
@@ -159,7 +159,7 @@ This function returns only Discord behavioral configurations.
     """
     
     try:
-        from utils.ai_config_manager import get_ai_config_manager
+        from utils.config.ai_manager import get_ai_config_manager
         manager = get_ai_config_manager()
         return manager.get_defaults()
     except Exception as e:
@@ -169,7 +169,7 @@ This function returns only Discord behavioral configurations.
         # Fallback: Parse the same DEFAULT_AI_CONFIG_CONTENT used by the manager
         # This ensures a single source of truth for default values
         try:
-            from utils.ai_config_manager import DEFAULT_AI_CONFIG_CONTENT
+            from utils.config.ai_manager import DEFAULT_AI_CONFIG_CONTENT
             from ruamel.yaml import YAML
             
             yaml_parser = YAML(typ='rt')
@@ -292,7 +292,7 @@ async def load_session_cache() -> None:
     global session_cache
     session_cache = {}
 
-    from utils.data_paths import DataPaths
+    from utils.core.paths import DataPaths
     data_paths = DataPaths()
 
     # Scan all server directories
@@ -320,7 +320,7 @@ async def update_session_data(server_id: str, channel_id: str, new_data: Dict[st
         channel_id: Channel ID
         new_data: New session data (None to delete)
     """
-    from utils.data_paths import DataPaths
+    from utils.core.paths import DataPaths
     data_paths = DataPaths()
 
     # Update in-memory cache
@@ -412,7 +412,7 @@ async def load_api_connections() -> Dict[str, Dict[str, Any]]:
     Returns:
         Dict[str, Dict[str, Any]]: Dictionary of connections by server
     """
-    from utils.data_paths import DataPaths
+    from utils.core.paths import DataPaths
 
     data_paths = DataPaths()
     all_connections = {}
@@ -434,7 +434,7 @@ async def save_api_connections(data: Dict[str, Dict[str, Any]]) -> None:
     Args:
         data: Dictionary of connections by server to save
     """
-    from utils.data_paths import DataPaths
+    from utils.core.paths import DataPaths
 
     data_paths = DataPaths()
 
@@ -455,7 +455,7 @@ def get_api_connection(server_id: str, connection_name: str) -> Optional[Dict[st
     Returns:
         Optional[Dict[str, Any]]: Connection data or None if not found
     """
-    from utils.data_paths import DataPaths
+    from utils.core.paths import DataPaths
 
     data_paths = DataPaths()
     connections_file = data_paths.get_api_connections_file(server_id)
@@ -703,7 +703,7 @@ def list_api_connections(server_id: str) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: Dictionary of server connections
     """
-    from utils.data_paths import DataPaths
+    from utils.core.paths import DataPaths
 
     data_paths = DataPaths()
     connections_file = data_paths.get_api_connections_file(server_id)
@@ -795,7 +795,7 @@ async def delete_server_session_data(server_id: str) -> bool:
             log.info("Removed server from session cache")
 
         # Delete all channel session files for this server
-        from utils.data_paths import DataPaths
+        from utils.core.paths import DataPaths
         data_paths = DataPaths()
 
         deleted_count = 0
@@ -896,7 +896,7 @@ async def cleanup_server_data(server_id: str, server_name: str = None) -> Dict[s
     
     # 3. Clean character cards (with smart deletion)
     try:
-        from utils.func_character_cards import delete_server_character_cards
+        from utils.characters.cards import delete_server_character_cards
         results["character_cards"] = await delete_server_character_cards(server_id)
         if not results["character_cards"].get("success", False):
             results["success"] = False
@@ -910,7 +910,7 @@ async def cleanup_server_data(server_id: str, server_name: str = None) -> Dict[s
     # 4. Clean conversation history
     try:
         from messaging.store import get_store
-        from utils.data_paths import DataPaths
+        from utils.core.paths import DataPaths
 
         data_paths = DataPaths()
         channels = data_paths.list_channels(server_id)

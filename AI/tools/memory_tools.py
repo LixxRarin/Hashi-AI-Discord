@@ -55,7 +55,7 @@ def _get_memory_path(server_id: str, channel_id: str, ai_name: str, chat_id: str
     Returns:
         Path: Path to memory file
     """
-    from utils.data_paths import DataPaths
+    from utils.core.paths import DataPaths
 
     data_paths = DataPaths()
     memory_file = data_paths.get_memory_file(server_id, channel_id, ai_name, chat_id)

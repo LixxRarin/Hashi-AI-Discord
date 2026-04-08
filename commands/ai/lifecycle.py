@@ -21,55 +21,56 @@ from discord.ext import commands
 from typing import Optional
 
 import utils.func as func
-from AI.chat_service import get_service
+from AI.services.chat_service import get_service
 from messaging.store import get_store
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.avatar_utils import AvatarUtils
 from commands.shared.webhook_utils import WebhookUtils
 from utils.http_client import create_http_session
-from utils.confirmation_ui import confirm_dangerous_action, create_success_embed
-from utils.thumbnail_helper import get_character_card_thumbnail_url
+from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.media.thumbnails import get_character_card_thumbnail_url
+
+
+# Module-level autocomplete functions (must be defined before class)
+async def ai_name_all_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for all AI names."""
+    return await AutocompleteHelpers.ai_name_all(interaction, current)
+
+
+async def connection_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for API connection names."""
+    return await AutocompleteHelpers.connection_name(interaction, current)
+
+
+async def card_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for card names."""
+    return await AutocompleteHelpers.card_name(interaction, current)
+
+
+async def preset_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for preset names."""
+    return await AutocompleteHelpers.preset_name(interaction, current)
 
 
 class AILifecycle(commands.Cog):
     """Manages AI lifecycle: creation (setup) and removal."""
-    
+
     def __init__(self, bot):
         self.bot = bot
         self.avatar_utils = AvatarUtils()
         self.webhook_utils = WebhookUtils()
-    
-    async def ai_name_all_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for all AI names."""
-        return await AutocompleteHelpers.ai_name_all(interaction, current)
-    
-    async def connection_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for API connection names."""
-        return await AutocompleteHelpers.connection_name(interaction, current)
-    
-    async def card_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for card names."""
-        return await AutocompleteHelpers.card_name(interaction, current)
-    
-    async def preset_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for preset names."""
-        return await AutocompleteHelpers.preset_name(interaction, current)
     
     def _generate_unique_ai_name(self, base_name: str, existing_names: set) -> str:
         """Generate a unique AI name by adding a suffix if the name already exists."""
@@ -104,7 +105,7 @@ class AILifecycle(commands.Cog):
         6. Preset (optional)
         7. Confirmation
         """
-        from utils.setup_ui_components import SetupWizardData, Step1_ChannelSelectView, create_step_embed
+        from utils.discord.setup_ui import SetupWizardData, Step1_ChannelSelectView, create_step_embed
         
         # Initialize wizard data
         wizard_data = SetupWizardData(
@@ -357,7 +358,7 @@ async def execute_setup_from_wizard(
     try:
         from pathlib import Path
         from utils.ccv3.parser import parse_character_card
-        from utils.guild_profile import set_guild_profile
+        from utils.discord.guild_profile import set_guild_profile
         from commands.shared.avatar_utils import AvatarUtils
         from commands.shared.webhook_utils import WebhookUtils
         
@@ -423,7 +424,7 @@ async def execute_setup_from_wizard(
         
         # Apply preset if provided
         if wizard_data.preset_name:
-            from utils.ai_config_manager import get_ai_config_manager
+            from utils.config.ai_manager import get_ai_config_manager
             config_manager = get_ai_config_manager()
             preset_config = config_manager.load_preset(wizard_data.preset_name)
             

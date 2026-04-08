@@ -404,10 +404,10 @@ async def save_conversation_history() -> bool:
     return await get_service().save_conversation_history()
 
 
-def get_ai_history(server_id: str, channel_id: str, ai_name: str) -> list:
+async def get_ai_history(server_id: str, channel_id: str, ai_name: str) -> list:
     """Get conversation history. Delegates to chat service."""
     from AI.services.chat_service import get_service
-    return get_service().get_ai_history(server_id, channel_id, ai_name)
+    return await get_service().get_ai_history(server_id, channel_id, ai_name)
 
 
 def set_ai_history(server_id: str, channel_id: str, ai_name: str, messages: list) -> None:

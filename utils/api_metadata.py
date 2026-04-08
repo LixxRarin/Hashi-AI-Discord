@@ -207,7 +207,7 @@ class APIMetadata:
         """
         if param == "provider":
             # Import here to avoid circular dependency
-            from AI.provider_registry import get_registry
+            from AI.core.registry import get_registry
             registry = get_registry()
             return registry.list_providers()
         return []

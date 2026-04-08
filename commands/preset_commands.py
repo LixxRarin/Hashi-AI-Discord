@@ -9,30 +9,31 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
-from utils.ai_config_manager import get_ai_config_manager
+from utils.config.ai_manager import get_ai_config_manager
 from commands.shared.autocomplete import AutocompleteHelpers
+
+
+# Module-level autocomplete functions (must be defined before class)
+async def ai_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for AI names."""
+    return await AutocompleteHelpers.ai_name_all(interaction, current)
+
+
+async def preset_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for preset names."""
+    return await AutocompleteHelpers.preset_name(interaction, current)
 
 
 class PresetCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.config_manager = get_ai_config_manager()
-    
-    async def ai_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for AI names."""
-        return await AutocompleteHelpers.ai_name_all(interaction, current)
-    
-    async def preset_name_autocomplete(
-        self,
-        interaction: discord.Interaction,
-        current: str
-    ) -> list[app_commands.Choice[str]]:
-        """Autocomplete for preset names."""
-        return await AutocompleteHelpers.preset_name(interaction, current)
     
     @app_commands.command(name="preset_save", description="Save current AI configuration as a preset")
     @app_commands.default_permissions(administrator=True)

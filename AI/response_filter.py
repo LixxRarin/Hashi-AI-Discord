@@ -9,7 +9,7 @@ import asyncio
 import json
 from typing import Dict, Any, Tuple
 import utils.func as func
-from AI.provider_registry import get_registry
+from AI.core.registry import get_registry
 
 
 class ResponseFilter:

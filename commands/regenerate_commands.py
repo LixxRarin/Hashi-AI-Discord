@@ -10,41 +10,22 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
-from AI.chat_service import get_service
+from AI.services.chat_service import get_service
+from commands.shared.autocomplete import AutocompleteHelpers
+
+
+# Module-level autocomplete functions (must be defined before class)
+async def ai_name_autocomplete(
+    interaction: discord.Interaction,
+    current: str
+) -> list[app_commands.Choice[str]]:
+    """Autocomplete for AI names."""
+    return await AutocompleteHelpers.ai_name_all(interaction, current)
 
 
 class RegenerateCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-    
-    async def ai_name_autocomplete(self, interaction: discord.Interaction, current: str) -> list[app_commands.Choice[str]]:
-        """Autocomplete function for AI names across the entire server."""
-        try:
-            server_id = str(interaction.guild.id)
-            all_server_data = func.session_cache.get(server_id, {}).get("channels", {})
-            
-            if not all_server_data:
-                return []
-            
-            choices = []
-            for channel_id_str, channel_data in all_server_data.items():
-                # Skip if channel_data is None (defensive check)
-                if channel_data is None:
-                    continue
-                    
-                channel_obj = interaction.guild.get_channel(int(channel_id_str))
-                channel_name = channel_obj.name if channel_obj else f"Deleted Channel ({channel_id_str})"
-
-                for ai_name, ai_data in channel_data.items():
-                    if current.lower() in ai_name.lower():
-                        provider = ai_data.get("provider", "openai").upper()
-                        display_name = f"{ai_name} [{provider}] (#{channel_name})"
-                        choices.append(app_commands.Choice(name=display_name[:100], value=ai_name))
-            
-            return choices[:25]
-        except Exception as e:
-            func.log.error(f"Error in ai_name_autocomplete: {e}")
-            return []
     
     @app_commands.command(name="regenerate", description="Regenerate the last AI response")
     @app_commands.default_permissions(administrator=True)
@@ -107,7 +88,7 @@ class RegenerateCommands(commands.Cog):
         
         # Get conversation history
         service = get_service()
-        history = service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
+        history = await service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
         
         if not history or len(history) < 2:
             await interaction.followup.send(
@@ -198,7 +179,7 @@ class RegenerateCommands(commands.Cog):
             # Trigger regeneration using the message pipeline
             if state.user_message:
                 # Get chat service
-                from AI.chat_service import get_service
+                from AI.services.chat_service import get_service
                 chat_service = get_service()
                 
                 # Create callback for sending to Discord using centralized MessageSender
