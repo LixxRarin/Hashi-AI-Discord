@@ -72,16 +72,31 @@ class AIOperations(commands.Cog):
         # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
         actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
 
-        # Get source AI
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{actual_ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
+        # Get source AI - use optimized lookup if channel_id is available
+        if channel_id_hint:
+            # Direct lookup - faster, no iteration
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            source_session = channel_data.get(actual_ai_name) if channel_data else None
 
-        source_channel_id, source_session = found_ai_data
+            if not source_session:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
+
+            source_channel_id = channel_id_hint
+        else:
+            # Fallback: Search all channels (for manual input without autocomplete)
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+
+            source_channel_id, source_session = found_ai_data
 
         # Determine new AI name
         if not new_ai_name:

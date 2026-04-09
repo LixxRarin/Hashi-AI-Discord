@@ -130,17 +130,32 @@ class PresetCommands(commands.Cog):
         # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
         actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
 
-        # Get AI session data
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
-        
-        if not found_ai_data:
-            await interaction.response.send_message(
-                f"❌ AI '{actual_ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
+        # Get AI session data - use optimized lookup if channel_id is available
+        if channel_id_hint:
+            # Direct lookup - faster, no iteration
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            session = channel_data.get(actual_ai_name) if channel_data else None
 
-        found_channel_id, session = found_ai_data
+            if not session:
+                await interaction.response.send_message(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
+
+            found_channel_id = channel_id_hint
+        else:
+            # Fallback: Search all channels (for manual input without autocomplete)
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+
+            if not found_ai_data:
+                await interaction.response.send_message(
+                    f"❌ AI '{actual_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+
+            found_channel_id, session = found_ai_data
 
         if session is None:
             await interaction.response.send_message(

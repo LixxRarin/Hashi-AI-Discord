@@ -72,16 +72,32 @@ class CardApplication(commands.Cog):
         # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
         actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
 
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+        # Get AI data - use optimized lookup if channel_id is available
+        if channel_id_hint:
+            # Direct lookup - faster, no iteration
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            session = channel_data.get(actual_ai_name) if channel_data else None
 
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{actual_ai_name}' not found in this server.",
-                ephemeral=True
-            )
-            return
+            if not session:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
 
-        found_channel_id, session = found_ai_data
+            found_channel_id = channel_id_hint
+        else:
+            # Fallback: Search all channels (for manual input without autocomplete)
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in this server.",
+                    ephemeral=True
+                )
+                return
+
+            found_channel_id, session = found_ai_data
         
         # Check if AI has a character card
         card_data = session.get("character_card", {}).get("data", {})
