@@ -299,27 +299,27 @@ class ChatService:
         
         # Memory prompt
         if config.get("enable_memory_system", False):
-            from AI.tools.memory_tools import read_memory_content, _load_memory
-            
+            from AI.tools.memory_tools import read_memory_content, get_memory_file_path, initialize_memory_file
+
+            memory_file_path = get_memory_file_path(server_id, channel_id, ai_name, chat_id)
             memory_content = read_memory_content(server_id, channel_id, ai_name, chat_id)
-            memory_data = _load_memory(server_id, channel_id, ai_name, chat_id)
-            memory_count = len(memory_data)
-            
-            # Always inject memory prompt when system is enabled, even if no memories yet
+
+            # Initialize file if doesn't exist
             if not memory_content:
-                memory_content = "No memories saved yet."
-            
+                initialize_memory_file(server_id, channel_id, ai_name, chat_id)
+                memory_content = "No memories saved yet. Use Edit tool to add information."
+
             # Process memory prompt template
-            memory_prompt_template = config.get("memory_prompt", "{{memory}}")
+            memory_prompt_template = config.get("memory_prompt", "{{memory_content}}")
             memory_prompt = self._process_template(memory_prompt_template, {
-                "memory": memory_content,
+                "memory_content": memory_content,
+                "memory_file_path": str(memory_file_path),
                 "char": char_name,
                 "user": user_name,
-                "memory_count": str(memory_count),
                 "ai_name": ai_name
             })
             components["memory_prompt"] = memory_prompt
-            func.log.debug(f"Injected memory prompt for chat {chat_id} ({memory_count} entries)")
+            func.log.debug(f"Injected memory prompt for chat {chat_id}")
         else:
             components["memory_prompt"] = None
         

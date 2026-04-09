@@ -33,13 +33,15 @@ class ToolExecutor:
     def _register_tools(self):
         """Register all available tools."""
         from AI.tools import discord_tools, memory_tools, bash_tool, attachment_tools, container_file_tools, moderation_tools
-        
+
         # Register unified Discord query tool
         self.tools["discord_query"] = discord_tools.discord_query
-        
-        # Register unified memory tool
-        self.tools["memory"] = memory_tools.memory
-        
+
+        # Register memory tools
+        self.tools["read_memory"] = memory_tools.read_memory
+        self.tools["edit_memory"] = memory_tools.edit_memory
+        self.tools["write_memory"] = memory_tools.write_memory
+
         # Register bash tool
         self.tools["bash_tool"] = bash_tool.bash_tool
         

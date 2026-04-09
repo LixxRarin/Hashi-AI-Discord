@@ -9,6 +9,7 @@ packaging
 PyNaCl
 openai
 tiktoken
+python-frontmatter
 psutil
 ollama
 anthropic

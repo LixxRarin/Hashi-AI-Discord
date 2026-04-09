@@ -1,22 +1,24 @@
 """
-Memory Tools - Persistent memory management for LLM
+Memory Tools - Persistent memory management for LLM (Markdown-based)
 
-This module provides tools for the LLM to manage persistent memory across conversations.
-Each chat has its own independent memory stored as JSON.
+This module provides tools for the LLM to manage persistent memory using Markdown files.
+The LLM can read and write the entire memory file, organizing information by topics.
+
+Tool functions (for LLM):
+- read_memory(): Read the full memory file
+- write_memory(): Write/update the full memory file
 
 Exported functions for external use:
-- read_memory_content(): Get formatted memory content for prompt injection
+- get_memory_file_path(): Get path to memory file
+- read_memory_content(): Get formatted memory content for prompt injection (without frontmatter)
+- initialize_memory_file(): Create initial memory file with frontmatter
+- get_memory_stats(): Get statistics about memory usage
 - delete_memory_file(): Delete memory files during cleanup
-- _load_memory(): Load raw memory data (for stats/internal use)
-
-This module provides tools for the LLM to manage persistent memory across conversations.
-Each chat has its own independent memory stored as JSON.
 """
 
-import json
 import logging
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime, timezone
 
 log = logging.getLogger(__name__)
@@ -53,7 +55,7 @@ def _get_memory_path(server_id: str, channel_id: str, ai_name: str, chat_id: str
         chat_id: Chat ID
 
     Returns:
-        Path: Path to memory file
+        Path: Path to memory Markdown file
     """
     from utils.core.paths import DataPaths
 
@@ -66,9 +68,9 @@ def _get_memory_path(server_id: str, channel_id: str, ai_name: str, chat_id: str
     return Path(memory_file)
 
 
-def _load_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> List[Dict[str, Any]]:
+def get_memory_file_path(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> Path:
     """
-    Load memory entries from file.
+    Get path to memory file for LLM to use with Read/Edit tools.
 
     Args:
         server_id: Discord server ID
@@ -77,512 +79,157 @@ def _load_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str) ->
         chat_id: Chat ID
 
     Returns:
-        List of memory entries
+        Path: Path to memory Markdown file
+    """
+    return _get_memory_path(server_id, channel_id, ai_name, chat_id)
+
+
+def parse_memory_frontmatter(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Parse frontmatter from memory file.
+
+    Args:
+        server_id: Discord server ID
+        channel_id: Discord channel ID
+        ai_name: AI name
+        chat_id: Chat ID
+
+    Returns:
+        Dict with frontmatter metadata or None if file doesn't exist
     """
     path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
 
     if not path.exists():
-        return []
+        return None
 
     try:
+        import frontmatter
         with open(path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        # Validate structure
-        if not isinstance(data, list):
-            log.error(f"Invalid memory file structure for channel {channel_id}/chat {chat_id}")
-            return []
-
-        return data
-
-    except json.JSONDecodeError as e:
-        log.error(f"Failed to parse memory file for channel {channel_id}/chat {chat_id}: {e}")
-        return []
+            post = frontmatter.load(f)
+        return dict(post.metadata)
     except Exception as e:
-        log.error(f"Failed to load memory for channel {channel_id}/chat {chat_id}: {e}")
-        return []
+        log.error(f"Failed to parse frontmatter for {path}: {e}")
+        return None
 
 
-def _save_memory(server_id: str, channel_id: str, ai_name: str, chat_id: str, entries: List[Dict[str, Any]]) -> bool:
+def initialize_memory_file(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> bool:
     """
-    Save memory entries to file.
-    
+    Create initial memory file with frontmatter if it doesn't exist.
+
     Args:
         server_id: Discord server ID
         channel_id: Discord channel ID
         ai_name: AI name
         chat_id: Chat ID
-        entries: List of memory entries
-        
+
     Returns:
-        bool: True if successful
+        bool: True if file was created, False if already exists or error
     """
     path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
-    
-    try:
-        with open(path, 'w', encoding='utf-8') as f:
-            json.dump(entries, f, ensure_ascii=False, indent=2)
-        
-        log.debug(f"Saved {len(entries)} memory entries for channel {channel_id}/chat {chat_id}")
-        return True
-        
-    except Exception as e:
-        log.error(f"Failed to save memory for channel {channel_id}/chat {chat_id}: {e}")
+
+    if path.exists():
         return False
 
-
-def _calculate_total_tokens(entries: List[Dict]) -> int:
-    """
-    Calculate total tokens in all entries.
-    
-    Args:
-        entries: List of memory entries
-        
-    Returns:
-        int: Total tokens
-    """
-    total = 0
-    for entry in entries:
-        content = entry.get("content", "")
-        total += _count_tokens(content)
-    return total
-
-
-def _get_next_id(entries: List[Dict]) -> int:
-    """
-    Get next available ID.
-    
-    Args:
-        entries: List of memory entries
-        
-    Returns:
-        int: Next ID
-    """
-    if not entries:
-        return 1
-    
-    return max(entry.get("id", 0) for entry in entries) + 1
-
-
-async def memory(
-    action: str,
-    content: Optional[str] = None,
-    memory_id: Optional[int] = None,
-    query: Optional[str] = None,
-    context: Optional[Dict[str, Any]] = None
-) -> Dict[str, Any]:
-    """
-    Unified memory handler - action-based routing.
-    
-    This is the main entry point for all memory operations.
-    Routes to appropriate specialized functions based on action.
-    
-    Args:
-        action: Memory operation ("list", "add", "update", "remove", "search")
-        content: Memory content (required for "add" and "update")
-        memory_id: Memory ID (required for "update" and "remove")
-        query: Search query (required for "search")
-        context: Context information
-        
-    Returns:
-        Dict with operation result or error
-    """
-    if context is None:
-        return {"error": "No context provided"}
-    
-    log.info(f"Memory operation: action={action}")
-    
     try:
-        if action == "list":
-            return await list_memories(context)
-        
-        elif action == "add":
-            if not content:
-                return {
-                    "error": "Parameter 'content' is required for action 'add'",
-                    "example": "memory(action='add', content='User prefers dark mode')"
-                }
-            return await add_memory(content, context)
-        
-        elif action == "update":
-            if memory_id is None:
-                return {
-                    "error": "Parameter 'memory_id' is required for action 'update'",
-                    "example": "memory(action='update', memory_id=3, content='Updated info')"
-                }
-            if not content:
-                return {
-                    "error": "Parameter 'content' is required for action 'update'",
-                    "example": "memory(action='update', memory_id=3, content='Updated info')"
-                }
-            return await update_memory(memory_id, content, context)
-        
-        elif action == "remove":
-            if memory_id is None:
-                return {
-                    "error": "Parameter 'memory_id' is required for action 'remove'",
-                    "example": "memory(action='remove', memory_id=3)"
-                }
-            return await remove_memory(memory_id, context)
-        
-        elif action == "search":
-            if not query:
-                return {
-                    "error": "Parameter 'query' is required for action 'search'",
-                    "example": "memory(action='search', query='dark mode')"
-                }
-            return await search_memories(query, context)
-        
-        else:
-            return {
-                "error": f"Unknown action: {action}",
-                "valid_actions": ["list", "add", "update", "remove", "search"]
-            }
-    
+        import frontmatter
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Create initial content with frontmatter
+        post = frontmatter.Post(
+            "# Persistent Memory\n\n*No memories saved yet. Use the Edit tool to add information organized by topics.*\n",
+            ai_name=ai_name,
+            chat_id=chat_id,
+            created=now,
+            last_updated=now
+        )
+
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(frontmatter.dumps(post))
+
+        log.info(f"Initialized memory file: {path}")
+        return True
+
     except Exception as e:
-        log.error(f"Error in memory operation (action={action}): {e}", exc_info=True)
-        return {
-            "error": f"Failed to execute memory operation: {str(e)}",
-            "action": action
-        }
-
-
-async def list_memories(context: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    List all memory entries.
-    
-    Args:
-        context: Context information (server_id, channel_id, ai_name, chat_id)
-        
-    Returns:
-        Dict with memories list and metadata
-    """
-    if context is None:
-        return {"error": "No context provided"}
-    
-    server_id = context.get("server_id")
-    channel_id = context.get("channel_id")
-    ai_name = context.get("ai_name")
-    chat_id = context.get("chat_id", "default")
-    max_tokens = context.get("memory_max_tokens", 1000)
-    
-    if not server_id or not channel_id or not ai_name:
-        return {"error": "Missing server_id, channel_id, or ai_name in context"}
-    
-    try:
-        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
-        total_tokens = _calculate_total_tokens(entries)
-        
-        return {
-            "memories": entries,
-            "count": len(entries),
-            "total_tokens": total_tokens,
-            "max_tokens": max_tokens
-        }
-        
-    except Exception as e:
-        log.error(f"Error in list_memories: {e}", exc_info=True)
-        return {
-            "error": f"Failed to list memories: {str(e)}",
-            "memories": []
-        }
-
-
-async def add_memory(content: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Add a new memory entry.
-    
-    Args:
-        content: Memory content to save
-        context: Context information
-        
-    Returns:
-        Dict with success status and new memory ID
-    """
-    if context is None:
-        return {"error": "No context provided"}
-    
-    if not content or not content.strip():
-        return {"error": "Memory content cannot be empty"}
-    
-    server_id = context.get("server_id")
-    channel_id = context.get("channel_id")
-    ai_name = context.get("ai_name")
-    chat_id = context.get("chat_id", "default")
-    max_tokens = context.get("memory_max_tokens", 1000)
-    
-    if not server_id or not channel_id or not ai_name:
-        return {"error": "Missing server_id, channel_id, or ai_name in context"}
-    
-    try:
-        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
-        
-        # Check token limit
-        new_tokens = _count_tokens(content)
-        current_tokens = _calculate_total_tokens(entries)
-        
-        if current_tokens + new_tokens > max_tokens:
-            return {
-                "error": f"Memory limit exceeded. Current: {current_tokens} tokens, "
-                        f"New entry: {new_tokens} tokens, Max: {max_tokens} tokens. "
-                        f"Please remove some old memories first.",
-                "current_tokens": current_tokens,
-                "new_tokens": new_tokens,
-                "max_tokens": max_tokens
-            }
-        
-        # Create new entry
-        new_id = _get_next_id(entries)
-        new_entry = {
-            "id": new_id,
-            "content": content.strip(),
-            "timestamp": datetime.now(timezone.utc).isoformat()
-        }
-        
-        entries.append(new_entry)
-        
-        # Save
-        if not _save_memory(server_id, channel_id, ai_name, chat_id, entries):
-            return {"error": "Failed to save memory"}
-        
-        log.info(f"Added memory #{new_id} for channel {channel_id}/chat {chat_id} ({new_tokens} tokens)")
-        
-        return {
-            "success": True,
-            "memory_id": new_id,
-            "tokens_used": new_tokens,
-            "total_tokens": current_tokens + new_tokens,
-            "max_tokens": max_tokens
-        }
-        
-    except Exception as e:
-        log.error(f"Error in add_memory: {e}", exc_info=True)
-        return {"error": f"Failed to add memory: {str(e)}"}
-
-
-async def update_memory(memory_id: int, content: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Update an existing memory entry.
-    
-    Args:
-        memory_id: ID of memory to update
-        content: New content
-        context: Context information
-        
-    Returns:
-        Dict with success status
-    """
-    if context is None:
-        return {"error": "No context provided"}
-    
-    if not content or not content.strip():
-        return {"error": "Memory content cannot be empty"}
-    
-    server_id = context.get("server_id")
-    channel_id = context.get("channel_id")
-    ai_name = context.get("ai_name")
-    chat_id = context.get("chat_id", "default")
-    max_tokens = context.get("memory_max_tokens", 1000)
-    
-    if not server_id or not channel_id or not ai_name:
-        return {"error": "Missing server_id, channel_id, or ai_name in context"}
-    
-    try:
-        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
-        
-        # Find entry
-        entry_index = None
-        for i, entry in enumerate(entries):
-            if entry.get("id") == memory_id:
-                entry_index = i
-                break
-        
-        if entry_index is None:
-            return {
-                "error": f"Memory with ID {memory_id} not found",
-                "available_ids": [e.get("id") for e in entries]
-            }
-        
-        # Check token limit (excluding the old entry)
-        old_tokens = _count_tokens(entries[entry_index].get("content", ""))
-        new_tokens = _count_tokens(content)
-        other_tokens = _calculate_total_tokens(entries) - old_tokens
-        
-        if other_tokens + new_tokens > max_tokens:
-            return {
-                "error": f"Memory limit exceeded. Other entries: {other_tokens} tokens, "
-                        f"New content: {new_tokens} tokens, Max: {max_tokens} tokens.",
-                "current_tokens": other_tokens + old_tokens,
-                "new_tokens": new_tokens,
-                "max_tokens": max_tokens
-            }
-        
-        # Update entry
-        entries[entry_index]["content"] = content.strip()
-        entries[entry_index]["timestamp"] = datetime.now(timezone.utc).isoformat()
-        
-        # Save
-        if not _save_memory(server_id, channel_id, ai_name, chat_id, entries):
-            return {"error": "Failed to save memory"}
-        
-        log.info(f"Updated memory #{memory_id} for channel {channel_id}/chat {chat_id}")
-        
-        return {
-            "success": True,
-            "memory_id": memory_id,
-            "old_tokens": old_tokens,
-            "new_tokens": new_tokens,
-            "total_tokens": other_tokens + new_tokens
-        }
-        
-    except Exception as e:
-        log.error(f"Error in update_memory: {e}", exc_info=True)
-        return {"error": f"Failed to update memory: {str(e)}"}
-
-
-async def remove_memory(memory_id: int, context: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Remove a specific memory entry.
-    
-    Args:
-        memory_id: ID of memory to remove
-        context: Context information
-        
-    Returns:
-        Dict with success status
-    """
-    if context is None:
-        return {"error": "No context provided"}
-    
-    server_id = context.get("server_id")
-    channel_id = context.get("channel_id")
-    ai_name = context.get("ai_name")
-    chat_id = context.get("chat_id", "default")
-    
-    if not server_id or not channel_id or not ai_name:
-        return {"error": "Missing server_id, channel_id, or ai_name in context"}
-    
-    try:
-        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
-        
-        # Find and remove entry
-        entry_index = None
-        for i, entry in enumerate(entries):
-            if entry.get("id") == memory_id:
-                entry_index = i
-                break
-        
-        if entry_index is None:
-            return {
-                "error": f"Memory with ID {memory_id} not found",
-                "available_ids": [e.get("id") for e in entries]
-            }
-        
-        removed_entry = entries.pop(entry_index)
-        removed_tokens = _count_tokens(removed_entry.get("content", ""))
-        
-        # Save
-        if not _save_memory(server_id, channel_id, ai_name, chat_id, entries):
-            return {"error": "Failed to save memory"}
-        
-        log.info(f"Removed memory #{memory_id} for channel {channel_id}/chat {chat_id}")
-        
-        return {
-            "success": True,
-            "memory_id": memory_id,
-            "removed_tokens": removed_tokens,
-            "remaining_count": len(entries),
-            "remaining_tokens": _calculate_total_tokens(entries)
-        }
-        
-    except Exception as e:
-        log.error(f"Error in remove_memory: {e}", exc_info=True)
-        return {"error": f"Failed to remove memory: {str(e)}"}
-
-
-async def search_memories(query: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
-    """
-    Search memories by keyword.
-    
-    Args:
-        query: Search term
-        context: Context information
-        
-    Returns:
-        Dict with matching memories
-    """
-    if context is None:
-        return {"error": "No context provided"}
-    
-    if not query or not query.strip():
-        return {"error": "Search query cannot be empty"}
-    
-    server_id = context.get("server_id")
-    channel_id = context.get("channel_id")
-    ai_name = context.get("ai_name")
-    chat_id = context.get("chat_id", "default")
-    
-    if not server_id or not channel_id or not ai_name:
-        return {"error": "Missing server_id, channel_id, or ai_name in context"}
-    
-    try:
-        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
-        
-        # Search (case-insensitive)
-        query_lower = query.lower()
-        matches = []
-        
-        for entry in entries:
-            content = entry.get("content", "")
-            if query_lower in content.lower():
-                matches.append(entry)
-        
-        return {
-            "matches": matches,
-            "count": len(matches),
-            "query": query
-        }
-        
-    except Exception as e:
-        log.error(f"Error in search_memories: {e}", exc_info=True)
-        return {
-            "error": f"Failed to search memories: {str(e)}",
-            "matches": []
-        }
+        log.error(f"Failed to initialize memory file {path}: {e}")
+        return False
 
 
 def read_memory_content(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> Optional[str]:
     """
-    Read memory content for injection into prompt.
-    
+    Read memory content for injection into prompt (without frontmatter).
+
     This function is used by chat_service to inject memories into the conversation.
-    
+
     Args:
         server_id: Discord server ID
         channel_id: Discord channel ID
         ai_name: AI name
         chat_id: Chat ID
-        
+
     Returns:
-        Formatted memory content or None if no memories
+        Memory content without frontmatter or None if no file exists
     """
-    try:
-        entries = _load_memory(server_id, channel_id, ai_name, chat_id)
-        
-        if not entries:
-            return None
-        
-        lines = []
-        for entry in entries:
-            memory_id = entry.get("id")
-            content = entry.get("content", "")
-            lines.append(f"[{memory_id}] {content}")
-        
-        return "\n".join(lines)
-        
-    except Exception as e:
-        log.error(f"Error reading memory content for channel {channel_id}/chat {chat_id}: {e}")
+    path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
+
+    if not path.exists():
         return None
+
+    try:
+        import frontmatter
+        with open(path, 'r', encoding='utf-8') as f:
+            post = frontmatter.load(f)
+
+        # Return content without frontmatter
+        return post.content.strip()
+
+    except Exception as e:
+        log.error(f"Error reading memory content for {path}: {e}")
+        return None
+
+
+def get_memory_stats(server_id: str, channel_id: str, ai_name: str, chat_id: str) -> Dict[str, Any]:
+    """
+    Get statistics about memory usage.
+
+    Args:
+        server_id: Discord server ID
+        channel_id: Discord channel ID
+        ai_name: AI name
+        chat_id: Chat ID
+
+    Returns:
+        Dict with stats: exists, token_count, last_updated, file_size
+    """
+    path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
+
+    if not path.exists():
+        return {
+            "exists": False,
+            "token_count": 0,
+            "last_updated": None,
+            "file_size": 0
+        }
+
+    try:
+        content = read_memory_content(server_id, channel_id, ai_name, chat_id)
+        metadata = parse_memory_frontmatter(server_id, channel_id, ai_name, chat_id)
+
+        return {
+            "exists": True,
+            "token_count": _count_tokens(content) if content else 0,
+            "last_updated": metadata.get("last_updated") if metadata else None,
+            "file_size": path.stat().st_size
+        }
+
+    except Exception as e:
+        log.error(f"Error getting memory stats for {path}: {e}")
+        return {
+            "exists": True,
+            "token_count": 0,
+            "last_updated": None,
+            "file_size": 0
+        }
 
 
 def delete_memory_file(server_id: str, channel_id: str, ai_name: str, chat_id: str = None) -> bool:
@@ -618,7 +265,7 @@ def delete_memory_file(server_id: str, channel_id: str, ai_name: str, chat_id: s
                 return False
 
             safe_ai_name = "".join(c for c in ai_name if c.isalnum() or c in "_-")
-            pattern = f"{safe_ai_name}_*.json"
+            pattern = f"{safe_ai_name}_*.md"
 
             deleted_count = 0
             for path in memory_dir.glob(pattern):
@@ -659,7 +306,7 @@ def delete_server_memory_files(server_id: str) -> int:
                 continue
 
             # Delete all memory files in this channel's memory directory
-            for memory_file in memory_dir.glob("*.json"):
+            for memory_file in memory_dir.glob("*.md"):
                 memory_file.unlink()
                 deleted_count += 1
 
@@ -694,7 +341,7 @@ def delete_channel_memory_files(server_id: str, channel_id: str) -> int:
             return 0
 
         deleted_count = 0
-        for memory_file in memory_dir.glob("*.json"):
+        for memory_file in memory_dir.glob("*.md"):
             memory_file.unlink()
             deleted_count += 1
 
@@ -706,3 +353,245 @@ def delete_channel_memory_files(server_id: str, channel_id: str) -> int:
     except Exception as e:
         log.error(f"Error deleting memory files for channel {channel_id}: {e}")
         return 0
+
+
+# ==================== Tool Functions for LLM ====================
+
+async def read_memory(context: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Read the full memory file (tool for LLM).
+
+    Returns the complete memory content including frontmatter metadata.
+
+    Args:
+        context: Context information (server_id, channel_id, ai_name, chat_id)
+
+    Returns:
+        Dict with full_content (entire file) and metadata
+    """
+    if context is None:
+        return {"error": "No context provided"}
+
+    server_id = context.get("server_id")
+    channel_id = context.get("channel_id")
+    ai_name = context.get("ai_name")
+    chat_id = context.get("chat_id", "default")
+
+    if not server_id or not channel_id or not ai_name:
+        return {"error": "Missing server_id, channel_id, or ai_name in context"}
+
+    try:
+        path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
+
+        if not path.exists():
+            return {
+                "error": "Memory file does not exist yet",
+                "suggestion": "File will be created automatically when you save information"
+            }
+
+        import frontmatter
+        with open(path, 'r', encoding='utf-8') as f:
+            post = frontmatter.load(f)
+
+        # Convert metadata to JSON-serializable format
+        metadata = {}
+        for key, value in post.metadata.items():
+            if isinstance(value, datetime):
+                metadata[key] = value.isoformat()
+            else:
+                metadata[key] = value
+
+        return {
+            "success": True,
+            "content": post.content.strip(),
+            "metadata": metadata,
+            "file_path": str(path),
+            "tokens": _count_tokens(post.content)
+        }
+
+    except Exception as e:
+        log.error(f"Error in read_memory: {e}", exc_info=True)
+        return {"error": f"Failed to read memory: {str(e)}"}
+
+
+async def edit_memory(old_string: str, new_string: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Edit memory by replacing old_string with new_string (tool for LLM).
+
+    Similar to a text editor's find-and-replace. Use this to make surgical edits
+    without rewriting the entire file.
+
+    Args:
+        old_string: Text to find and replace (must match exactly)
+        new_string: Text to replace it with
+        context: Context information
+
+    Returns:
+        Dict with success status and statistics
+    """
+    if context is None:
+        return {"error": "No context provided"}
+
+    if old_string == new_string:
+        return {"error": "old_string and new_string are identical - no changes to make"}
+
+    server_id = context.get("server_id")
+    channel_id = context.get("channel_id")
+    ai_name = context.get("ai_name")
+    chat_id = context.get("chat_id", "default")
+    max_tokens = context.get("memory_max_tokens", 1500)
+
+    if not server_id or not channel_id or not ai_name:
+        return {"error": "Missing server_id, channel_id, or ai_name in context"}
+
+    try:
+        path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
+
+        # Load existing file or create new
+        import frontmatter
+        now = datetime.now(timezone.utc).isoformat()
+
+        if path.exists():
+            with open(path, 'r', encoding='utf-8') as f:
+                post = frontmatter.load(f)
+            content = post.content
+            metadata = dict(post.metadata)
+        else:
+            # Create new file with initial structure
+            content = "# Persistent Memory\n\n*No memories saved yet.*\n"
+            metadata = {
+                "ai_name": ai_name,
+                "chat_id": chat_id,
+                "created": now,
+                "last_updated": now
+            }
+
+        # Perform replacement
+        if old_string not in content:
+            return {
+                "error": f"String to replace not found in memory file",
+                "old_string": old_string[:100] + "..." if len(old_string) > 100 else old_string,
+                "suggestion": "Use read_memory() to see current content, then try again with exact text"
+            }
+
+        # Count occurrences
+        occurrences = content.count(old_string)
+        if occurrences > 1:
+            return {
+                "error": f"Found {occurrences} matches of old_string. Please provide more context to make it unique.",
+                "occurrences": occurrences
+            }
+
+        # Replace
+        new_content = content.replace(old_string, new_string, 1)
+
+        # Check token limit
+        new_tokens = _count_tokens(new_content)
+        if new_tokens > max_tokens:
+            return {
+                "error": f"Edit would exceed token limit. Result: {new_tokens} tokens, Max: {max_tokens} tokens. "
+                        f"Please consolidate or remove some information.",
+                "current_tokens": new_tokens,
+                "max_tokens": max_tokens
+            }
+
+        # Update metadata
+        metadata["last_updated"] = now
+
+        # Save
+        post = frontmatter.Post(new_content.strip(), **metadata)
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(frontmatter.dumps(post))
+
+        log.info(f"Edited memory for channel {channel_id}/chat {chat_id} ({new_tokens} tokens)")
+
+        return {
+            "success": True,
+            "tokens_used": new_tokens,
+            "max_tokens": max_tokens,
+            "file_path": str(path)
+        }
+
+    except Exception as e:
+        log.error(f"Error in edit_memory: {e}", exc_info=True)
+        return {"error": f"Failed to edit memory: {str(e)}"}
+
+
+async def write_memory(content: str, context: Dict[str, Any] = None) -> Dict[str, Any]:
+    """
+    Write/replace the full memory file (tool for LLM).
+
+    Use this ONLY for initial creation or complete rewrites.
+    For updates, use edit_memory() instead.
+
+    Args:
+        content: New memory content (Markdown format, without frontmatter)
+        context: Context information
+
+    Returns:
+        Dict with success status and statistics
+    """
+    if context is None:
+        return {"error": "No context provided"}
+
+    if not content or not content.strip():
+        return {"error": "Memory content cannot be empty"}
+
+    server_id = context.get("server_id")
+    channel_id = context.get("channel_id")
+    ai_name = context.get("ai_name")
+    chat_id = context.get("chat_id", "default")
+    max_tokens = context.get("memory_max_tokens", 1500)
+
+    if not server_id or not channel_id or not ai_name:
+        return {"error": "Missing server_id, channel_id, or ai_name in context"}
+
+    try:
+        path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
+
+        # Check token limit
+        new_tokens = _count_tokens(content)
+        if new_tokens > max_tokens:
+            return {
+                "error": f"Memory exceeds token limit. Content: {new_tokens} tokens, Max: {max_tokens} tokens. "
+                        f"Please consolidate or remove some information.",
+                "current_tokens": new_tokens,
+                "max_tokens": max_tokens
+            }
+
+        # Load existing metadata or create new
+        import frontmatter
+        now = datetime.now(timezone.utc).isoformat()
+
+        if path.exists():
+            with open(path, 'r', encoding='utf-8') as f:
+                old_post = frontmatter.load(f)
+            metadata = dict(old_post.metadata)
+            metadata["last_updated"] = now
+        else:
+            metadata = {
+                "ai_name": ai_name,
+                "chat_id": chat_id,
+                "created": now,
+                "last_updated": now
+            }
+
+        # Create new post with updated content
+        post = frontmatter.Post(content.strip(), **metadata)
+
+        # Save
+        with open(path, 'w', encoding='utf-8') as f:
+            f.write(frontmatter.dumps(post))
+
+        log.info(f"Wrote memory file for channel {channel_id}/chat {chat_id} ({new_tokens} tokens)")
+
+        return {
+            "success": True,
+            "tokens_used": new_tokens,
+            "max_tokens": max_tokens,
+            "file_path": str(path)
+        }
+
+    except Exception as e:
+        log.error(f"Error in write_memory: {e}", exc_info=True)
+        return {"error": f"Failed to write memory: {str(e)}"}

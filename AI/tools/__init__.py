@@ -108,30 +108,50 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "memory",
-            "description": "Manage persistent memory across conversations. Use to remember user preferences, facts, and important information. Always check memories before answering questions about past conversations. Examples: memory(action='list'), memory(action='add', content='User prefers dark mode'), memory(action='search', query='dark mode'), memory(action='update', memory_id=3, content='Updated info'), memory(action='remove', memory_id=3)",
+            "name": "read_memory",
+            "description": "Read your persistent memory file. Returns the complete memory content organized by topics (Users, Server Information, Preferences, etc.). Use this to check what information you have saved before editing or adding new content.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_memory",
+            "description": "Edit your memory by replacing old text with new text. Works like find-and-replace. Use this to make surgical edits without rewriting the entire file. The old_string must match exactly (including whitespace). If you want to add new information to an existing section, use old_string to match that section and new_string to include the section with the new info added. Example: To add 'Likes pizza' to Rarin's section, use old_string='### Rarin (@lixxrarin)\\n- Creator, female' and new_string='### Rarin (@lixxrarin)\\n- Creator, female\\n- Likes pizza'",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "action": {
+                    "old_string": {
                         "type": "string",
-                        "enum": ["list", "add", "update", "remove", "search"],
-                        "description": "Memory operation: 'list' (show all memories), 'add' (save new memory), 'update' (modify existing memory), 'remove' (delete memory), 'search' (find memories by keyword)"
+                        "description": "Text to find and replace. Must match exactly (including line breaks and spacing). If not found or found multiple times, the edit will fail with an error."
                     },
-                    "content": {
+                    "new_string": {
                         "type": "string",
-                        "description": "Memory content to save or update (required for 'add' and 'update' actions). Be concise but clear."
-                    },
-                    "memory_id": {
-                        "type": "integer",
-                        "description": "ID of the memory to update or remove (required for 'update' and 'remove' actions). Get this from list_memories or search_memories."
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Search term or keyword to look for in memories (required for 'search' action)"
+                        "description": "Text to replace it with. Can be longer or shorter than old_string."
                     }
                 },
-                "required": ["action"]
+                "required": ["old_string", "new_string"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "write_memory",
+            "description": "Write/replace the entire memory file. Use this ONLY for initial creation or complete rewrites. For updates to existing content, use edit_memory instead (it's more efficient). Organize content by topics with ## headers for main sections and ### for subsections.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "Complete memory content in Markdown format. Organize by topics with ## headers (Users, Server Information, Preferences) and ### for subsections (individual users). Use bullet points for facts. Do NOT include YAML frontmatter - that's handled automatically."
+                    }
+                },
+                "required": ["content"]
             }
         }
     },

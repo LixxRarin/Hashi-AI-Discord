@@ -73,12 +73,12 @@ class DataPaths:
             chat_id: Chat session ID (default: "default")
 
         Returns:
-            Path to memory JSON file for this AI chat
+            Path to memory Markdown file for this AI chat
         """
         memory_dir = self.get_memory_dir(server_id, channel_id)
         # Sanitize ai_name for filename (remove emojis and special chars)
         safe_ai_name = "".join(c for c in ai_name if c.isalnum() or c in "_-")
-        return f"{memory_dir}/{safe_ai_name}_{chat_id}.json"
+        return f"{memory_dir}/{safe_ai_name}_{chat_id}.md"
 
     # ==================== Server-Level Paths ====================
 
