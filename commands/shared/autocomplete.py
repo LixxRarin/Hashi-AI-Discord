@@ -46,8 +46,14 @@ class AutocompleteHelpers:
 
                 for ai_name, ai_data in channel_data.items():
                     if current.lower() in ai_name.lower():
-                        provider = ai_data.get("provider", "openai").capitalize()
-                        display_name = f"{ai_name} • {provider} • #{channel_name}"
+                        # Show API connection name if available, otherwise show provider
+                        api_connection = ai_data.get("api_connection")
+                        if api_connection:
+                            provider_display = api_connection
+                        else:
+                            provider_display = ai_data.get("provider", "openai").capitalize()
+
+                        display_name = f"{ai_name} • {provider_display} • #{channel_name}"
                         # Use special separator to encode both ai_name and channel_id
                         value = f"{ai_name}|||{channel_id_str}"
                         choices.append(app_commands.Choice(name=display_name[:100], value=value))
@@ -106,8 +112,14 @@ class AutocompleteHelpers:
                         continue
 
                     if current.lower() in ai_name.lower():
-                        provider = ai_data.get("provider", "openai").capitalize()
-                        display_name = f"{ai_name} • {provider} • #{channel_name}"
+                        # Show API connection name if available, otherwise show provider
+                        api_connection = ai_data.get("api_connection")
+                        if api_connection:
+                            provider_display = api_connection
+                        else:
+                            provider_display = ai_data.get("provider", "openai").capitalize()
+
+                        display_name = f"{ai_name} • {provider_display} • #{channel_name}"
                         # Use special separator to encode both ai_name and channel_id
                         value = f"{ai_name}|||{channel_id_str}"
                         choices.append(app_commands.Choice(name=display_name[:100], value=value))
