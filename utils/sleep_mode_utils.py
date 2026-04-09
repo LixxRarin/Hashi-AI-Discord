@@ -51,29 +51,31 @@ def check_wakeup_patterns(
 ) -> bool:
     """
     Check if message matches any wake-up pattern.
-    
+
     This function is extracted from MessagePipeline._check_wakeup_patterns
     to be reusable by both pipeline and timing controller.
-    
+
     Args:
         message_content: The message content to check
         ai_name: Name of the AI
         is_mentioned: Whether AI was mentioned
         is_reply_to_bot: Whether message is a reply to bot
         patterns: List of wake-up patterns (placeholders or regex)
-        
+
     Returns:
         True if any pattern matches
-        
+
     Examples:
         >>> check_wakeup_patterns("Hello @bot", "bot", True, False, ["{ai_mention}"])
         True
         >>> check_wakeup_patterns("Hello", "bot", False, False, ["{ai_mention}"])
         False
     """
+
     if not patterns:
         # Default behavior: wake on mention or reply
-        return is_mentioned or is_reply_to_bot
+        result = is_mentioned or is_reply_to_bot
+        return result
     
     for pattern in patterns:
         # Handle special placeholders
@@ -85,8 +87,25 @@ def check_wakeup_patterns(
                 return True
         elif pattern == "{ai_name}":
             # Check if AI name appears in message (case-insensitive)
+            # Remove emojis and special chars from AI name for flexible matching
+            # This handles cases like "Hashi 🐏" matching "hashi"
+            ai_name_clean = re.sub(r'[^\w\s]', '', ai_name).strip()
+
+            # Try matching the full name first
             if re.search(re.escape(ai_name), message_content, re.IGNORECASE):
                 return True
+
+            # Try matching the cleaned name (without emojis/special chars)
+            if ai_name_clean and re.search(r'\b' + re.escape(ai_name_clean) + r'\b', message_content, re.IGNORECASE):
+                return True
+
+            # Try matching individual words from the AI name
+            # This handles multi-word names like "Hashi Bot"
+            words = ai_name_clean.split()
+            for word in words:
+                if len(word) >= 3:  # Only match words with 3+ chars to avoid false positives
+                    if re.search(r'\b' + re.escape(word) + r'\b', message_content, re.IGNORECASE):
+                        return True
         else:
             # Treat as regex pattern
             try:
@@ -95,7 +114,7 @@ def check_wakeup_patterns(
             except re.error as e:
                 log.warning(f"Invalid wake-up regex pattern '{pattern}': {e}")
                 continue
-    
+
     return False
 
 

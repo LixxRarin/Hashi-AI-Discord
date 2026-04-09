@@ -73,14 +73,18 @@ async def fetch_image_for_vision(
         
         # Convert to base64
         base64_data = base64.b64encode(image_data).decode('utf-8')
-        
-        # Determine format from URL
+
+        # Determine format from URL (extract path to ignore query parameters)
+        from urllib.parse import urlparse
+        parsed_url = urlparse(url)
+        url_path = parsed_url.path.lower()
+
         image_format = "image/png"
-        if url.endswith('.jpg') or url.endswith('.jpeg'):
+        if url_path.endswith('.jpg') or url_path.endswith('.jpeg'):
             image_format = "image/jpeg"
-        elif url.endswith('.gif'):
+        elif url_path.endswith('.gif'):
             image_format = "image/gif"
-        elif url.endswith('.webp'):
+        elif url_path.endswith('.webp'):
             image_format = "image/webp"
         
         log.info(f"Successfully fetched {image_type} for vision: {len(image_data)} bytes")

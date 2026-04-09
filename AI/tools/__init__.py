@@ -203,7 +203,7 @@ TOOL_DEFINITIONS = [
                     },
                     "url": {
                         "type": "string",
-                        "description": "Direct URL to a file (e.g., sticker URL, attachment URL from Discord CDN). Use this to process files directly without needing a message ID. Examples: 'https://cdn.discordapp.com/stickers/123.png', 'https://cdn.discordapp.com/attachments/123/456/file.pdf'. Either message_id or url must be provided, but not both."
+                        "description": "Direct URL to a file (e.g., sticker URL, attachment URL from Discord CDN). IMPORTANT: When copying URLs from message history, use the COMPLETE URL exactly as shown, including ALL query parameters (?ex=...&is=...&hm=...). Discord CDN URLs require these parameters to work. Examples: 'https://cdn.discordapp.com/stickers/123.png', 'https://cdn.discordapp.com/attachments/123/456/file.jpg?ex=abc&is=def&hm=ghi'. Either message_id or url must be provided, but not both."
                     },
                     "attachment_index": {
                         "type": "integer",

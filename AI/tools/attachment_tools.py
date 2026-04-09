@@ -111,10 +111,12 @@ async def _process_direct_url(
     """
     try:
         from utils.media.attachments import get_attachment_processor
+        from urllib.parse import urlparse
         import os
-        
-        # Extract filename from URL
-        filename = os.path.basename(url.split('?')[0])  # Remove query params
+
+        # Extract filename from URL path (not from query params)
+        parsed_url = urlparse(url)
+        filename = os.path.basename(parsed_url.path)
         
         # Try to determine content type from extension
         ext = os.path.splitext(filename)[1].lower()
