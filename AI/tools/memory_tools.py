@@ -588,17 +588,19 @@ def read_memory_content(server_id: str, channel_id: str, ai_name: str, chat_id: 
 def delete_memory_file(server_id: str, channel_id: str, ai_name: str, chat_id: str = None) -> bool:
     """
     Delete memory file(s) for an AI in a specific server and channel. Used during cleanup.
-    
+
     Args:
         server_id: Discord server ID
         channel_id: Discord channel ID
         ai_name: AI name
         chat_id: Optional chat ID. If None, deletes all chats for this AI in this channel
-        
+
     Returns:
         bool: True if any files were deleted
     """
     try:
+        from utils.core.paths import DataPaths
+
         if chat_id:
             # Delete specific chat memory
             path = _get_memory_path(server_id, channel_id, ai_name, chat_id)
@@ -609,19 +611,23 @@ def delete_memory_file(server_id: str, channel_id: str, ai_name: str, chat_id: s
             return False
         else:
             # Delete all memory files for this AI in this channel
-            safe_server_id = "".join(c for c in server_id if c.isalnum() or c in "_-")
-            safe_channel_id = "".join(c for c in channel_id if c.isalnum() or c in "_-")
+            data_paths = DataPaths()
+            memory_dir = Path(data_paths.get_memory_dir(server_id, channel_id))
+
+            if not memory_dir.exists():
+                return False
+
             safe_ai_name = "".join(c for c in ai_name if c.isalnum() or c in "_-")
-            pattern = f"{safe_server_id}_{safe_channel_id}_{safe_ai_name}_*.json"
-            
+            pattern = f"{safe_ai_name}_*.json"
+
             deleted_count = 0
-            for path in MEMORY_DIR.glob(pattern):
+            for path in memory_dir.glob(pattern):
                 path.unlink()
                 log.info(f"Deleted memory file: {path.name}")
                 deleted_count += 1
-            
+
             return deleted_count > 0
-            
+
     except Exception as e:
         log.error(f"Error deleting memory files for channel {channel_id}: {e}")
         return False
@@ -630,33 +636,38 @@ def delete_memory_file(server_id: str, channel_id: str, ai_name: str, chat_id: s
 def delete_server_memory_files(server_id: str) -> int:
     """
     Delete all memory files for a server. Used during server cleanup.
-    
+
     Args:
         server_id: Server ID
-        
+
     Returns:
         int: Number of files deleted
     """
     try:
-        # Sanitize server_id for filename matching
-        safe_server_id = "".join(c for c in server_id if c.isalnum() or c in "_-")
-        
-        # Pattern to match all memory files for this server
-        pattern = f"memory_{safe_server_id}_*.json"
-        
+        from utils.core.paths import DataPaths
+
+        data_paths = DataPaths()
         deleted_count = 0
-        for path in MEMORY_DIR.glob(pattern):
-            path.unlink()
-            log.info(f"Deleted memory file: {path.name}")
-            deleted_count += 1
-        
+
+        # Iterate through all channels in the server
+        channels = data_paths.list_channels(server_id)
+
+        for channel_id in channels:
+            memory_dir = Path(data_paths.get_memory_dir(server_id, channel_id))
+
+            if not memory_dir.exists():
+                continue
+
+            # Delete all memory files in this channel's memory directory
+            for memory_file in memory_dir.glob("*.json"):
+                memory_file.unlink()
+                deleted_count += 1
+
         if deleted_count > 0:
             log.info(f"Deleted {deleted_count} memory file(s)")
-        else:
-            log.debug("No memory files found")
-        
+
         return deleted_count
-        
+
     except Exception as e:
         log.error(f"Error deleting memory files: {e}")
         return 0
@@ -665,35 +676,33 @@ def delete_server_memory_files(server_id: str) -> int:
 def delete_channel_memory_files(server_id: str, channel_id: str) -> int:
     """
     Delete all memory files for a specific channel. Used during channel cleanup.
-    
+
     Args:
         server_id: Server ID
         channel_id: Channel ID
-        
+
     Returns:
         int: Number of files deleted
     """
     try:
-        # Sanitize IDs for filename matching
-        safe_server_id = "".join(c for c in server_id if c.isalnum() or c in "_-")
-        safe_channel_id = "".join(c for c in channel_id if c.isalnum() or c in "_-")
-        
-        # Pattern to match all memory files for this channel
-        pattern = f"memory_{safe_server_id}_{safe_channel_id}_*.json"
-        
+        from utils.core.paths import DataPaths
+
+        data_paths = DataPaths()
+        memory_dir = Path(data_paths.get_memory_dir(server_id, channel_id))
+
+        if not memory_dir.exists():
+            return 0
+
         deleted_count = 0
-        for path in MEMORY_DIR.glob(pattern):
-            path.unlink()
-            log.info(f"Deleted memory file: {path.name}")
+        for memory_file in memory_dir.glob("*.json"):
+            memory_file.unlink()
             deleted_count += 1
-        
+
         if deleted_count > 0:
             log.info(f"Deleted {deleted_count} memory file(s) for channel {channel_id}")
-        else:
-            log.debug(f"No memory files found for channel {channel_id}")
-        
+
         return deleted_count
-        
+
     except Exception as e:
         log.error(f"Error deleting memory files for channel {channel_id}: {e}")
         return 0

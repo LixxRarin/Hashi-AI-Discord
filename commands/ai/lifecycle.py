@@ -289,12 +289,19 @@ class AILifecycle(commands.Cog):
             
             # Remove from session data
             del channel_data[ai_name]
-            
+
             if not channel_data:
                 await func.remove_session_data(server_id, found_channel_id)
+
+                # Channel is now empty (no more AIs) - cleanup channel directory
+                try:
+                    await func.cleanup_channel_data(server_id, found_channel_id)
+                    func.log.info(f"Channel {found_channel_id} is now empty, removed directory")
+                except Exception as e:
+                    func.log.warning(f"Failed to cleanup empty channel directory: {e}")
             else:
                 await func.update_session_data(server_id, found_channel_id, channel_data)
-            
+
             func.log.info(f"Successfully removed AI '{ai_name}' and all related data from channel {found_channel_id}")
             
             # Create success embed

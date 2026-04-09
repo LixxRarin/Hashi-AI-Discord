@@ -106,6 +106,17 @@ class BridgeBot(commands.Bot):
             self.synced = True
             func.log.info("Logged in as %s!", self.user)
 
+            # Clean up orphaned data (servers/channels bot is no longer part of)
+            try:
+                cleanup_result = await func.cleanup_orphaned_data(self)
+                if cleanup_result["servers_removed"] > 0 or cleanup_result["channels_removed"] > 0:
+                    func.log.info(
+                        f"Startup cleanup: removed {cleanup_result['servers_removed']} orphaned server(s), "
+                        f"{cleanup_result['channels_removed']} orphaned channel(s)"
+                    )
+            except Exception as e:
+                func.log.warning(f"Failed to clean up orphaned data: {e}")
+
             # Initialize all webhooks with their respective character configurations
             await self._initialize_all_webhooks()
             
@@ -131,9 +142,6 @@ class BridgeBot(commands.Bot):
     async def _initialize_all_webhooks(self):
         """Initialize all webhooks with their respective character configurations"""
         func.log.debug("Checking webhook configurations...")
-        
-        # Track channels that no longer exist for cleanup
-        channels_to_cleanup = []
 
         # Iterate over all sessions to verify configuration only
         for server_id, server_data in func.session_cache.items():
@@ -142,10 +150,9 @@ class BridgeBot(commands.Bot):
                 # Get the channel object (if available)
                 channel = self.get_channel(int(channel_id))
                 if not channel:
-                    # Channel no longer exists - mark for cleanup
+                    # This shouldn't happen as cleanup_orphaned_data runs first
                     func.log.warning(
-                        "Channel with ID %s not found - will be cleaned up.", channel_id)
-                    channels_to_cleanup.append((server_id, channel_id))
+                        "Channel with ID %s not found (should have been cleaned up)", channel_id)
                     continue
 
                 # Skip if channel_data is None (can happen after removing all AIs)
@@ -156,30 +163,13 @@ class BridgeBot(commands.Bot):
                 for ai_name, session in channel_data.items():
                     provider = session.get("provider", "openai")
                     mode = session.get("mode", "webhook")
-                    
+
                     # Verify webhook URL exists for webhook mode
                     if mode == "webhook" and not session.get("webhook_url"):
                         func.log.warning(
                             "No webhook URL found for AI %s in channel %s in server %s",
                             ai_name, channel_id, server_id
                         )
-        
-        # Cleanup channels that no longer exist
-        if channels_to_cleanup:
-            func.log.info(f"Found {len(channels_to_cleanup)} orphaned channel(s), starting cleanup...")
-            
-            for server_id, channel_id in channels_to_cleanup:
-                try:
-                    results = await func.cleanup_channel_data(server_id, channel_id)
-                    if results["success"]:
-                        func.log.info(f"Cleaned up orphaned channel {channel_id}")
-                    else:
-                        func.log.warning(
-                            f"Cleanup completed with errors for channel {channel_id}: "
-                            f"{', '.join(results.get('errors', []))}"
-                        )
-                except Exception as e:
-                    func.log.error(f"Error cleaning up channel {channel_id}: {e}")
 
         func.log.debug("Webhook configuration check complete!")
 

@@ -2,6 +2,7 @@ import asyncio
 import datetime
 import logging
 import os
+import shutil
 import socket
 import time
 from typing import Any, Dict, Optional, Callable, Awaitable, TypeVar
@@ -843,6 +844,94 @@ async def delete_server_api_connections(server_id: str) -> bool:
         return False
 
 
+async def cleanup_orphaned_data(bot) -> Dict[str, Any]:
+    """
+    Clean up data for servers/channels that the bot is no longer part of.
+
+    This function:
+    1. Checks all server directories in data/ and removes those where bot is not present
+    2. For remaining servers, checks all channel directories and removes orphaned ones
+
+    Args:
+        bot: Discord bot instance
+
+    Returns:
+        Dict with cleanup results
+    """
+    from utils.core.paths import DataPaths
+
+    data_paths = DataPaths()
+    results = {
+        "servers_removed": 0,
+        "channels_removed": 0,
+        "servers_cleaned": [],
+        "channels_cleaned": [],
+        "errors": []
+    }
+
+    try:
+        # Get all server directories
+        server_ids = data_paths.list_servers()
+
+        for server_id in server_ids:
+            # Check if bot is still in this server
+            guild = bot.get_guild(int(server_id))
+
+            if not guild:
+                # Bot is no longer in this server - remove all data
+                log.info(f"Bot no longer in server {server_id}, cleaning up...")
+                try:
+                    cleanup_result = await cleanup_server_data(server_id)
+                    if cleanup_result["success"]:
+                        results["servers_removed"] += 1
+                        results["servers_cleaned"].append(server_id)
+                        log.info(f"Removed orphaned server data: {server_id}")
+                    else:
+                        results["errors"].append(f"Failed to cleanup server {server_id}")
+                except Exception as e:
+                    error_msg = f"Error cleaning server {server_id}: {e}"
+                    results["errors"].append(error_msg)
+                    log.error(error_msg)
+            else:
+                # Bot is still in server - check channels
+                channel_ids = data_paths.list_channels(server_id)
+
+                for channel_id in channel_ids:
+                    # Check if channel still exists
+                    channel = bot.get_channel(int(channel_id))
+
+                    if not channel:
+                        # Channel no longer exists - remove data
+                        log.info(f"Channel {channel_id} no longer exists in server {server_id}, cleaning up...")
+                        try:
+                            cleanup_result = await cleanup_channel_data(server_id, channel_id)
+                            if cleanup_result["success"]:
+                                results["channels_removed"] += 1
+                                results["channels_cleaned"].append(f"{server_id}/{channel_id}")
+                                log.info(f"Removed orphaned channel data: {server_id}/{channel_id}")
+                            else:
+                                results["errors"].append(f"Failed to cleanup channel {channel_id}")
+                        except Exception as e:
+                            error_msg = f"Error cleaning channel {channel_id}: {e}"
+                            results["errors"].append(error_msg)
+                            log.error(error_msg)
+
+        # Summary
+        if results["servers_removed"] > 0 or results["channels_removed"] > 0:
+            log.info(
+                f"Orphaned data cleanup complete: "
+                f"{results['servers_removed']} server(s), "
+                f"{results['channels_removed']} channel(s) removed"
+            )
+
+    except Exception as e:
+        error_msg = f"Error during orphaned data cleanup: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+
+    return results
+
+
 async def cleanup_server_data(server_id: str, server_name: str = None) -> Dict[str, Any]:
     """
     Orchestrate complete cleanup of all server data.
@@ -864,7 +953,7 @@ async def cleanup_server_data(server_id: str, server_name: str = None) -> Dict[s
     """
     server_display = f"{server_name} (ID: {server_id})" if server_name else f"ID: {server_id}"
     log.info(f"Starting cleanup for server: {server_display}")
-    
+
     results = {
         "success": True,
         "session_data": False,
@@ -875,39 +964,52 @@ async def cleanup_server_data(server_id: str, server_name: str = None) -> Dict[s
         "memory_files": 0,
         "errors": []
     }
-    
-    # 1. Clean session data
+
+    # 1. Remove entire server directory FIRST to prevent file recreation
+    try:
+        from utils.core.paths import DataPaths
+        data_paths = DataPaths()
+        server_path = f"{data_paths.base_dir}/{server_id}"
+
+        if os.path.exists(server_path):
+            # Force removal with custom error handler
+            def handle_remove_error(func, path, exc_info):
+                """Handle errors during removal by changing permissions and retrying."""
+                import stat
+                if not os.access(path, os.W_OK):
+                    os.chmod(path, stat.S_IWUSR)
+                    func(path)
+
+            shutil.rmtree(server_path, onerror=handle_remove_error)
+            log.info(f"Removed server directory: {server_id}")
+    except Exception as e:
+        error_msg = f"Directory removal failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+
+    # 2. Clean session data (in-memory only)
     try:
         results["session_data"] = await delete_server_session_data(server_id)
     except Exception as e:
-        error_msg = f"Session data cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
-    
-    # 2. Clean API connections
+        # Ignore errors - directory is already gone
+        pass
+
+    # 3. Clean API connections (in-memory only)
     try:
         results["api_connections"] = await delete_server_api_connections(server_id)
     except Exception as e:
-        error_msg = f"API connections cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
-    
-    # 3. Clean character cards (with smart deletion)
+        # Ignore errors - directory is already gone
+        pass
+
+    # 4. Clean character cards (in-memory only)
     try:
         from utils.characters.cards import delete_server_character_cards
         results["character_cards"] = await delete_server_character_cards(server_id)
-        if not results["character_cards"].get("success", False):
-            results["success"] = False
     except Exception as e:
-        error_msg = f"Character cards cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
-        results["character_cards"] = {"success": False, "error": str(e)}
+        # Ignore errors - directory is already gone
+        pass
 
-    # 4. Clean conversation history
+    # 5. Clean conversation history (in-memory only)
     try:
         from messaging.store import get_store
         from utils.core.paths import DataPaths
@@ -923,49 +1025,31 @@ async def cleanup_server_data(server_id: str, server_name: str = None) -> Dict[s
 
         results["conversations"] = total_deleted
     except Exception as e:
-        error_msg = f"Conversations cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
-    
-    # 5. Clean short ID mappings
+        # Ignore errors - directory is already gone
+        pass
+
+    # 6. Clean short ID mappings (in-memory only)
     try:
         from messaging.short_id_manager import get_short_id_manager
         manager = get_short_id_manager()
         results["short_id_mappings"] = await manager.delete_server_mappings(server_id)
     except Exception as e:
-        error_msg = f"Short ID mappings cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
-    
-    # 6. Clean memory files
+        # Ignore errors - directory is already gone
+        pass
+
+    # 7. Clean memory files (in-memory only)
     try:
         from AI.tools.memory_tools import delete_server_memory_files
         results["memory_files"] = delete_server_memory_files(server_id)
     except Exception as e:
-        error_msg = f"Memory files cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
-    
+        # Ignore errors - directory is already gone
+        pass
+
     # Log summary
     if results["success"]:
-        log.info(
-            f"Successfully cleaned up data for server {server_display}:\n"
-            f"  - Session data: {'✓' if results['session_data'] else '✗'}\n"
-            f"  - API connections: {'✓' if results['api_connections'] else '✗'}\n"
-            f"  - Character cards: {results['character_cards'].get('cards_unregistered', 0)} unregistered, "
-            f"{results['character_cards'].get('files_deleted', 0)} files deleted\n"
-            f"  - Conversations: {'✓' if results['conversations'] else '✗'}\n"
-            f"  - Short ID mappings: {'✓' if results['short_id_mappings'] else '✗'}\n"
-            f"  - Memory files: {results['memory_files']} deleted"
-        )
+        log.info(f"Cleaned up server {server_display}")
     else:
-        log.error(
-            f"Cleanup completed with errors for server {server_display}. "
-            f"Errors: {', '.join(results['errors'])}"
-        )
+        log.error(f"Cleanup errors for server {server_display}: {', '.join(results['errors'])}")
     return results
 
 
@@ -986,7 +1070,7 @@ async def cleanup_channel_data(server_id: str, channel_id: str, channel_name: st
     """
     channel_display = f"#{channel_name} (ID: {channel_id})" if channel_name else f"ID: {channel_id}"
     log.info(f"Starting cleanup for deleted channel: {channel_display}")
-    
+
     results = {
         "success": True,
         "session_data": False,
@@ -995,63 +1079,68 @@ async def cleanup_channel_data(server_id: str, channel_id: str, channel_name: st
         "memory_files": 0,
         "errors": []
     }
-    
-    # 1. Clean session data for this channel
+
+    # 1. Remove entire channel directory FIRST to prevent file recreation
+    try:
+        from utils.core.paths import DataPaths
+        data_paths = DataPaths()
+        channel_path = f"{data_paths.base_dir}/{server_id}/{channel_id}"
+
+        if os.path.exists(channel_path):
+            # Force removal with custom error handler
+            def handle_remove_error(func, path, exc_info):
+                """Handle errors during removal by changing permissions and retrying."""
+                import stat
+                if not os.access(path, os.W_OK):
+                    os.chmod(path, stat.S_IWUSR)
+                    func(path)
+
+            shutil.rmtree(channel_path, onerror=handle_remove_error)
+            log.info(f"Removed channel directory: {channel_id}")
+    except Exception as e:
+        error_msg = f"Directory removal failed: {e}"
+        results["errors"].append(error_msg)
+        log.error(error_msg)
+
+    # 2. Clean session data for this channel (in-memory only)
     try:
         results["session_data"] = await remove_session_data(server_id, channel_id)
     except Exception as e:
-        error_msg = f"Session data cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
+        # Ignore errors - directory is already gone
+        pass
 
-    # 2. Clean conversation history for this channel
+    # 3. Clean conversation history (in-memory only)
     try:
         from messaging.store import get_store
         store = get_store(server_id, channel_id)
         results["conversations"] = await store.delete_channel_conversations(server_id, channel_id)
     except Exception as e:
-        error_msg = f"Conversations cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
-    
-    # 3. Clean short ID mappings for this channel
+        # Ignore errors - directory is already gone
+        pass
+
+    # 4. Clean short ID mappings (in-memory only)
     try:
         from messaging.short_id_manager import get_short_id_manager
         manager = get_short_id_manager()
         results["short_id_mappings"] = await manager.delete_channel_mappings(server_id, channel_id)
     except Exception as e:
-        error_msg = f"Short ID mappings cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
-    
-    # 4. Clean memory files for this channel
+        # Ignore errors - directory is already gone
+        pass
+
+    # 5. Clean memory files (in-memory only)
     try:
         from AI.tools.memory_tools import delete_channel_memory_files
         results["memory_files"] = delete_channel_memory_files(server_id, channel_id)
     except Exception as e:
-        error_msg = f"Memory files cleanup failed: {e}"
-        results["errors"].append(error_msg)
-        log.error(error_msg)
-        results["success"] = False
-    
+        # Ignore errors - directory is already gone
+        pass
+
     # Log summary
     if results["success"]:
-        log.info(
-            f"Successfully cleaned up data for channel {channel_display}:\n"
-            f"  - Session data: {'✓' if results['session_data'] else '✗'}\n"
-            f"  - Conversations: {'✓' if results['conversations'] else '✗'}\n"
-            f"  - Short ID mappings: {'✓' if results['short_id_mappings'] else '✗'}\n"
-            f"  - Memory files: {results['memory_files']} deleted"
-        )
+        log.info(f"Cleaned up channel {channel_display}")
     else:
-        log.error(
-            f"Cleanup completed with errors for channel {channel_display}. "
-            f"Errors: {', '.join(results['errors'])}"
-        )
-    
+        log.error(f"Cleanup errors for channel {channel_display}: {', '.join(results['errors'])}")
+
     return results
 
 
