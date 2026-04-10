@@ -79,7 +79,7 @@ def create_step_embed(
     wizard_data: SetupWizardData,
     color: discord.Color = discord.Color.blue()
 ) -> discord.Embed:
-    """Cria embed padronizado para cada step."""
+    """Create embed with consistent formatting for each step."""
     embed = discord.Embed(
         title=f"🔧 AI Setup - Step {step}/7",
         description=f"**{title}**\n\n{description}",
@@ -88,8 +88,8 @@ def create_step_embed(
     
     # Add progress info
     progress_text = []
-    if wizard_data.channel_name:
-        progress_text.append(f"📍 Channel: #{wizard_data.channel_name}")
+    if wizard_data.channel_id:
+        progress_text.append(f"📍 Channel: <#{wizard_data.channel_id}>")
     if wizard_data.mode:
         mode_emoji = "🤖" if wizard_data.mode == "bot" else "🔗"
         progress_text.append(f"{mode_emoji} Mode: {wizard_data.mode.title()}")
@@ -112,8 +112,7 @@ def create_step_embed(
 
 
 class Step1_ChannelSelectView(ui.View):
-    """Seleção de canal."""
-    
+    """Selection of channel."""
     def __init__(self, wizard_data: SetupWizardData):
         super().__init__(timeout=300)
         self.wizard_data = wizard_data
@@ -139,7 +138,7 @@ class Step1_ChannelSelectView(ui.View):
                 
                 await interaction.response.send_message(
                     f"❌ **Channel already has AI configured**\n\n"
-                    f"**Channel:** #{channel.name}\n"
+                    f"**Channel:** {channel.mention}\n"
                     f"**Existing AI(s):** {', '.join(existing_ais)}\n"
                     f"**Mode(s):** {', '.join(existing_modes)}\n\n"
                     f"💡 **Only 1 AI per channel is allowed.**\n"
@@ -371,7 +370,7 @@ class APIConnectionSelectMenu(ui.Select):
                 provider_display = provider_meta.display_name
                 provider_icon = provider_meta.icon
             except ValueError:
-                provider_display = provider.upper()
+                provider_display = provider
                 provider_icon = "🔵"
             
             description = f"{provider_icon} {provider_display} • {model}"
@@ -1019,19 +1018,29 @@ def create_confirmation_embed(wizard_data: SetupWizardData) -> discord.Embed:
     mode_emoji = "🤖" if wizard_data.mode == "bot" else "🔗"
     embed.add_field(
         name="📍 Channel & Mode",
-        value=f"**Channel:** #{wizard_data.channel_name}\n"
+        value=f"**Channel:** <#{wizard_data.channel_id}>\n"
               f"**Mode:** {mode_emoji} {wizard_data.mode.title()}",
         inline=False
     )
     
     # API Connection
     if wizard_data.api_connection_data:
-        provider = wizard_data.api_connection_data.get("provider", "unknown").upper()
+        provider_raw = wizard_data.api_connection_data.get("provider", "unknown")
         model = wizard_data.api_connection_data.get("model", "Unknown")
+
+        # Get provider display name
+        try:
+            from AI.core.registry import get_registry
+            registry = get_registry()
+            provider_meta = registry.get_metadata(provider_raw.lower())
+            provider_display = provider_meta.display_name
+        except:
+            provider_display = provider_raw
+
         embed.add_field(
             name="🔌 API Connection",
             value=f"**Name:** {wizard_data.api_connection_name}\n"
-                  f"**Provider:** {provider}\n"
+                  f"**Provider:** {provider_display}\n"
                   f"**Model:** {model}",
             inline=False
         )

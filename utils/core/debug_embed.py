@@ -485,9 +485,18 @@ class DebugEmbed:
             Discord embed
         """
         ai_name = data.get("ai_name", "AI")
-        provider = data.get("provider", "unknown")
+        provider_raw = data.get("provider", "unknown")
         model = data.get("model", "unknown")
-        
+
+        # Get provider display name from registry
+        try:
+            from AI.core.registry import get_registry
+            registry = get_registry()
+            provider_meta = registry.get_metadata(provider_raw.lower())
+            provider_display = provider_meta.display_name
+        except:
+            provider_display = provider_raw
+
         # Create embed
         embed = discord.Embed(
             title=f"Debug Mode: {ai_name}",
@@ -524,7 +533,7 @@ class DebugEmbed:
         # Provider & Model
         embed.add_field(
             name="Provider & Model",
-            value=f"{provider} • {model}",
+            value=f"{provider_display} • {model}",
             inline=False
         )
         

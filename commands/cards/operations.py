@@ -245,10 +245,10 @@ class AIOperations(commands.Cog):
         
         # Build success message
         source_channel_obj = interaction.guild.get_channel(int(source_channel_id))
-        source_channel_name = source_channel_obj.name if source_channel_obj else f"Channel {source_channel_id}"
+        source_channel_mention = f"<#{source_channel_id}>" if source_channel_obj else f"Channel {source_channel_id}"
 
         success_msg = f"✅ **AI copied successfully!**\n\n"
-        success_msg += f"**Source AI:** {actual_ai_name} (#{source_channel_name})\n"
+        success_msg += f"**Source AI:** {actual_ai_name} ({source_channel_mention})\n"
         success_msg += f"**New AI:** {new_ai_name}\n"
         success_msg += f"**Target Channel:** {target_channel.mention}\n"
         success_msg += f"**Mode:** {target_mode.capitalize()}\n"

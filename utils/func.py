@@ -528,17 +528,26 @@ async def create_api_connection(
     
     await save_api_connections(connections)
     log.info(f"Created API connection '{connection_name}'")
-    
+
     # Send debug embed
     if guild:
         try:
+            # Get provider display name
+            from AI.core.registry import get_registry
+            try:
+                registry = get_registry()
+                provider_meta = registry.get_metadata(provider.lower())
+                provider_display = provider_meta.display_name
+            except:
+                provider_display = provider
+
             from utils.core.debug_embed import DebugEmbed
             await DebugEmbed.send(
                 guild=guild,
                 event="api_connection_created",
                 data={
                     "connection_name": connection_name,
-                    "provider": provider,
+                    "provider": provider_display,
                     "model": model,
                     "endpoint": base_url if base_url else "default"
                 }
@@ -583,17 +592,26 @@ async def update_api_connection(
     connections[server_id][connection_name].update(updates)
     await save_api_connections(connections)
     log.info(f"Updated API connection '{connection_name}'")
-    
+
     # Send debug embed
     if guild:
         try:
+            # Get provider display name
+            from AI.core.registry import get_registry
+            try:
+                registry = get_registry()
+                provider_meta = registry.get_metadata(provider.lower())
+                provider_display = provider_meta.display_name
+            except:
+                provider_display = provider
+
             from utils.core.debug_embed import DebugEmbed
             await DebugEmbed.send(
                 guild=guild,
                 event="api_connection_edited",
                 data={
                     "connection_name": connection_name,
-                    "provider": provider,
+                    "provider": provider_display,
                     "changes": updates
                 }
             )
@@ -683,17 +701,26 @@ async def delete_api_connection(server_id: str, connection_name: str, guild=None
     
     await save_api_connections(connections)
     log.info(f"Deleted API connection '{connection_name}'")
-    
+
     # Send debug embed
     if guild:
         try:
+            # Get provider display name
+            from AI.core.registry import get_registry
+            try:
+                registry = get_registry()
+                provider_meta = registry.get_metadata(provider.lower())
+                provider_display = provider_meta.display_name
+            except:
+                provider_display = provider
+
             from utils.core.debug_embed import DebugEmbed
             await DebugEmbed.send(
                 guild=guild,
                 event="api_connection_removed",
                 data={
                     "connection_name": connection_name,
-                    "provider": provider
+                    "provider": provider_display
                 }
             )
         except Exception as e:

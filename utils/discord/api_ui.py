@@ -76,7 +76,7 @@ def create_connection_list_embed(
             provider_display = provider_meta.display_name
             provider_icon = provider_meta.icon
         except ValueError:
-            provider_display = provider.upper()
+            provider_display = provider
             provider_icon = "🔵"
         
         # Get AIs using this connection
@@ -131,7 +131,7 @@ def create_connection_details_embed(
         provider_icon = provider_meta.icon
         color = getattr(discord.Color, provider_meta.color, discord.Color.blue)()
     except ValueError:
-        provider_display = provider.upper()
+        provider_display = provider
         provider_icon = "🔵"
         color = discord.Color.blue()
     
@@ -1423,12 +1423,22 @@ class RemoveConnectionSelectView(ui.View):
             
             # Check if any AIs are using this connection
             ais_using = func.get_ais_using_connection(self.server_id, connection_name)
-            
+
+            # Get provider display name
+            provider_raw = connection.get('provider', 'Unknown')
+            try:
+                from AI.core.registry import get_registry
+                registry = get_registry()
+                provider_meta = registry.get_metadata(provider_raw.lower())
+                provider_display = provider_meta.display_name
+            except:
+                provider_display = provider_raw
+
             # Create confirmation embed
             embed = discord.Embed(
                 title="⚠️ Confirm Removal",
                 description=f"**Connection:** `{connection_name}`\n"
-                           f"**Provider:** {connection.get('provider', 'Unknown').upper()}\n"
+                           f"**Provider:** {provider_display}\n"
                            f"**Model:** `{connection.get('model', 'Unknown')}`",
                 color=discord.Color.red()
             )
@@ -1742,7 +1752,7 @@ class ConnectionSelect(ui.Select):
                 provider_display = provider_meta.display_name
                 provider_icon = provider_meta.icon
             except ValueError:
-                provider_display = provider.upper()
+                provider_display = provider
                 provider_icon = "🔵"
             
             # Get usage info

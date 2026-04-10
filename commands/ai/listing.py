@@ -100,7 +100,7 @@ class AIListing(commands.Cog):
                 provider_icon = provider_meta.icon
                 provider_color = getattr(discord.Color, provider_meta.color, discord.Color.blue)()
             except ValueError:
-                provider_display = provider.upper()
+                provider_display = provider
                 provider_icon = "🔵"
                 provider_color = discord.Color.blue()
             

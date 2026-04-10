@@ -301,8 +301,8 @@ class CardRegistry(commands.Cog):
             ai_list = []
             for channel_id, ai_name in ais_using[:5]:
                 channel_obj = interaction.guild.get_channel(int(channel_id))
-                channel_name = f"#{channel_obj.name}" if channel_obj else f"Channel {channel_id}"
-                ai_list.append(f"• `{ai_name}` in {channel_name}")
+                channel_mention = f"<#{channel_id}>" if channel_obj else f"Channel {channel_id}"
+                ai_list.append(f"• `{ai_name}` in {channel_mention}")
             
             ai_usage_text = "\n".join(ai_list)
             if len(ais_using) > 5:

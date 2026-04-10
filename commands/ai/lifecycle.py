@@ -179,8 +179,8 @@ class AILifecycle(commands.Cog):
                 server_id=server_id
             )
         
-        # Get channel name for display
-        channel_name = f"#{channel_obj.name}" if channel_obj else f"Channel {found_channel_id}"
+        # Get channel mention for display
+        channel_mention = f"<#{found_channel_id}>" if channel_obj else f"Channel {found_channel_id}"
         
         # Get mode information
         mode = session.get("mode", "bot")
@@ -190,12 +190,24 @@ class AILifecycle(commands.Cog):
         provider = session.get("provider", "unknown")
         api_connection = session.get("api_connection")
         model_info = "Unknown"
+        connection_display = api_connection if api_connection else None
+
         if api_connection:
             connection = func.get_api_connection(server_id, api_connection)
             if connection:
                 model_info = connection.get("model", "Unknown")
         else:
             model_info = session.get("model", "Unknown")
+
+        # Get provider display name
+        if not connection_display:
+            from AI.core.registry import get_registry
+            try:
+                registry = get_registry()
+                provider_meta = registry.get_metadata(provider)
+                connection_display = provider_meta.display_name
+            except:
+                connection_display = provider
         
         # Count total chats and messages
         service = get_service()
@@ -218,7 +230,7 @@ class AILifecycle(commands.Cog):
                 "value": f"• **AI Name:** {ai_name}\n"
                         f"• **Channel:** <#{found_channel_id}>\n"
                         f"• **Mode:** {mode_display}\n"
-                        f"• **Provider:** {provider.upper()}\n"
+                        f"• **Connection:** {connection_display}\n"
                         f"• **Model:** `{model_info}`"
             },
             {
@@ -312,11 +324,11 @@ class AILifecycle(commands.Cog):
                 data={
                     "command": "/remove_ai",
                     "ai_name": ai_name,
-                    "channel": channel_name,
+                    "channel": channel_mention,
                     "executor": f"{interaction.user.name}#{interaction.user.discriminator}",
                     "changes": {
                         "Mode": mode_display,
-                        "Provider": provider.upper(),
+                        "Connection": connection_display,
                         "Model": model_info,
                         "Chats Deleted": str(total_chats),
                         "Messages Deleted": str(total_messages)
@@ -328,12 +340,12 @@ class AILifecycle(commands.Cog):
             # Create success embed
             success_embed = create_success_embed(
                 title="✅ AI Removed Successfully",
-                description=f"The AI **{ai_name}** has been permanently removed from {channel_name}.",
+                description=f"The AI **{ai_name}** has been permanently removed from {channel_mention}.",
                 fields=[
                     {
                         "name": "📊 Summary",
                         "value": f"• **AI:** {ai_name}\n"
-                                f"• **Channel:** {channel_name}\n"
+                                f"• **Channel:** {channel_mention}\n"
                                 f"• **Chats Deleted:** {total_chats}\n"
                                 f"• **Messages Deleted:** {total_messages}\n"
                                 f"• **Removed by:** {interaction.user.mention}"
@@ -557,14 +569,24 @@ async def execute_setup_from_wizard(
         
         # 6. Build success message
         mode_emoji = "🤖" if wizard_data.mode == "bot" else "🔗"
-        provider = wizard_data.api_connection_data.get("provider", "unknown").upper()
+
+        # Get provider display name
+        provider_raw = wizard_data.api_connection_data.get("provider", "unknown")
+        try:
+            from AI.core.registry import get_registry
+            registry = get_registry()
+            provider_meta = registry.get_metadata(provider_raw)
+            provider_display = provider_meta.display_name
+        except:
+            provider_display = provider_raw
+
         model = wizard_data.api_connection_data.get("model", "Unknown")
-        
+
         success_msg = f"**AI Name:** {ai_name}\n"
         success_msg += f"**Character:** {character_card.name}\n"
         success_msg += f"**Channel:** <#{channel_id}>\n"
         success_msg += f"**Mode:** {mode_emoji} {wizard_data.mode.title()}\n"
-        success_msg += f"**API:** {wizard_data.api_connection_name} ({provider} - {model})\n"
+        success_msg += f"**API:** {wizard_data.api_connection_name} ({provider_display} - {model})\n"
         success_msg += f"**Greeting:** {wizard_data.greeting_index + 1}/{wizard_data.total_greetings}\n"
         
         if wizard_data.preset_name:

@@ -362,9 +362,9 @@ class SlashCommands(commands.Cog):
         if channel_id:
             try:
                 channel_obj = self.bot.get_channel(int(channel_id))
-                channel_name = channel_obj.name if channel_obj else "Unknown"
+                channel_mention = f"<#{channel_id}>" if channel_obj else "Unknown"
                 config_lines.append(f"• **AI:** {ai_name}")
-                config_lines.append(f"• **Channel:** #{channel_name}")
+                config_lines.append(f"• **Channel:** {channel_mention}")
             except Exception as e:
                 func.log.warning(f"Could not get channel name: {e}")
                 config_lines.append(f"• **AI:** {ai_name}")
@@ -531,8 +531,20 @@ class SlashCommands(commands.Cog):
 
         # Warn if copying between different providers
         if from_provider != to_provider:
+            # Get display names for providers
+            from AI.core.registry import get_registry
+            try:
+                registry = get_registry()
+                from_provider_meta = registry.get_metadata(from_provider)
+                to_provider_meta = registry.get_metadata(to_provider)
+                from_display = from_provider_meta.display_name
+                to_display = to_provider_meta.display_name
+            except:
+                from_display = from_provider
+                to_display = to_provider
+
             await interaction.response.send_message(
-                f"⚠️ Warning: Copying config from {from_provider.upper()} to {to_provider.upper()}. "
+                f"⚠️ Warning: Copying config from {from_display} to {to_display}. "
                 "Provider-specific settings may not be compatible.",
                 ephemeral=True
             )

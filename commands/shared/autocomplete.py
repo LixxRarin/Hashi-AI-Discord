@@ -42,18 +42,26 @@ class AutocompleteHelpers:
                     continue
                     
                 channel_obj = interaction.guild.get_channel(int(channel_id_str))
-                channel_name = channel_obj.name if channel_obj else f"Deleted Channel ({channel_id_str})"
+                channel_display = f"#{channel_obj.name}" if channel_obj else f"Deleted ({channel_id_str[:8]})"
 
                 for ai_name, ai_data in channel_data.items():
                     if current.lower() in ai_name.lower():
-                        # Show API connection name if available, otherwise show provider
+                        # Show API connection name if available, otherwise show provider display name
                         api_connection = ai_data.get("api_connection")
                         if api_connection:
                             provider_display = api_connection
                         else:
-                            provider_display = ai_data.get("provider", "openai").capitalize()
+                            # Try to get provider display name from registry
+                            from AI.core.registry import get_registry
+                            provider = ai_data.get("provider", "openai")
+                            try:
+                                registry = get_registry()
+                                provider_meta = registry.get_metadata(provider)
+                                provider_display = provider_meta.display_name
+                            except:
+                                provider_display = provider
 
-                        display_name = f"{ai_name} • {provider_display} • #{channel_name}"
+                        display_name = f"{ai_name} • {provider_display} • {channel_display}"
                         # Use special separator to encode both ai_name and channel_id
                         value = f"{ai_name}|||{channel_id_str}"
                         choices.append(app_commands.Choice(name=display_name[:100], value=value))
@@ -104,7 +112,7 @@ class AutocompleteHelpers:
                     continue
                     
                 channel_obj = interaction.guild.get_channel(int(channel_id_str))
-                channel_name = channel_obj.name if channel_obj else f"Deleted Channel ({channel_id_str})"
+                channel_display = f"#{channel_obj.name}" if channel_obj else f"Deleted ({channel_id_str[:8]})"
 
                 for ai_name, ai_data in channel_data.items():
                     # Only show AIs with character cards
@@ -112,14 +120,22 @@ class AutocompleteHelpers:
                         continue
 
                     if current.lower() in ai_name.lower():
-                        # Show API connection name if available, otherwise show provider
+                        # Show API connection name if available, otherwise show provider display name
                         api_connection = ai_data.get("api_connection")
                         if api_connection:
                             provider_display = api_connection
                         else:
-                            provider_display = ai_data.get("provider", "openai").capitalize()
+                            # Try to get provider display name from registry
+                            from AI.core.registry import get_registry
+                            provider = ai_data.get("provider", "openai")
+                            try:
+                                registry = get_registry()
+                                provider_meta = registry.get_metadata(provider)
+                                provider_display = provider_meta.display_name
+                            except:
+                                provider_display = provider
 
-                        display_name = f"{ai_name} • {provider_display} • #{channel_name}"
+                        display_name = f"{ai_name} • {provider_display} • {channel_display}"
                         # Use special separator to encode both ai_name and channel_id
                         value = f"{ai_name}|||{channel_id_str}"
                         choices.append(app_commands.Choice(name=display_name[:100], value=value))
@@ -181,9 +197,18 @@ class AutocompleteHelpers:
             choices = []
             for conn_name, conn_data in connections.items():
                 if current.lower() in conn_name.lower():
-                    provider = conn_data.get("provider", "unknown").upper()
+                    # Get provider display name from registry
+                    from AI.core.registry import get_registry
+                    provider_raw = conn_data.get("provider", "unknown")
+                    try:
+                        registry = get_registry()
+                        provider_meta = registry.get_metadata(provider_raw)
+                        provider_display = provider_meta.display_name
+                    except:
+                        provider_display = provider_raw
+
                     model = conn_data.get("model", "unknown")
-                    display_name = f"{conn_name} [{provider}] ({model})"
+                    display_name = f"{conn_name} [{provider_display}] ({model})"
                     choices.append(app_commands.Choice(name=display_name[:100], value=conn_name))
             
             return choices[:25]
