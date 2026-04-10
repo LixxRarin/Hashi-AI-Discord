@@ -19,7 +19,7 @@ from utils.discord.confirmation_ui import (
     create_success_embed
 )
 from utils.discord.guild_profile import set_guild_profile
-from utils.media.thumbnails import get_character_card_thumbnail_url
+from utils.media.thumbnails import get_thumbnail_url
 
 
 # Module-level autocomplete functions (must be defined before class)
@@ -217,10 +217,10 @@ class CardApplication(commands.Cog):
             try:
                 channel_obj = interaction.guild.get_channel(int(found_channel_id))
                 if channel_obj:
-                    thumbnail_url = await get_character_card_thumbnail_url(
-                        channel=channel_obj,
-                        session=session,
-                        server_id=server_id
+                    thumbnail_url = await get_thumbnail_url(
+                        channel_obj,
+                        session,
+                        server_id
                     )
             except:
                 pass
@@ -641,10 +641,10 @@ class CardApplication(commands.Cog):
             try:
                 channel_obj = interaction.guild.get_channel(int(found_channel_id))
                 if channel_obj:
-                    thumbnail_url = await get_character_card_thumbnail_url(
-                        channel=channel_obj,
-                        session=session,
-                        server_id=server_id
+                    thumbnail_url = await get_thumbnail_url(
+                        channel_obj,
+                        session,
+                        server_id
                     )
             except:
                 pass

@@ -43,6 +43,7 @@ class CharacterCardV3:
     system_prompt: str = ""
     post_history_instructions: str = ""
     alternate_greetings: List[str] = field(default_factory=list)
+    avatar: Optional[str] = None  # Avatar URL from V2 cards
     
     # V3 additions
     creator_notes: str = ""
@@ -80,6 +81,7 @@ class CharacterCardV3:
                 "system_prompt": self.system_prompt,
                 "post_history_instructions": self.post_history_instructions,
                 "alternate_greetings": self.alternate_greetings,
+                "avatar": self.avatar,  # Include avatar URL
                 "creator_notes": self.creator_notes,
                 "creator_notes_multilingual": self.creator_notes_multilingual,
                 "nickname": self.nickname,
@@ -234,7 +236,7 @@ def parse_png_card(png_bytes: bytes) -> Optional[CharacterCardV3]:
                     if keyword == 'ccv3':
                         ccv3_data = ('tEXt', text_data)
                         log.debug(f"Found ccv3 in tEXt chunk ({len(text_data)} bytes)")
-                    elif keyword == 'chara':
+                    elif keyword == 'chara' and not chara_data:  # Use first chunk found
                         chara_data = ('tEXt', text_data)
                         log.debug(f"Found chara in tEXt chunk ({len(text_data)} bytes)")
             
@@ -254,7 +256,7 @@ def parse_png_card(png_bytes: bytes) -> Optional[CharacterCardV3]:
                             if keyword == 'ccv3':
                                 ccv3_data = ('zTXt', text_data)
                                 log.debug(f"Found ccv3 in zTXt chunk ({len(text_data)} bytes decompressed)")
-                            elif keyword == 'chara':
+                            elif keyword == 'chara' and not chara_data:  # Use first chunk found
                                 chara_data = ('zTXt', text_data)
                                 log.debug(f"Found chara in zTXt chunk ({len(text_data)} bytes decompressed)")
                         except zlib.error as e:
@@ -291,7 +293,7 @@ def parse_png_card(png_bytes: bytes) -> Optional[CharacterCardV3]:
                             if keyword == 'ccv3':
                                 ccv3_data = ('iTXt', text_data)
                                 log.debug(f"Found ccv3 in iTXt chunk ({len(text_data)} bytes)")
-                            elif keyword == 'chara':
+                            elif keyword == 'chara' and not chara_data:  # Use first chunk found
                                 chara_data = ('iTXt', text_data)
                                 log.debug(f"Found chara in iTXt chunk ({len(text_data)} bytes)")
             
@@ -496,13 +498,25 @@ def convert_v2_to_v3(v2_card: Dict[str, Any]) -> Optional[CharacterCardV3]:
             system_prompt=data.get("system_prompt", ""),
             post_history_instructions=data.get("post_history_instructions", ""),
             alternate_greetings=data.get("alternate_greetings", []),
+            avatar=data.get("avatar"),  # Preserve avatar URL from V2
             creator_notes=data.get("creator_notes", ""),
             character_book=data.get("character_book"),
             extensions=data.get("extensions", {}),
         )
-        
-        # Add default icon asset if not present
-        if not card.assets:
+
+        # Migrate V2 avatar to V3 assets
+        avatar_url = data.get("avatar")
+        if avatar_url and isinstance(avatar_url, str) and avatar_url.startswith("http"):
+            # Create icon asset from V2 avatar URL
+            card.assets = [{
+                "type": "icon",
+                "uri": avatar_url,
+                "name": "main",
+                "ext": "png"
+            }]
+            log.debug(f"Migrated V2 avatar to V3 assets: {avatar_url[:60]}...")
+        elif not card.assets:
+            # Add default icon asset if not present
             card.assets = [{
                 "type": "icon",
                 "uri": "ccdefault:",

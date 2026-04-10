@@ -16,7 +16,7 @@ from messaging.response import get_response_manager
 from messaging.store import get_store
 from commands.shared.autocomplete import AutocompleteHelpers
 from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
-from utils.media.thumbnails import get_character_card_thumbnail_url
+from utils.media.thumbnails import get_thumbnail_url
 
 
 # Module-level autocomplete functions (must be defined before class)
@@ -89,10 +89,10 @@ class HistoryManager(commands.Cog):
         channel_obj = interaction.guild.get_channel(int(found_channel_id))
         thumbnail_url = None
         if channel_obj:
-            thumbnail_url = await get_character_card_thumbnail_url(
-                channel=channel_obj,
-                session=session,
-                server_id=server_id
+            thumbnail_url = await get_thumbnail_url(
+                channel_obj,
+                session,
+                server_id
             )
         
         # Get chat info for display

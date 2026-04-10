@@ -197,7 +197,6 @@ async def update_thumbnail_cache(
     
     Adds/updates:
     - thumbnail_cdn_url: Discord CDN URL
-    - thumbnail_last_validated: ISO 8601 timestamp
     
     Args:
         server_id: Server ID
@@ -227,8 +226,7 @@ async def update_thumbnail_cache(
         
         # Update cache fields
         cards[card_name]["thumbnail_cdn_url"] = cdn_url
-        cards[card_name]["thumbnail_last_validated"] = datetime.utcnow().isoformat() + "Z"
-        
+    
         # Save
         func.write_json(cards_file, cards)
         log.info(f"Updated thumbnail cache for card '{card_name}'")
@@ -286,18 +284,49 @@ async def get_thumbnail_for_card_registry(
             log.warning(f"Card '{card_name}' not found in registry")
             return None
         
-        # Step 1: Check for avatar URL in character card data
-        # Wrap card_info in expected format for get_avatar_url_from_card
-        card_data = {"data": card_info}
-        avatar_url = get_avatar_url_from_card(card_data)
-        
-        if avatar_url:
-            log.debug("Found avatar URL in character card, validating...")
+        # Step 1: Check for avatar URL in character card registry metadata
+        # First check if avatar is stored directly in registry metadata
+        avatar_url = card_info.get("avatar")
+
+        if avatar_url and isinstance(avatar_url, str) and avatar_url.startswith("http"):
+            log.debug("Found avatar URL in registry metadata, validating...")
             if await validate_cdn_url(avatar_url):
-                log.info("Using avatar URL from character card")
+                log.info("Using avatar URL from registry metadata")
                 return avatar_url
             else:
                 log.warning("Avatar URL validation failed, falling back to cache")
+
+        # Step 1.5: If no avatar in metadata, try loading from PNG file
+        if not avatar_url:
+            cache_path = card_info.get("cache_path")
+            if cache_path and Path(cache_path).exists():
+                try:
+                    from utils.ccv3.loader import load_local_card
+                    log.debug("Loading card from PNG to extract avatar URL...")
+                    result = await load_local_card(cache_path)
+                    if result:
+                        character_card, _ = result
+                        card_data = {"data": character_card.to_dict()["data"]}
+                        avatar_url = get_avatar_url_from_card(card_data)
+
+                        if avatar_url and isinstance(avatar_url, str) and avatar_url.startswith("http"):
+                            log.debug("Found avatar URL in PNG file, validating...")
+                            if await validate_cdn_url(avatar_url):
+                                log.info("Using avatar URL from PNG file")
+                                # Save to registry for future use
+                                import utils.func as func
+                                from utils.core.paths import DataPaths
+                                data_paths = DataPaths()
+                                cards_file = data_paths.get_character_cards_file(server_id)
+                                if os.path.exists(cards_file):
+                                    cards = func.read_json(cards_file) or {}
+                                    if card_name in cards:
+                                        cards[card_name]["avatar"] = avatar_url
+                                        func.write_json(cards_file, cards)
+                                        log.info(f"Saved avatar URL to registry for '{card_name}'")
+                                return avatar_url
+                except Exception as e:
+                    log.warning(f"Failed to load avatar from PNG: {e}")
         
         # Step 2: Check cache in character_cards.json
         cached_url = card_info.get("thumbnail_cdn_url")
@@ -377,7 +406,38 @@ async def get_thumbnail_url(
                 return avatar_url
             else:
                 log.warning("Avatar URL validation failed, falling back to cache")
-        
+
+        # Step 1.5: If no avatar in session, try loading from PNG file
+        if not avatar_url and cache_path and Path(cache_path).exists():
+            try:
+                from utils.ccv3.loader import load_local_card
+                log.debug("Loading card from PNG to extract avatar URL...")
+                result = await load_local_card(cache_path)
+                if result:
+                    character_card_obj, _ = result
+                    card_data = {"data": character_card_obj.to_dict()["data"]}
+                    avatar_url = get_avatar_url_from_card(card_data)
+
+                    if avatar_url and isinstance(avatar_url, str) and avatar_url.startswith("http"):
+                        log.debug("Found avatar URL in PNG file, validating...")
+                        if await validate_cdn_url(avatar_url):
+                            log.info("Using avatar URL from PNG file")
+                            # Save to registry for future use
+                            if card_name:
+                                import utils.func as func
+                                from utils.core.paths import DataPaths
+                                data_paths = DataPaths()
+                                cards_file = data_paths.get_character_cards_file(server_id)
+                                if os.path.exists(cards_file):
+                                    cards = func.read_json(cards_file) or {}
+                                    if card_name in cards:
+                                        cards[card_name]["avatar"] = avatar_url
+                                        func.write_json(cards_file, cards)
+                                        log.info(f"Saved avatar URL to registry for '{card_name}'")
+                            return avatar_url
+            except Exception as e:
+                log.warning(f"Failed to load avatar from PNG: {e}")
+
         # Step 2: Check cache in character_cards.json
         if card_name:
             import utils.func as func

@@ -215,28 +215,42 @@ class CardRegistry(commands.Cog):
             
             func.log.info(f"Registered card as: {registered_name}")
             
-            # Upload initial thumbnail to CDN cache (if PNG)
+            # Upload initial thumbnail to CDN cache (if PNG and no avatar URL)
             thumbnail_cached = False
             if cache_path and Path(cache_path).suffix.lower() == '.png':
                 try:
-                    from utils.media.thumbnails import upload_to_cdn_cache, update_thumbnail_cache
-                    
-                    func.log.info("Uploading initial thumbnail to CDN cache...")
-                    cdn_url = await upload_to_cdn_cache(
-                        interaction.channel,
-                        cache_path,
-                        server_id
-                    )
-                    
-                    if cdn_url:
-                        # Save to cache
-                        thumbnail_cached = await update_thumbnail_cache(
-                            server_id,
-                            registered_name,
-                            cdn_url
+                    from utils.media.thumbnails import upload_to_cdn_cache, update_thumbnail_cache, get_avatar_url_from_card, validate_cdn_url
+
+                    # Check if card has avatar URL - if yes, skip CDN upload
+                    card_data_wrapped = {"data": character_card.to_dict()["data"]}
+                    avatar_url = get_avatar_url_from_card(card_data_wrapped)
+
+                    should_upload = True
+                    if avatar_url:
+                        func.log.info("Card has avatar URL, validating...")
+                        if await validate_cdn_url(avatar_url):
+                            func.log.info("Avatar URL is valid, skipping CDN upload")
+                            should_upload = False
+                        else:
+                            func.log.warning("Avatar URL validation failed, will upload to CDN")
+
+                    if should_upload:
+                        func.log.info("Uploading initial thumbnail to CDN cache...")
+                        cdn_url = await upload_to_cdn_cache(
+                            interaction.channel,
+                            cache_path,
+                            server_id
                         )
-                        if thumbnail_cached:
-                            func.log.info(f"Thumbnail cached for card '{registered_name}'")
+
+                        if cdn_url:
+                            # Save to cache
+                            thumbnail_cached = await update_thumbnail_cache(
+                                server_id,
+                                registered_name,
+                                cdn_url
+                            )
+                            if thumbnail_cached:
+                                func.log.info(f"Thumbnail cached for card '{registered_name}'")
                 except Exception as e:
                     func.log.warning(f"Failed to cache thumbnail during import: {e}")
                     # Don't fail the import if thumbnail caching fails

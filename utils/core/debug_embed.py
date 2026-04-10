@@ -519,8 +519,8 @@ class DebugEmbed:
         try:
             session = data.get("session")
             if session:
-                from utils.media.thumbnails import get_character_card_thumbnail_url
-                thumbnail_url = await get_character_card_thumbnail_url(
+                from utils.media.thumbnails import get_thumbnail_url
+                thumbnail_url = await get_thumbnail_url(
                     channel,
                     session,
                     server_id=server_id
@@ -910,8 +910,8 @@ class DebugEmbed:
         try:
             session = data.get("session")
             if session:
-                from utils.media.thumbnails import get_character_card_thumbnail_url
-                thumbnail_url = await get_character_card_thumbnail_url(
+                from utils.media.thumbnails import get_thumbnail_url
+                thumbnail_url = await get_thumbnail_url(
                     channel,
                     session,
                     server_id=server_id
