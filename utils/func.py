@@ -233,61 +233,6 @@ def get_default_ai_session(provider: str = "openai", channel_name: str = "defaul
         # REMOVED: "base_url": None
     }
 
-
-async def timeout_async(func: Callable[[], Awaitable[T]], timeout: float,
-                        on_timeout: Callable[[], Awaitable[None]]) -> None:
-    """
-    Awaits the execution of 'func' with a specified timeout.
-    If a timeout occurs, the 'on_timeout' function is called.
-
-    Args:
-        func: Async function to execute
-        timeout: Timeout in seconds
-        on_timeout: Async function to call if timeout occurs
-    """
-    try:
-        await asyncio.wait_for(func(), timeout=timeout)
-    except asyncio.TimeoutError:
-        log.warning(
-            "Operation timed out after %s seconds. Executing on_timeout handler.", timeout)
-        try:
-            await on_timeout()
-        except Exception as e:
-            log.error("Error in on_timeout handler: %s", e)
-
-
-def test_internet() -> bool:
-    """
-    Tests internet connectivity by attempting to connect to www.google.com.
-
-    Returns:
-        bool: True if successful, otherwise False
-    """
-    try:
-        socket.create_connection(("www.google.com", 80), timeout=5)
-        log.debug("Internet connection test succeeded.")
-        return True
-    except OSError as e:
-        log.error("Internet connection test failed: %s", e)
-        return False
-
-
-def is_channel_active(server_id: str, channel_id: str) -> bool:
-    """
-    Check if a channel is still active in the session data.
-
-    Args:
-        server_id: Server ID
-        channel_id: Channel ID
-
-    Returns:
-        bool: True if the channel is active, False otherwise
-    """
-    return channel_id in session_cache.get(server_id, {}).get("channels", {})
-
-
-
-
 async def load_session_cache() -> None:
     """Loads session data from hierarchical structure into memory cache"""
     global session_cache

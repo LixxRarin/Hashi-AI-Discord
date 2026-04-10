@@ -12,13 +12,14 @@ from discord.ext import commands
 import utils.func as func
 from AI.services.chat_service import get_service
 from commands.shared.autocomplete import AutocompleteHelpers
-from commands.shared.avatar_utils import AvatarUtils, get_character_card_thumbnail_url
+from commands.shared.avatar_utils import AvatarUtils
 from commands.shared.webhook_utils import WebhookUtils
 from utils.discord.confirmation_ui import (
     confirm_dangerous_action,
     create_success_embed
 )
 from utils.discord.guild_profile import set_guild_profile
+from utils.media.thumbnails import get_character_card_thumbnail_url
 
 
 # Module-level autocomplete functions (must be defined before class)
