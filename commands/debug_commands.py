@@ -32,17 +32,24 @@ class DebugCommands(commands.Cog):
         self.bot = bot
         self.start_time = time.time()
     
-    @app_commands.command(name="debug_setup", description="Configure a channel to receive debug embeds")
+    @app_commands.command(name="debug_setup", description="Configure debug and CDN cache channels")
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
-        channel="Channel to send debug embeds to"
+        debug_channel="Channel to send debug embeds to",
+        cdn_cache_channel="Channel to cache thumbnail images (optional, reduces spam)"
     )
     async def debug_setup(
         self,
         interaction: discord.Interaction,
-        channel: discord.TextChannel
+        debug_channel: discord.TextChannel,
+        cdn_cache_channel: Optional[discord.TextChannel] = None
     ):
-        """Configure the debug channel for receiving debug embeds."""
+        """
+        Configure debug channel and optionally a CDN cache channel.
+        
+        - debug_channel: Receives debug embeds with logs
+        - cdn_cache_channel: Stores images for Discord CDN URLs (reduces spam)
+        """
         await interaction.response.defer(ephemeral=True)
 
         server_id = str(interaction.guild.id)
@@ -57,18 +64,22 @@ class DebugCommands(commands.Cog):
         server_config = func.read_json(debug_config_file) or {}
 
         # Update configuration
-        server_config["debug_channel_id"] = str(channel.id)
+        server_config["debug_channel_id"] = str(debug_channel.id)
         server_config["enabled"] = True  # Enable by default when setting channel
+        
+        # Add CDN cache channel if provided
+        if cdn_cache_channel:
+            server_config["cdn_cache_channel_id"] = str(cdn_cache_channel.id)
 
         # Save configuration
         func.write_json(debug_config_file, server_config)
         
-        # Send test message
+        # Send test message to debug channel
         try:
             test_embed = discord.Embed(
-                title="✅ Debug Channel Configured",
-                description=f"This channel will now receive structured debug embeds.\n\n"
-                           f"Debug embeds provide detailed information about:\n"
+                title="✅ Debug Channels Configured",
+                description=f"Debug system has been configured successfully.\n\n"
+                           f"**Debug embeds** provide detailed information about:\n"
                            f"• Command executions\n"
                            f"• LLM responses with token usage\n"
                            f"• Configuration changes\n"
@@ -76,30 +87,67 @@ class DebugCommands(commands.Cog):
                 color=discord.Color.green(),
                 timestamp=datetime.now()
             )
+            
+            config_value = f"**Debug Channel:** {debug_channel.mention}\n"
+            config_value += f"**Status:** Enabled\n"
+            if cdn_cache_channel:
+                config_value += f"**CDN Cache Channel:** {cdn_cache_channel.mention}\n"
+                config_value += f"**Cache:** Thumbnails will be stored here"
+            else:
+                config_value += f"**CDN Cache Channel:** Not configured\n"
+                config_value += f"**Cache:** Using temporary uploads"
+            
             test_embed.add_field(
                 name="Configuration",
-                value=f"**Channel:** {channel.mention}\n"
-                      f"**Status:** Enabled",
+                value=config_value,
                 inline=False
             )
             test_embed.set_footer(text=f"Configured by {interaction.user.name}")
             
-            await channel.send(embed=test_embed)
+            await debug_channel.send(embed=test_embed)
             
-            func.log.info(f"Debug channel configured: {channel.id}")
+            func.log.info(f"Debug channel configured: {debug_channel.id}")
+            if cdn_cache_channel:
+                func.log.info(f"CDN cache channel configured: {cdn_cache_channel.id}")
             
         except discord.Forbidden:
             await interaction.followup.send(
-                "❌ I don't have permission to send messages in that channel.",
+                "❌ I don't have permission to send messages in the debug channel.",
                 ephemeral=True
             )
             return
         
+        # Test CDN cache channel if provided
+        if cdn_cache_channel:
+            try:
+                test_msg = await cdn_cache_channel.send(
+                    "✅ **CDN Cache Channel Configured**\n\n"
+                    "This channel will store thumbnail images for Discord CDN URLs.\n"
+                    "Messages here should not be deleted as they provide permanent image hosting."
+                )
+                func.log.info(f"CDN cache channel test successful: {cdn_cache_channel.id}")
+            except discord.Forbidden:
+                await interaction.followup.send(
+                    f"⚠️ Debug channel configured, but I don't have permission to send messages in the CDN cache channel.\n\n"
+                    f"Please grant me permissions in {cdn_cache_channel.mention}",
+                    ephemeral=True
+                )
+                return
+        
         # Send confirmation
+        confirmation_msg = f"✅ Debug system configured successfully!\n\n"
+        confirmation_msg += f"**Debug Channel:** {debug_channel.mention}\n"
+        if cdn_cache_channel:
+            confirmation_msg += f"**CDN Cache Channel:** {cdn_cache_channel.mention}\n"
+            confirmation_msg += f"💡 Thumbnails will be cached to reduce spam\n\n"
+        else:
+            confirmation_msg += f"💡 CDN cache channel not configured (thumbnails will use temporary uploads)\n\n"
+        confirmation_msg += f"**Commands:**\n"
+        confirmation_msg += f"• `/debug` - Toggle debug embeds on/off\n"
+        confirmation_msg += f"• `/debug_test` - Send a test embed"
+        
         await interaction.followup.send(
-            f"✅ Debug channel configured: {channel.mention}\n\n"
-            f"💡 Use `/debug` to toggle debug embeds on/off\n"
-            f"💡 Use `/debug_status` to view statistics",
+            confirmation_msg,
             ephemeral=True
         )
     

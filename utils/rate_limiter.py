@@ -491,64 +491,6 @@ class CircuitBreaker:
         }
 
 
-class RateLimiter:
-    """
-    Legacy global rate limiter (kept for backward compatibility).
-    
-    Note: New code should use ChannelRateLimiter instead for better
-    per-channel rate limiting.
-    """
-    
-    def __init__(self, rate: float = 50.0, burst: int = 10):
-        """
-        Initialize the rate limiter.
-        
-        Args:
-            rate: Requests per second (default: 50, Discord's typical limit)
-            burst: Maximum burst size (default: 10)
-        """
-        self.rate = rate
-        self.burst = burst
-        self.tokens = float(burst)
-        self.last_update = time.time()
-        self._lock = asyncio.Lock()
-        
-        log.info(f"RateLimiter initialized (rate={rate}/s, burst={burst})")
-    
-    async def acquire(self, endpoint: str = "default") -> None:
-        """
-        Acquire a token, waiting if necessary.
-        
-        Args:
-            endpoint: Endpoint identifier (for logging, not used for separate buckets yet)
-        """
-        async with self._lock:
-            now = time.time()
-            elapsed = now - self.last_update
-            
-            # Refill tokens based on time elapsed
-            self.tokens = min(self.burst, self.tokens + elapsed * self.rate)
-            self.last_update = now
-            
-            # If no tokens available, wait
-            if self.tokens < 1.0:
-                wait_time = (1.0 - self.tokens) / self.rate
-                log.debug(f"Rate limiter waiting {wait_time:.2f}s for token")
-                await asyncio.sleep(wait_time)
-                self.tokens = 0.0
-            else:
-                self.tokens -= 1.0
-    
-    def get_stats(self) -> dict:
-        """Get current rate limiter statistics."""
-        return {
-            "rate": self.rate,
-            "burst": self.burst,
-            "available_tokens": self.tokens,
-            "last_update": self.last_update
-        }
-
-
 async def with_backoff(
     func: Callable,
     max_retries: int = 3,
@@ -622,18 +564,9 @@ async def with_backoff(
 
 
 # Global instances
-_global_limiter: Optional[RateLimiter] = None
 _channel_limiter: Optional[ChannelRateLimiter] = None
 _adaptive_backoff: Optional[AdaptiveBackoff] = None
 _circuit_breaker: Optional[CircuitBreaker] = None
-
-
-def get_rate_limiter() -> RateLimiter:
-    """Get the global rate limiter instance (legacy)."""
-    global _global_limiter
-    if _global_limiter is None:
-        _global_limiter = RateLimiter(rate=50.0, burst=10)
-    return _global_limiter
 
 
 def get_channel_rate_limiter() -> ChannelRateLimiter:

@@ -310,9 +310,7 @@ class BaseAIClient(ABC):
         if not fallback_key:
             log.error(
                 f"No API key found for {self.provider_name}! Please either:\n"
-                f"  1. Create an API connection: /new_api\n"
-                f"  2. Configure your AI: /setup with api_connection parameter\n"
-                f"  3. Or add api_key to config.yaml (legacy method)"
+                f"- Create an API connection: /api_connection\n"
             )
         return fallback_key
     

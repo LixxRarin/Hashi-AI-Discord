@@ -15,7 +15,7 @@ from typing import Optional, List
 import utils.func as func
 from commands.shared.autocomplete import AutocompleteHelpers
 from utils.pagination import PaginatedView
-from utils.media.thumbnails import upload_thumbnail_to_discord
+from utils.media.thumbnails import get_thumbnail_for_card_registry
 from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
 
 
@@ -215,6 +215,32 @@ class CardRegistry(commands.Cog):
             
             func.log.info(f"Registered card as: {registered_name}")
             
+            # Upload initial thumbnail to CDN cache (if PNG)
+            thumbnail_cached = False
+            if cache_path and Path(cache_path).suffix.lower() == '.png':
+                try:
+                    from utils.media.thumbnails import upload_to_cdn_cache, update_thumbnail_cache
+                    
+                    func.log.info("Uploading initial thumbnail to CDN cache...")
+                    cdn_url = await upload_to_cdn_cache(
+                        interaction.channel,
+                        cache_path,
+                        server_id
+                    )
+                    
+                    if cdn_url:
+                        # Save to cache
+                        thumbnail_cached = await update_thumbnail_cache(
+                            server_id,
+                            registered_name,
+                            cdn_url
+                        )
+                        if thumbnail_cached:
+                            func.log.info(f"Thumbnail cached for card '{registered_name}'")
+                except Exception as e:
+                    func.log.warning(f"Failed to cache thumbnail during import: {e}")
+                    # Don't fail the import if thumbnail caching fails
+            
             # Build success message
             card_data = character_card.to_dict()["data"]
             char_name = card_data.get("name", registered_name)
@@ -281,15 +307,11 @@ class CardRegistry(commands.Cog):
         ais_using = func.get_ais_using_card(server_id, card_name)
         
         # Get character card thumbnail
-        cache_path = card_info.get("cache_path")
-        thumbnail_url = None
-        if cache_path and Path(cache_path).suffix.lower() == '.png' and Path(cache_path).exists():
-            # Upload thumbnail to Discord CDN
-            thumbnail_url = await upload_thumbnail_to_discord(
-                interaction.channel,
-                cache_path,
-                server_id=server_id
-            )
+        thumbnail_url = await get_thumbnail_for_card_registry(
+            interaction.channel,
+            card_name,
+            server_id
+        )
         
         # Get character info
         char_name = card_info.get('name', card_name)
@@ -558,20 +580,24 @@ class CardRegistry(commands.Cog):
         # Upload thumbnail for each card in use
         for card_data in cards_in_use:
             card_name = card_data["card_name"]
-            cache_path = card_data["card_info"].get("cache_path")
-            if cache_path and Path(cache_path).suffix.lower() == '.png' and Path(cache_path).exists():
-                thumbnail_url = await upload_thumbnail_to_discord(interaction.channel, cache_path, server_id=server_id)
-                if thumbnail_url:
-                    thumbnail_urls[card_name] = thumbnail_url
+            thumbnail_url = await get_thumbnail_for_card_registry(
+                interaction.channel,
+                card_name,
+                server_id
+            )
+            if thumbnail_url:
+                thumbnail_urls[card_name] = thumbnail_url
         
         # Upload thumbnail for each available card
         for card_data in cards_available:
             card_name = card_data["card_name"]
-            cache_path = card_data["card_info"].get("cache_path")
-            if cache_path and Path(cache_path).suffix.lower() == '.png' and Path(cache_path).exists():
-                thumbnail_url = await upload_thumbnail_to_discord(interaction.channel, cache_path, server_id=server_id)
-                if thumbnail_url:
-                    thumbnail_urls[card_name] = thumbnail_url
+            thumbnail_url = await get_thumbnail_for_card_registry(
+                interaction.channel,
+                card_name,
+                server_id
+            )
+            if thumbnail_url:
+                thumbnail_urls[card_name] = thumbnail_url
         
         # Create embeds list
         embeds = []

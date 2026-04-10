@@ -11,7 +11,7 @@ from typing import Dict, List, Optional
 
 import utils.func as func
 from utils.pagination import PaginatedView
-from utils.media.thumbnails import upload_thumbnail_to_discord
+from utils.media.thumbnails import get_thumbnail_url
 from AI.core.registry import get_registry
 
 
@@ -72,14 +72,27 @@ class AIListing(commands.Cog):
         for provider, ais in sorted(ais_by_provider.items()):
             all_ais.extend(ais)
         
-        # Upload thumbnails to Discord CDN for each AI with character card
+        # Get thumbnails for each AI with character card using intelligent caching
         thumbnail_urls = {}  # ai_name -> thumbnail_url
         
         for ai_info in all_ais:
             ai_name = ai_info["name"]
-            cache_path = ai_info["data"].get("character_card", {}).get("cache_path")
-            if cache_path and Path(cache_path).suffix.lower() == '.png' and Path(cache_path).exists():
-                thumbnail_url = await upload_thumbnail_to_discord(interaction.channel, cache_path, server_id=server_id)
+            ai_data = ai_info["data"]
+            
+            # Only get thumbnail if AI has a character card
+            if "character_card" in ai_data and ai_data["character_card"]:
+                # Construct minimal session dict for get_thumbnail_url
+                session = {
+                    "character_card": ai_data.get("character_card", {}),
+                    "character_card_name": ai_data.get("character_card_name")
+                }
+                
+                thumbnail_url = await get_thumbnail_url(
+                    interaction.channel,
+                    session,
+                    server_id
+                )
+                
                 if thumbnail_url:
                     thumbnail_urls[ai_name] = thumbnail_url
         
