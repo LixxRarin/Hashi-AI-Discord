@@ -107,6 +107,28 @@ class BotStatusManager:
         try:
             await self.bot.change_presence(status=discord.Status.idle)
             log.info("Bot status changed to IDLE (sleep mode active)")
+            
+            # Send debug embed to all guilds
+            try:
+                from utils.core.debug_embed import DebugEmbed
+                
+                # Get list of sleeping AIs (limit to 10 for embed)
+                sleeping_ai_names = []
+                for server_id, channel_id, ai_name in list(self.sleeping_ais)[:10]:
+                    sleeping_ai_names.append(ai_name)
+                
+                await DebugEmbed.send_to_all_guilds(
+                    bot=self.bot,
+                    event="bot_status_change",
+                    data={
+                        "old_status": "online",
+                        "new_status": "idle",
+                        "reason": "AI(s) entered sleep mode",
+                        "ais_in_sleep": sleeping_ai_names
+                    }
+                )
+            except Exception as e:
+                log.error(f"Failed to send bot status change debug embed: {e}")
         except Exception as e:
             log.error(f"Failed to change bot status to Idle: {e}")
     
@@ -119,6 +141,23 @@ class BotStatusManager:
         try:
             await self.bot.change_presence(status=discord.Status.online)
             log.info("Bot status changed to ONLINE (all AIs awake)")
+            
+            # Send debug embed to all guilds
+            try:
+                from utils.core.debug_embed import DebugEmbed
+                
+                await DebugEmbed.send_to_all_guilds(
+                    bot=self.bot,
+                    event="bot_status_change",
+                    data={
+                        "old_status": "idle",
+                        "new_status": "online",
+                        "reason": "All AIs woke up from sleep mode",
+                        "ais_in_sleep": []
+                    }
+                )
+            except Exception as e:
+                log.error(f"Failed to send bot status change debug embed: {e}")
         except Exception as e:
             log.error(f"Failed to change bot status to Online: {e}")
     

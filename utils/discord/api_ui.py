@@ -532,7 +532,8 @@ class CreateConnectionDetailsModal(ui.Modal):
                 vision_enabled=False,
                 vision_detail="auto",
                 max_image_size=20,
-                created_by=str(interaction.user.id)
+                created_by=str(interaction.user.id),
+                guild=interaction.guild
             )
             
             if not success:
@@ -833,6 +834,7 @@ class FinishCreateButton(ui.Button):
             # Create connection
             success = await func.create_api_connection(
                 server_id=self.server_id,
+                guild=interaction.guild,
                 **final_data
             )
             
@@ -1510,7 +1512,7 @@ class ConfirmRemoveButton(ui.Button):
             ais_using = func.get_ais_using_connection(self.server_id, self.connection_name)
             
             # Remove the connection
-            success = await func.delete_api_connection(self.server_id, self.connection_name)
+            success = await func.delete_api_connection(self.server_id, self.connection_name, guild=interaction.guild)
             
             if not success:
                 await interaction.response.send_message(
@@ -1877,6 +1879,7 @@ class EditParameterModal(ui.Modal):
             success = await func.update_api_connection(
                 self.server_id,
                 self.connection_name,
+                guild=interaction.guild,
                 **{self.param: parsed_value}
             )
             
@@ -1967,6 +1970,7 @@ class EditParameterChoiceView(ui.View):
             success = await func.update_api_connection(
                 self.server_id,
                 self.connection_name,
+                guild=interaction.guild,
                 **{self.param: value}
             )
             

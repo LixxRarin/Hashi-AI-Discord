@@ -491,7 +491,8 @@ async def create_api_connection(
     vision_enabled: bool = False,
     vision_detail: str = "auto",
     max_image_size: int = 20,
-    created_by: Optional[str] = None
+    created_by: Optional[str] = None,
+    guild = None
 ) -> bool:
     """
     Create a new API connection.
@@ -582,12 +583,31 @@ async def create_api_connection(
     
     await save_api_connections(connections)
     log.info(f"Created API connection '{connection_name}'")
+    
+    # Send debug embed
+    if guild:
+        try:
+            from utils.core.debug_embed import DebugEmbed
+            await DebugEmbed.send(
+                guild=guild,
+                event="api_connection_created",
+                data={
+                    "connection_name": connection_name,
+                    "provider": provider,
+                    "model": model,
+                    "endpoint": base_url if base_url else "default"
+                }
+            )
+        except Exception as e:
+            log.debug(f"Failed to send debug embed: {e}")
+    
     return True
 
 
 async def update_api_connection(
     server_id: str,
     connection_name: str,
+    guild=None,
     **updates
 ) -> bool:
     """
@@ -596,6 +616,7 @@ async def update_api_connection(
     Args:
         server_id: Server ID
         connection_name: Connection name
+        guild: Discord guild (optional, for debug embed)
         **updates: Fields to update
         
     Returns:
@@ -607,12 +628,33 @@ async def update_api_connection(
         log.warning(f"Connection '{connection_name}' not found")
         return False
     
+    # Get connection info before update
+    connection = connections[server_id][connection_name]
+    provider = connection.get("provider", "unknown")
+    
     # Remove None values from updates
     updates = {k: v for k, v in updates.items() if v is not None}
     
     connections[server_id][connection_name].update(updates)
     await save_api_connections(connections)
     log.info(f"Updated API connection '{connection_name}'")
+    
+    # Send debug embed
+    if guild:
+        try:
+            from utils.core.debug_embed import DebugEmbed
+            await DebugEmbed.send(
+                guild=guild,
+                event="api_connection_edited",
+                data={
+                    "connection_name": connection_name,
+                    "provider": provider,
+                    "changes": updates
+                }
+            )
+        except Exception as e:
+            log.debug(f"Failed to send debug embed: {e}")
+    
     return True
 
 
@@ -666,13 +708,14 @@ async def rename_api_connection(
     return True, ""
 
 
-async def delete_api_connection(server_id: str, connection_name: str) -> bool:
+async def delete_api_connection(server_id: str, connection_name: str, guild=None) -> bool:
     """
     Remove an API connection.
     
     Args:
         server_id: Server ID
         connection_name: Connection name
+        guild: Discord guild (optional, for debug embed)
         
     Returns:
         bool: True if removed successfully, False if not found
@@ -683,6 +726,10 @@ async def delete_api_connection(server_id: str, connection_name: str) -> bool:
         log.warning(f"Connection '{connection_name}' not found")
         return False
     
+    # Get connection info before deleting
+    connection = connections[server_id][connection_name]
+    provider = connection.get("provider", "unknown")
+    
     del connections[server_id][connection_name]
     
     # Clean up empty server entries
@@ -691,6 +738,22 @@ async def delete_api_connection(server_id: str, connection_name: str) -> bool:
     
     await save_api_connections(connections)
     log.info(f"Deleted API connection '{connection_name}'")
+    
+    # Send debug embed
+    if guild:
+        try:
+            from utils.core.debug_embed import DebugEmbed
+            await DebugEmbed.send(
+                guild=guild,
+                event="api_connection_removed",
+                data={
+                    "connection_name": connection_name,
+                    "provider": provider
+                }
+            )
+        except Exception as e:
+            log.debug(f"Failed to send debug embed: {e}")
+    
     return True
 
 

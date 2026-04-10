@@ -304,6 +304,27 @@ class AILifecycle(commands.Cog):
 
             func.log.info(f"Successfully removed AI '{ai_name}' and all related data from channel {found_channel_id}")
             
+            # Send debug embed
+            from utils.core.debug_embed import DebugEmbed
+            await DebugEmbed.send(
+                guild=interaction.guild,
+                event="remove_ai",
+                data={
+                    "command": "/remove_ai",
+                    "ai_name": ai_name,
+                    "channel": channel_name,
+                    "executor": f"{interaction.user.name}#{interaction.user.discriminator}",
+                    "changes": {
+                        "Mode": mode_display,
+                        "Provider": provider.upper(),
+                        "Model": model_info,
+                        "Chats Deleted": str(total_chats),
+                        "Messages Deleted": str(total_messages)
+                    },
+                    "session": session
+                }
+            )
+            
             # Create success embed
             success_embed = create_success_embed(
                 title="✅ AI Removed Successfully",
@@ -488,7 +509,14 @@ async def execute_setup_from_wizard(
             # Send greeting
             if greetings and channel_obj:
                 try:
-                    await channel_obj.send(greetings)
+                    # Split greeting if it exceeds Discord's 2000 char limit
+                    if len(greetings) > 2000:
+                        greeting_chunks = WebhookUtils.split_text(greetings)
+                        func.log.info(f"Greeting message split into {len(greeting_chunks)} chunks (total: {len(greetings)} chars)")
+                        for chunk in greeting_chunks:
+                            await channel_obj.send(chunk)
+                    else:
+                        await channel_obj.send(greetings)
                     func.log.info("Greeting message sent as bot")
                 except Exception as e:
                     func.log.error(f"Error sending greeting: {e}")

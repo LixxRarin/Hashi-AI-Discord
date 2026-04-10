@@ -514,8 +514,11 @@ class ConfigChoiceSelectView(ui.View):
                 value = choice
                 display_value = choice
             
-            # Save value
+            # Capture old value before saving
             config = self.session.setdefault("config", {})
+            old_value = self.parser.get_nested_value(config, self.config_key)
+            
+            # Save value
             self.parser.set_nested_value(config, self.config_key, value)
             
             # Save to session.json
@@ -531,6 +534,31 @@ class ConfigChoiceSelectView(ui.View):
             )
             
             func.log.info(f"Updated config {self.config_key} = {value} for AI '{self.ai_name}'")
+            
+            # Send debug embed
+            if interaction.guild:
+                try:
+                    from utils.core.debug_embed import DebugEmbed
+                    
+                    # Determine category from config_key
+                    category = self.config_key.split('.')[0] if '.' in self.config_key else "General"
+                    setting = self.config_key.split('.')[-1]
+                    
+                    await DebugEmbed.send(
+                        guild=interaction.guild,
+                        event="config_change",
+                        data={
+                            "ai_name": self.ai_name,
+                            "category": category.replace('_', ' ').title(),
+                            "setting": setting.replace('_', ' ').title(),
+                            "old_value": str(old_value) if old_value is not None else "None",
+                            "new_value": str(value),
+                            "executor": f"<@{interaction.user.id}>",
+                            "channel": f"<#{self.channel_id}>"
+                        }
+                    )
+                except Exception as e:
+                    func.log.debug(f"Failed to send debug embed: {e}")
         
         except Exception as e:
             func.log.error(f"Error saving choice: {e}\n{traceback.format_exc()}")
@@ -599,8 +627,12 @@ class ConfigEditModal(ui.Modal):
                 )
                 return
             
+            # Capture old value before saving
+            config = self.session.get("config", {})
+            old_value = self.parser.get_nested_value(config, self.config_key)
+            
             # Save to session
-            await self._save_value(parsed_value)
+            await self._save_value(parsed_value, interaction, old_value)
             
             # Send confirmation
             formatted_value = self.metadata.format_value_for_display(parsed_value)
@@ -622,7 +654,7 @@ class ConfigEditModal(ui.Modal):
                 ephemeral=True
             )
     
-    async def _save_value(self, value: Any):
+    async def _save_value(self, value: Any, interaction=None, old_value=None):
         """Save value to session.json."""
         # Get config
         config = self.session.setdefault("config", {})
@@ -636,3 +668,28 @@ class ConfigEditModal(ui.Modal):
         await func.update_session_data(self.server_id, self.channel_id, channel_data)
         
         func.log.info(f"Updated config {self.config_key} = {value} for AI '{self.ai_name}'")
+        
+        # Send debug embed
+        if interaction and interaction.guild:
+            try:
+                from utils.core.debug_embed import DebugEmbed
+                
+                # Determine category from config_key
+                category = self.config_key.split('.')[0] if '.' in self.config_key else "General"
+                setting = self.config_key.split('.')[-1]
+                
+                await DebugEmbed.send(
+                    guild=interaction.guild,
+                    event="config_change",
+                    data={
+                        "ai_name": self.ai_name,
+                        "category": category.replace('_', ' ').title(),
+                        "setting": setting.replace('_', ' ').title(),
+                        "old_value": str(old_value) if old_value is not None else "None",
+                        "new_value": str(value),
+                        "executor": f"<@{interaction.user.id}>",
+                        "channel": f"<#{self.channel_id}>"
+                    }
+                )
+            except Exception as e:
+                func.log.debug(f"Failed to send debug embed: {e}")

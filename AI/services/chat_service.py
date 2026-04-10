@@ -924,6 +924,9 @@ class ChatService:
         
         
         try:
+            import time
+            start_time = time.time()
+            
             default_model = "deepseek-chat" if provider == "deepseek" else "gpt-3.5-turbo"
             model = client.resolve_model(session, server_id, default_model)
             
@@ -988,6 +991,101 @@ class ChatService:
                 tools=tools,
                 tool_context=tool_context
             )
+            
+            # Calculate latency
+            latency_ms = int((time.time() - start_time) * 1000)
+            
+            # Send debug embed for LLM response
+            guild = message.guild if hasattr(message, 'guild') else None
+            if guild:
+                try:
+                    from utils.core.debug_embed import DebugEmbed
+                    
+                    # Get history for memory stats
+                    history = await self.get_ai_history(server_id, channel_id, ai_name, chat_id)
+                    
+                    # Calculate token breakdown using standard LLM terminology
+                    # System: static parts (character card, system prompts)
+                    system_tokens = sum(
+                        client.count_tokens(msg["content"], model)
+                        for msg in prepared_messages
+                        if msg["role"] == "system"
+                    )
+                    
+                    # Context: conversation history + current user input
+                    context_tokens = sum(
+                        client.count_tokens(msg["content"], model)
+                        for msg in prepared_messages
+                        if msg["role"] in ["user", "assistant"]
+                    )
+                    
+                    # Prompt: total tokens sent to LLM (system + context)
+                    prompt_tokens = system_tokens + context_tokens
+                    
+                    # Completion: AI's response
+                    completion_tokens = client.count_tokens(raw_response, model)
+                    
+                    # Total: everything (prompt + completion)
+                    total_tokens = prompt_tokens + completion_tokens
+                    
+                    # Get context window size
+                    llm_params = client.get_llm_params(session, server_id)
+                    context_window = llm_params.get("context_size", 0)
+                    
+                    # Calculate TPS (Tokens Per Second)
+                    tps = None
+                    if latency_ms > 0 and completion_tokens > 0:
+                        latency_seconds = latency_ms / 1000.0
+                        tps = completion_tokens / latency_seconds
+                    
+                    # Prepare tool calls info (if tools were used)
+                    tool_calls_info = []
+                    if tools and tool_context:
+                        # Extract executed tools from context
+                        executed_tools = tool_context.get("_executed_tools", [])
+                        tool_calls_info = executed_tools
+                    
+                    # Get channel mention from real channel object
+                    channel_mention = None
+                    bot_client = getattr(message, '_bot_client', None)
+                    if bot_client:
+                        try:
+                            real_channel = bot_client.get_channel(int(channel_id))
+                            if real_channel and hasattr(real_channel, 'mention'):
+                                channel_mention = real_channel.mention
+                        except Exception as e:
+                            func.log.debug(f"Could not get channel mention: {e}")
+                    
+                    await DebugEmbed.send(
+                        guild=guild,
+                        event="llm_response",
+                        data={
+                            "ai_name": ai_name,
+                            "channel": channel_mention,
+                            "provider": provider,
+                            "model": model,
+                            "tokens": {
+                                "system": system_tokens,
+                                "context": context_tokens,
+                                "prompt": prompt_tokens,
+                                "completion": completion_tokens,
+                                "total": total_tokens,
+                                "context_window": context_window
+                            },
+                            "memory": {
+                                "messages_count": len(history),
+                                "estimated_tokens": context_tokens
+                            },
+                            "tool_calls": tool_calls_info,
+                            "latency_ms": latency_ms,
+                            "tps": tps,
+                            "raw_response": raw_response[:2000],  # Truncate for embed
+                            "session": session
+                        }
+                    )
+                except Exception as debug_error:
+                    # Never crash main flow due to debug failures
+                    func.log.debug(f"Error sending LLM debug embed: {debug_error}")
             
             # Check if response is a structured error before post-processing
             from AI.error_types import LLMError

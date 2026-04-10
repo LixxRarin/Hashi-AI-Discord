@@ -12,8 +12,13 @@ from discord.ext import commands
 import utils.func as func
 from AI.services.chat_service import get_service
 from commands.shared.autocomplete import AutocompleteHelpers
-from commands.shared.avatar_utils import AvatarUtils
+from commands.shared.avatar_utils import AvatarUtils, get_character_card_thumbnail_url
 from commands.shared.webhook_utils import WebhookUtils
+from utils.discord.confirmation_ui import (
+    confirm_dangerous_action,
+    create_success_embed
+)
+from utils.discord.guild_profile import set_guild_profile
 
 
 # Module-level autocomplete functions (must be defined before class)
@@ -135,91 +140,123 @@ class CardApplication(commands.Cog):
         # Check if there's existing conversation history
         service = get_service()
         current_chat_id = session.get("chat_id", "default")
-        existing_history = await service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
+        existing_history = await service.get_ai_history(server_id, found_channel_id, actual_ai_name, current_chat_id)
+        
+        # Helper function to apply the greeting change
+        async def apply_greeting_change(confirm_interaction: discord.Interaction = None):
+            """Apply the greeting change and update history."""
+            # Process CBS in greeting
+            from utils.ccv3 import process_cbs
+            char_name = card_data.get("nickname") or card_data.get("name", actual_ai_name)
+            user_name = "{{user}}"
+            processed_greeting = process_cbs(greeting_text, char_name, user_name, session)
+            
+            # Update config
+            channel_data = func.get_session_data(server_id, found_channel_id)
+            if not channel_data or actual_ai_name not in channel_data:
+                error_msg = f"❌ Failed to update configuration."
+                if confirm_interaction:
+                    error_embed = discord.Embed(
+                        title="❌ Error",
+                        description=error_msg,
+                        color=discord.Color.red()
+                    )
+                    await confirm_interaction.response.edit_message(embed=error_embed, view=None)
+                else:
+                    await interaction.followup.send(error_msg, ephemeral=True)
+                return
+            
+            channel_data[actual_ai_name]["config"]["greeting_index"] = greeting_index
+            
+            # Clear conversation history and add new greeting
+            await service.clear_ai_history(server_id, found_channel_id, actual_ai_name, current_chat_id, keep_greeting=False)
+            await service.append_to_history(server_id, found_channel_id, actual_ai_name, "assistant", processed_greeting, current_chat_id)
+            
+            # Save updated session
+            await func.update_session_data(server_id, found_channel_id, channel_data)
+            
+            # Send greeting to channel if requested
+            if send_to_channel:
+                channel = self.bot.get_channel(int(found_channel_id))
+                if channel:
+                    if session.get("mode") == "webhook":
+                        webhook_url = session.get("webhook_url")
+                        if webhook_url:
+                            await self.webhook_utils.send_message(webhook_url, processed_greeting, session)
+                    else:
+                        await channel.send(processed_greeting)
+            
+            # Send success message
+            success_msg = f"✅ Greeting #{greeting_index} selected for '{actual_ai_name}'.\nHistory has been cleared and the new greeting has been set."
+            
+            if confirm_interaction:
+                success_embed = create_success_embed(
+                    title="✅ Greeting Changed Successfully",
+                    description=f"The greeting for **{actual_ai_name}** has been updated.",
+                    fields=[
+                        {
+                            "name": "📊 Summary",
+                            "value": f"• **AI:** {actual_ai_name}\n"
+                                    f"• **New Greeting:** #{greeting_index}\n"
+                                    f"• **Messages Cleared:** {len(existing_history)}\n"
+                                    f"• **Changed by:** {interaction.user.mention}"
+                        }
+                    ]
+                )
+                await confirm_interaction.response.edit_message(embed=success_embed, view=None)
+            else:
+                await interaction.followup.send(success_msg, ephemeral=True)
         
         # If there's existing history, ask for confirmation
         if existing_history and len(existing_history) > 1:
             greeting_preview = greeting_text[:200] + "..." if len(greeting_text) > 200 else greeting_text
             
-            confirm_msg = await interaction.channel.send(
-                f"⚠️ **WARNING: Existing Conversation History** (requested by {interaction.user.mention})\n\n"
-                f"**AI:** {ai_name}\n"
-                f"**Messages in history:** {len(existing_history)}\n"
-                f"**New greeting:** #{greeting_index}\n\n"
-                f"**Preview of new greeting:**\n{greeting_preview}\n\n"
-                f"⚠️ **Changing the greeting will DELETE ALL CONVERSATION HISTORY!**\n"
-                f"This means all RP/conversation progress will be lost.\n\n"
-                f"**React with ✅ to confirm or ❌ to cancel.**"
-            )
-            
-            await interaction.followup.send(
-                "✅ Confirmation message sent. Please react to confirm or cancel.",
-                ephemeral=True
-            )
-            
-            await confirm_msg.add_reaction("✅")
-            await confirm_msg.add_reaction("❌")
-            
-            def check(reaction, user):
-                return (
-                    user.id == interaction.user.id and
-                    str(reaction.emoji) in ["✅", "❌"] and
-                    reaction.message.id == confirm_msg.id
-                )
-            
+            # Get thumbnail
+            thumbnail_url = None
             try:
-                reaction, user = await self.bot.wait_for('reaction_add', timeout=30.0, check=check)
-                
-                if str(reaction.emoji) == "❌":
-                    await confirm_msg.edit(content="❌ Greeting change cancelled. History preserved.")
-                    return
-                
-                await confirm_msg.edit(content="🔄 Changing greeting and clearing history...")
-                
-            except asyncio.TimeoutError:
-                await confirm_msg.edit(content="⏱️ Timeout. Greeting change cancelled.")
-                return
-        
-        # Process CBS in greeting
-        from utils.ccv3 import process_cbs
-        char_name = card_data.get("nickname") or card_data.get("name", ai_name)
-        user_name = "{{user}}"
-        greeting_text = process_cbs(greeting_text, char_name, user_name, session)
-        
-        # Update config
-        channel_data = func.get_session_data(server_id, found_channel_id)
-        if not channel_data or ai_name not in channel_data:
-            await interaction.followup.send(
-                f"❌ Failed to update configuration.",
-                ephemeral=True
+                channel_obj = interaction.guild.get_channel(int(found_channel_id))
+                if channel_obj:
+                    thumbnail_url = await get_character_card_thumbnail_url(
+                        channel=channel_obj,
+                        session=session,
+                        server_id=server_id
+                    )
+            except:
+                pass
+            
+            # Prepare detail fields
+            details_fields = [
+                {
+                    "name": "📊 Details",
+                    "value": f"• **AI:** {actual_ai_name}\n"
+                            f"• **New Greeting:** #{greeting_index}\n"
+                            f"• **Messages in History:** {len(existing_history)}"
+                },
+                {
+                    "name": "📝 New Greeting Preview",
+                    "value": greeting_preview
+                },
+                {
+                    "name": "⚠️ Warning",
+                    "value": "**This will DELETE ALL conversation history!**\n"
+                            "All roleplay and conversation progress will be lost forever.\n"
+                            "This action cannot be undone."
+                }
+            ]
+            
+            # Show double confirmation dialog
+            await confirm_dangerous_action(
+                interaction=interaction,
+                action_name="Change Greeting",
+                warning_message="This will delete all conversation history!",
+                details_fields=details_fields,
+                on_confirm=apply_greeting_change,
+                thumbnail_url=thumbnail_url
             )
             return
         
-        channel_data[ai_name]["config"]["greeting_index"] = greeting_index
-        
-        # Clear conversation history and add new greeting
-        await service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id, keep_greeting=False)
-        await service.append_to_history(server_id, found_channel_id, ai_name, "assistant", greeting_text, current_chat_id)
-        
-        # Save updated session
-        await func.update_session_data(server_id, found_channel_id, channel_data)
-        
-        # Send greeting to channel if requested
-        if send_to_channel:
-            channel = self.bot.get_channel(int(found_channel_id))
-            if channel:
-                if session.get("mode") == "webhook":
-                    webhook_url = session.get("webhook_url")
-                    if webhook_url:
-                        await self.webhook_utils.send_message(webhook_url, greeting_text, session)
-                else:
-                    await channel.send(greeting_text)
-        
-        await interaction.followup.send(
-            f"✅ Greeting #{greeting_index} selected for '{ai_name}'.\n"
-            f"History has been cleared and the new greeting has been set.",
-            ephemeral=True
-        )
+        # If no history, proceed directly
+        await apply_greeting_change()
     
     @app_commands.command(name="set_card", description="Apply a registered character card to an existing AI")
     @app_commands.default_permissions(administrator=True)
@@ -227,8 +264,8 @@ class CardApplication(commands.Cog):
         ai_name="Name of the AI to apply the card to",
         card_name="Name of the registered card to apply",
         greeting_index="Which greeting to use (0=first_mes, 1+=alternate_greetings)",
-        update_avatar="Update the AI's avatar (global for bot, per-webhook for webhook mode)",
-        update_display_name="Update the AI's display name (nickname for bot, webhook name for webhook mode)",
+        update_avatar="Update the AI's avatar (guild-specific for bot, per-webhook for webhook mode)",
+        update_display_name="Update the AI's display name (guild nickname for bot, webhook name for webhook mode)",
         clear_history="Clear conversation history and add greeting (default: True)"
     )
     @app_commands.autocomplete(
@@ -250,17 +287,36 @@ class CardApplication(commands.Cog):
         
         server_id = str(interaction.guild.id)
         
-        # Check if AI exists
-        found_ai_data = func.get_ai_session_data_from_all_channels(server_id, ai_name)
-        if not found_ai_data:
-            await interaction.followup.send(
-                f"❌ AI '{ai_name}' not found in this server.\n\n"
-                f"💡 Use `/list_ais` to see available AIs.",
-                ephemeral=True
-            )
-            return
+        # Parse AI identifier from autocomplete (format: "ai_name|||channel_id")
+        actual_ai_name, channel_id_hint = AutocompleteHelpers.parse_ai_identifier(ai_name)
         
-        found_channel_id, session = found_ai_data
+        # Get AI data - use optimized lookup if channel_id is available
+        if channel_id_hint:
+            # Direct lookup - faster, no iteration
+            channel_data = func.get_session_data(server_id, channel_id_hint)
+            session = channel_data.get(actual_ai_name) if channel_data else None
+            
+            if not session:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in the specified channel.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id = channel_id_hint
+        else:
+            # Fallback: Search all channels (for manual input without autocomplete)
+            found_ai_data = func.get_ai_session_data_from_all_channels(server_id, actual_ai_name)
+            
+            if not found_ai_data:
+                await interaction.followup.send(
+                    f"❌ AI '{actual_ai_name}' not found in this server.\n\n"
+                    f"💡 Use `/list_ais` to see available AIs.",
+                    ephemeral=True
+                )
+                return
+            
+            found_channel_id, session = found_ai_data
         
         # Check if user selected the special default card option
         if card_name == "__default__":
@@ -415,158 +471,217 @@ class CardApplication(commands.Cog):
         # Check if there's existing conversation history
         service = get_service()
         current_chat_id = session.get("chat_id", "default")
-        existing_history = await service.get_ai_history(server_id, found_channel_id, ai_name, current_chat_id)
+        existing_history = await service.get_ai_history(server_id, found_channel_id, actual_ai_name, current_chat_id)
+        
+        # Helper function to apply the card
+        async def apply_card(confirm_interaction: discord.Interaction = None):
+            """Apply the character card and update all settings."""
+            # Update session data with new card
+            channel_data = func.get_session_data(server_id, found_channel_id)
+            if not channel_data or actual_ai_name not in channel_data:
+                error_msg = f"❌ Failed to update configuration."
+                if confirm_interaction:
+                    error_embed = discord.Embed(
+                        title="❌ Error",
+                        description=error_msg,
+                        color=discord.Color.red()
+                    )
+                    await confirm_interaction.response.edit_message(embed=error_embed, view=None)
+                else:
+                    await interaction.followup.send(error_msg, ephemeral=True)
+                return
+            
+            # Update character card data
+            channel_data[actual_ai_name]["character_card"] = {
+                "data": card_data,
+                "spec_version": character_card.spec_version,
+                "cache_path": cache_path
+            }
+            channel_data[actual_ai_name]["character_card_name"] = card_name
+            channel_data[actual_ai_name]["config"]["greeting_index"] = greeting_index
+            
+            # Clear conversation history and add new greeting (only if clear_history=True)
+            if clear_history:
+                # Process CBS in greeting
+                from utils.ccv3 import process_cbs
+                char_name = card_data.get("nickname") or card_data.get("name", actual_ai_name)
+                user_name = "{{user}}"
+                processed_greeting = process_cbs(greeting_text, char_name, user_name, session)
+                
+                await service.clear_ai_history(server_id, found_channel_id, actual_ai_name, current_chat_id, keep_greeting=False)
+                await service.append_to_history(server_id, found_channel_id, actual_ai_name, "assistant", processed_greeting, current_chat_id)
+            
+            # Save updated session
+            await func.update_session_data(server_id, found_channel_id, channel_data)
+            
+            # Update avatar and display name based on mode
+            avatar_updated = False
+            name_updated = False
+            
+            if session.get("mode") == "webhook":
+                webhook_url = session.get("webhook_url")
+                
+                if webhook_url and update_avatar:
+                    try:
+                        avatar_bytes = await self.avatar_utils.extract_from_card(cache_path)
+                        if avatar_bytes:
+                            await self.webhook_utils.update_avatar(webhook_url, avatar_bytes)
+                            avatar_updated = True
+                            func.log.info("Updated webhook avatar")
+                    except Exception as e:
+                        func.log.warning(f"Failed to update webhook avatar: {e}")
+                
+                if webhook_url and update_display_name:
+                    try:
+                        display_name = card_data.get("nickname") or card_data.get("name", actual_ai_name)
+                        await self.webhook_utils.update_name(webhook_url, display_name)
+                        name_updated = True
+                        func.log.info("Updated webhook display name")
+                    except Exception as e:
+                        func.log.warning(f"Failed to update webhook display name: {e}")
+            
+            elif session.get("mode") == "bot":
+                # Update guild-specific profile (both avatar and nickname)
+                try:
+                    profile_updates = {}
+                    
+                    if update_display_name:
+                        display_name = card_data.get("nickname") or card_data.get("name", actual_ai_name)
+                        profile_updates["nick"] = display_name
+                    
+                    if update_avatar:
+                        avatar_bytes = await self.avatar_utils.extract_from_card(cache_path)
+                        if avatar_bytes:
+                            profile_updates["avatar_bytes"] = avatar_bytes
+                    
+                    # Apply guild-specific profile
+                    if profile_updates:
+                        await set_guild_profile(
+                            bot=self.bot,
+                            guild_id=interaction.guild.id,
+                            **profile_updates
+                        )
+                        
+                        # Set flags based on what was updated
+                        if "nick" in profile_updates:
+                            name_updated = True
+                        if "avatar_bytes" in profile_updates:
+                            avatar_updated = True
+                        
+                        func.log.info(f"Updated guild profile for guild {interaction.guild.id}")
+                except Exception as e:
+                    func.log.warning(f"Failed to update guild profile: {e}")
+            
+            # Build success message
+            creator = card_data.get("creator", "Unknown")
+            char_name = card_data.get("nickname") or card_data.get("name", actual_ai_name)
+            
+            if confirm_interaction:
+                # Create success embed for confirmation flow
+                success_embed = create_success_embed(
+                    title="✅ Character Card Applied Successfully",
+                    description=f"The character card has been applied to **{actual_ai_name}**.",
+                    fields=[
+                        {
+                            "name": "📊 Card Details",
+                            "value": f"• **Card:** {card_name}\n"
+                                    f"• **Character:** {char_name}\n"
+                                    f"• **Creator:** {creator}\n"
+                                    f"• **Greeting:** #{greeting_index}"
+                        },
+                        {
+                            "name": "🔄 Updates Applied",
+                            "value": f"• **Avatar:** {'✅ Updated' if avatar_updated else '⏭️ Skipped'}\n"
+                                    f"• **Display Name:** {'✅ Updated' if name_updated else '⏭️ Skipped'}\n"
+                                    f"• **History:** {'🗑️ Cleared' if clear_history else '💾 Preserved'}"
+                        },
+                        {
+                            "name": "👤 Applied By",
+                            "value": interaction.user.mention
+                        }
+                    ]
+                )
+                
+                if clear_history:
+                    success_embed.add_field(
+                        name="💡 Note",
+                        value=f"Conversation history cleared. Messages deleted: {len(existing_history)}",
+                        inline=False
+                    )
+                
+                await confirm_interaction.response.edit_message(embed=success_embed, view=None)
+            else:
+                # Simple text message for non-confirmation flow
+                success_msg = f"✅ **Character card applied successfully!**\n\n"
+                success_msg += f"**AI:** `{actual_ai_name}`\n"
+                success_msg += f"**Card:** `{card_name}`\n"
+                success_msg += f"**Character:** {char_name}\n"
+                success_msg += f"**Creator:** {creator}\n"
+                success_msg += f"**Greeting:** #{greeting_index}\n"
+                success_msg += f"**Avatar updated:** {'Yes' if avatar_updated else 'No'}\n"
+                success_msg += f"**Display name updated:** {'Yes' if name_updated else 'No'}\n\n"
+                
+                if clear_history:
+                    success_msg += f"💡 **History cleared:** The conversation history has been cleared and the new greeting has been set.\n"
+                else:
+                    success_msg += f"💡 **History preserved:** The conversation history has been kept intact. Only card metadata was updated.\n"
+                
+                success_msg += f"Use `/character_info ai_name:{actual_ai_name}` to view card details."
+                
+                await interaction.followup.send(success_msg, ephemeral=True)
         
         # If clear_history is True and there's existing history, ask for confirmation
-        confirm_msg = None
         if clear_history and existing_history and len(existing_history) > 1:
             char_name = card_data.get("nickname") or card_data.get("name", card_name)
             greeting_preview = greeting_text[:200] + "..." if len(greeting_text) > 200 else greeting_text
             
-            confirm_msg = await interaction.channel.send(
-                f"⚠️ **WARNING: Existing Conversation History** (requested by {interaction.user.mention})\n\n"
-                f"**AI:** {ai_name}\n"
-                f"**Messages in history:** {len(existing_history)}\n"
-                f"**New card:** {card_name}\n"
-                f"**Character:** {char_name}\n\n"
-                f"**Preview of new greeting:**\n{greeting_preview}\n\n"
-                f"⚠️ **Applying this card will DELETE ALL CONVERSATION HISTORY!**\n"
-                f"This means all RP/conversation progress will be lost.\n\n"
-                f"**React with ✅ to confirm or ❌ to cancel.**"
-            )
-            
-            await interaction.followup.send(
-                "✅ Confirmation message sent. Please react to confirm or cancel.",
-                ephemeral=True
-            )
-            
-            await confirm_msg.add_reaction("✅")
-            await confirm_msg.add_reaction("❌")
-            
-            def check(reaction, user):
-                return (
-                    user.id == interaction.user.id and
-                    str(reaction.emoji) in ["✅", "❌"] and
-                    reaction.message.id == confirm_msg.id
-                )
-            
+            # Get thumbnail
+            thumbnail_url = None
             try:
-                reaction, user = await self.bot.wait_for('reaction_add', timeout=30.0, check=check)
-                
-                if str(reaction.emoji) == "❌":
-                    await confirm_msg.edit(content="❌ Card application cancelled. History preserved.")
-                    return
-                
-                await confirm_msg.edit(content="🔄 Applying card and clearing history...")
-                
-            except asyncio.TimeoutError:
-                await confirm_msg.edit(content="⏱️ Timeout. Card application cancelled.")
-                return
-        
-        # Update session data with new card
-        channel_data = func.get_session_data(server_id, found_channel_id)
-        if not channel_data or ai_name not in channel_data:
-            msg = f"❌ Failed to update configuration."
-            if confirm_msg:
-                await confirm_msg.edit(content=msg)
-            else:
-                await interaction.followup.send(msg, ephemeral=True)
+                channel_obj = interaction.guild.get_channel(int(found_channel_id))
+                if channel_obj:
+                    thumbnail_url = await get_character_card_thumbnail_url(
+                        channel=channel_obj,
+                        session=session,
+                        server_id=server_id
+                    )
+            except:
+                pass
+            
+            # Prepare detail fields
+            details_fields = [
+                {
+                    "name": "📊 Details",
+                    "value": f"• **AI:** {actual_ai_name}\n"
+                            f"• **New Card:** {card_name}\n"
+                            f"• **Character:** {char_name}\n"
+                            f"• **Messages in History:** {len(existing_history)}"
+                },
+                {
+                    "name": "📝 New Greeting Preview",
+                    "value": greeting_preview
+                },
+                {
+                    "name": "⚠️ Warning",
+                    "value": "**This will DELETE ALL conversation history!**\n"
+                            "All roleplay and conversation progress will be lost forever.\n"
+                            "This action cannot be undone."
+                }
+            ]
+            
+            # Show double confirmation dialog
+            await confirm_dangerous_action(
+                interaction=interaction,
+                action_name="Apply Card",
+                warning_message="This will delete all conversation history!",
+                details_fields=details_fields,
+                on_confirm=apply_card,
+                thumbnail_url=thumbnail_url
+            )
             return
         
-        # Update character card data
-        channel_data[ai_name]["character_card"] = {
-            "data": card_data,
-            "spec_version": character_card.spec_version,
-            "cache_path": cache_path
-        }
-        channel_data[ai_name]["character_card_name"] = card_name
-        channel_data[ai_name]["config"]["greeting_index"] = greeting_index
-        
-        # Clear conversation history and add new greeting (only if clear_history=True)
-        if clear_history:
-            # Process CBS in greeting
-            from utils.ccv3 import process_cbs
-            char_name = card_data.get("nickname") or card_data.get("name", ai_name)
-            user_name = "{{user}}"
-            greeting_text = process_cbs(greeting_text, char_name, user_name, session)
-            
-            await service.clear_ai_history(server_id, found_channel_id, ai_name, current_chat_id, keep_greeting=False)
-            await service.append_to_history(server_id, found_channel_id, ai_name, "assistant", greeting_text, current_chat_id)
-        
-        # Save updated session
-        await func.update_session_data(server_id, found_channel_id, channel_data)
-        
-        # Update avatar and display name based on mode
-        avatar_updated = False
-        name_updated = False
-        
-        if session.get("mode") == "webhook":
-            webhook_url = session.get("webhook_url")
-            
-            if webhook_url and update_avatar:
-                try:
-                    avatar_bytes = await self.avatar_utils.extract_from_card(cache_path)
-                    if avatar_bytes:
-                        await self.webhook_utils.update_avatar(webhook_url, avatar_bytes)
-                        avatar_updated = True
-                        func.log.info("Updated avatar for AI")
-                except Exception as e:
-                    func.log.warning(f"Failed to update avatar: {e}")
-            
-            if webhook_url and update_display_name:
-                try:
-                    display_name = card_data.get("nickname") or card_data.get("name", ai_name)
-                    await self.webhook_utils.update_name(webhook_url, display_name)
-                    name_updated = True
-                    func.log.info("Updated display name for AI")
-                except Exception as e:
-                    func.log.warning(f"Failed to update display name: {e}")
-        
-        elif session.get("mode") == "bot":
-            # Update bot nickname and avatar
-            if update_display_name:
-                try:
-                    display_name = card_data.get("nickname") or card_data.get("name", ai_name)
-                    me = interaction.guild.me
-                    await me.edit(nick=display_name)
-                    name_updated = True
-                    func.log.info(f"Updated bot nickname in guild {interaction.guild.id}")
-                except Exception as e:
-                    func.log.warning(f"Failed to update bot nickname: {e}")
-            
-            if update_avatar:
-                try:
-                    avatar_bytes = await self.avatar_utils.extract_from_card(cache_path)
-                    if avatar_bytes:
-                        await self.bot.user.edit(avatar=avatar_bytes)
-                        avatar_updated = True
-                        func.log.info(f"Updated bot avatar globally")
-                except Exception as e:
-                    func.log.warning(f"Failed to update bot avatar: {e}")
-        
-        # Build success message
-        creator = card_data.get("creator", "Unknown")
-        char_name = card_data.get("nickname") or card_data.get("name", ai_name)
-        success_msg = f"✅ **Character card applied successfully!**\n\n"
-        success_msg += f"**AI:** `{ai_name}`\n"
-        success_msg += f"**Card:** `{card_name}`\n"
-        success_msg += f"**Character:** {char_name}\n"
-        success_msg += f"**Creator:** {creator}\n"
-        success_msg += f"**Greeting:** #{greeting_index}\n"
-        success_msg += f"**Avatar updated:** {'Yes' if avatar_updated else 'No'}\n"
-        success_msg += f"**Display name updated:** {'Yes' if name_updated else 'No'}\n\n"
-        
-        if clear_history:
-            success_msg += f"💡 **History cleared:** The conversation history has been cleared and the new greeting has been set.\n"
-        else:
-            success_msg += f"💡 **History preserved:** The conversation history has been kept intact. Only card metadata was updated.\n"
-        
-        success_msg += f"Use `/character_info ai_name:{ai_name}` to view card details."
-        
-        if confirm_msg:
-            await confirm_msg.edit(content=success_msg)
-        else:
-            await interaction.followup.send(success_msg, ephemeral=True)
+        # If no history or clear_history=False, proceed directly
+        await apply_card()
 
 
 async def setup(bot):

@@ -589,10 +589,61 @@ class MessagePipeline:
                         short_id=None  # No short_id for ignored messages
                     )
                     
+                    # Handle sleep mode and track state changes
+                    sleep_mode_triggered = False
+                    consecutive_count = 0
+                    threshold = 3
+                    sleep_mode_active = False
+                    
                     if config.get("sleep_mode_enabled", False):
+                        # Get state before handling to detect if sleep mode was just triggered
+                        response_filter = get_response_filter()
+                        state_key = (server_id, channel_id, ai_name)
+                        
+                        # Get state before
+                        if state_key in response_filter.sleep_state:
+                            state_before = response_filter.sleep_state[state_key]
+                            was_in_sleep = state_before.get("in_sleep_mode", False)
+                        else:
+                            was_in_sleep = False
+                        
                         await self._handle_ignore_for_sleep(
                             server_id, channel_id, ai_name, session_with_context
                         )
+                        
+                        # Get state after
+                        if state_key in response_filter.sleep_state:
+                            state_after = response_filter.sleep_state[state_key]
+                            now_in_sleep = state_after.get("in_sleep_mode", False)
+                            consecutive_count = state_after.get("consecutive_refusals", 0)
+                            sleep_mode_active = now_in_sleep
+                            sleep_mode_triggered = now_in_sleep and not was_in_sleep
+                        
+                        threshold = config.get("ignore_sleep_threshold", 3)
+                    
+                    # Send debug embed
+                    try:
+                        channel = self.bot_client.get_channel(int(channel_id))
+                        if channel and hasattr(channel, 'guild'):
+                            from utils.core.debug_embed import DebugEmbed
+                            await DebugEmbed.send(
+                                guild=channel.guild,
+                                event="ignore_detected",
+                                data={
+                                    "ai_name": ai_name,
+                                    "channel": channel.mention,
+                                    "ignore_type": "pure",
+                                    "raw_response": response,
+                                    "sleep_mode_enabled": config.get("sleep_mode_enabled", False),
+                                    "sleep_mode_active": sleep_mode_active,
+                                    "consecutive_ignores": consecutive_count,
+                                    "ignore_threshold": threshold,
+                                    "just_entered_sleep": sleep_mode_triggered,
+                                    "session": session_with_context
+                                }
+                            )
+                    except Exception as e:
+                        log.error(f"Error sending ignore debug embed: {e}")
                 
                 elif ignore_type == "impure":
                     # Impure ignore: don't save to history, don't handle sleep mode
@@ -601,6 +652,30 @@ class MessagePipeline:
                         "skipping message and not saving to history"
                     )
                     # No history save, no sleep mode handling for impure ignore
+                    
+                    # Send debug embed
+                    try:
+                        channel = self.bot_client.get_channel(int(channel_id))
+                        if channel and hasattr(channel, 'guild'):
+                            from utils.core.debug_embed import DebugEmbed
+                            await DebugEmbed.send(
+                                guild=channel.guild,
+                                event="ignore_detected",
+                                data={
+                                    "ai_name": ai_name,
+                                    "channel": channel.mention,
+                                    "ignore_type": "impure",
+                                    "raw_response": response,
+                                    "sleep_mode_enabled": False,  # Not relevant for impure
+                                    "sleep_mode_active": False,
+                                    "consecutive_ignores": 0,
+                                    "ignore_threshold": 0,
+                                    "just_entered_sleep": False,
+                                    "session": session_with_context
+                                }
+                            )
+                    except Exception as e:
+                        log.error(f"Error sending ignore debug embed: {e}")
                 
                 await self.buffer.clear_specific_messages(
                     server_id, channel_id, ai_name, processing_message_ids
@@ -799,7 +874,6 @@ class MessagePipeline:
         
         # Verificar se IA está em sleep mode
         import time
-        from AI.response_filter import get_response_filter
         
         response_filter = get_response_filter()
         state_key = (server_id, channel_id, ai_name)

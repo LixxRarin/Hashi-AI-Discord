@@ -23,7 +23,6 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
-from utils.core.debug import DiscordLogHandler
 
 
 class DebugCommands(commands.Cog):
@@ -32,85 +31,18 @@ class DebugCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
         self.start_time = time.time()
-        self._discord_handler: Optional[DiscordLogHandler] = None
     
-    async def cog_load(self):
-        """Called when the cog is loaded. Initialize debug handler if configured."""
-        try:
-            from utils.core.paths import DataPaths
-
-            data_paths = DataPaths()
-
-            # Check if any server has debug enabled
-            has_enabled_debug = False
-            min_level = logging.CRITICAL  # Start with highest level
-
-            for server_id in data_paths.list_servers():
-                debug_config_file = data_paths.get_debug_config_file(server_id)
-                if not os.path.exists(debug_config_file):
-                    continue
-
-                config = func.read_json(debug_config_file) or {}
-                if config.get("enabled", False) and config.get("debug_channel_id"):
-                    has_enabled_debug = True
-                    # Find the lowest (most verbose) log level across all configs
-                    level_name = config.get("log_level", "INFO")
-                    level = getattr(logging, level_name, logging.INFO)
-                    min_level = min(min_level, level)
-
-            # Initialize handler if debug is enabled
-            if has_enabled_debug:
-                handler = self._get_or_create_handler()
-                handler.setLevel(min_level)
-        except Exception as e:
-            func.log.error(f"Error initializing debug handler on startup: {e}")
-    
-    def _get_or_create_handler(self) -> DiscordLogHandler:
-        """
-        Get or create the Discord log handler.
-        
-        Returns:
-            DiscordLogHandler instance
-        """
-        if self._discord_handler is None:
-            # Find existing handler or create new one
-            root_logger = logging.getLogger()
-            for handler in root_logger.handlers:
-                if isinstance(handler, DiscordLogHandler):
-                    self._discord_handler = handler
-                    break
-            
-            if self._discord_handler is None:
-                # Create new handler
-                self._discord_handler = DiscordLogHandler(self.bot)
-                self._discord_handler.setLevel(logging.DEBUG)
-                root_logger.addHandler(self._discord_handler)
-                func.log.info("Discord log handler created and registered")
-        
-        return self._discord_handler
-    
-    @app_commands.command(name="set_debug_channel", description="Configure a channel to receive debug logs")
+    @app_commands.command(name="debug_setup", description="Configure a channel to receive debug embeds")
     @app_commands.default_permissions(administrator=True)
     @app_commands.describe(
-        channel="Channel to send debug logs to",
-        log_level="Minimum log level to display",
-        enabled="Enable or disable debug logging"
+        channel="Channel to send debug embeds to"
     )
-    @app_commands.choices(log_level=[
-        app_commands.Choice(name="DEBUG (All messages)", value="DEBUG"),
-        app_commands.Choice(name="INFO (Informational and above)", value="INFO"),
-        app_commands.Choice(name="WARNING (Warnings and errors only)", value="WARNING"),
-        app_commands.Choice(name="ERROR (Errors only)", value="ERROR"),
-        app_commands.Choice(name="CRITICAL (Critical errors only)", value="CRITICAL")
-    ])
-    async def set_debug_channel(
+    async def debug_setup(
         self,
         interaction: discord.Interaction,
-        channel: discord.TextChannel,
-        log_level: app_commands.Choice[str] = None,
-        enabled: bool = True
+        channel: discord.TextChannel
     ):
-        """Configure the debug channel for receiving logs."""
+        """Configure the debug channel for receiving debug embeds."""
         await interaction.response.defer(ephemeral=True)
 
         server_id = str(interaction.guild.id)
@@ -126,217 +58,106 @@ class DebugCommands(commands.Cog):
 
         # Update configuration
         server_config["debug_channel_id"] = str(channel.id)
-        server_config["enabled"] = enabled
-
-        if log_level:
-            server_config["log_level"] = log_level.value
-        elif "log_level" not in server_config:
-            server_config["log_level"] = "INFO"
+        server_config["enabled"] = True  # Enable by default when setting channel
 
         # Save configuration
         func.write_json(debug_config_file, server_config)
-
-        # Get or create handler
-        handler = self._get_or_create_handler()
-
-        # Invalidate cache to pick up new configuration
-        handler.invalidate_cache()
-
-        # Set handler level to minimum across all enabled configs
-        min_level = logging.CRITICAL
-        for srv_id in data_paths.list_servers():
-            cfg_file = data_paths.get_debug_config_file(srv_id)
-            if os.path.exists(cfg_file):
-                cfg = func.read_json(cfg_file) or {}
-                if cfg.get("enabled", False):
-                    lvl_name = cfg.get("log_level", "INFO")
-                    lvl = getattr(logging, lvl_name, logging.INFO)
-                    min_level = min(min_level, lvl)
-        handler.setLevel(min_level)
-
-        # Get the log level name for display
-        level_name = server_config["log_level"]
         
         # Send test message
-        if enabled:
-            try:
-                test_embed = discord.Embed(
-                    title="✅ Debug Channel Configured",
-                    description=f"This channel will now receive debug logs at level **{level_name}** and above.",
-                    color=discord.Color.green(),
-                    timestamp=datetime.now()
-                )
-                test_embed.add_field(
-                    name="Configuration",
-                    value=f"**Channel:** {channel.mention}\n"
-                          f"**Log Level:** {level_name}\n"
-                          f"**Status:** {'Enabled' if enabled else 'Disabled'}",
-                    inline=False
-                )
-                test_embed.set_footer(text=f"Configured by {interaction.user.name}")
-                
-                await channel.send(embed=test_embed)
-                
-                # Log a test message
-                func.log.info(f"Debug channel configured: {channel.id} (Level: {level_name})")
-                
-            except discord.Forbidden:
-                await interaction.followup.send(
-                    "❌ I don't have permission to send messages in that channel.",
-                    ephemeral=True
-                )
-                return
+        try:
+            test_embed = discord.Embed(
+                title="✅ Debug Channel Configured",
+                description=f"This channel will now receive structured debug embeds.\n\n"
+                           f"Debug embeds provide detailed information about:\n"
+                           f"• Command executions\n"
+                           f"• LLM responses with token usage\n"
+                           f"• Configuration changes\n"
+                           f"• Errors and warnings",
+                color=discord.Color.green(),
+                timestamp=datetime.now()
+            )
+            test_embed.add_field(
+                name="Configuration",
+                value=f"**Channel:** {channel.mention}\n"
+                      f"**Status:** Enabled",
+                inline=False
+            )
+            test_embed.set_footer(text=f"Configured by {interaction.user.name}")
+            
+            await channel.send(embed=test_embed)
+            
+            func.log.info(f"Debug channel configured: {channel.id}")
+            
+        except discord.Forbidden:
+            await interaction.followup.send(
+                "❌ I don't have permission to send messages in that channel.",
+                ephemeral=True
+            )
+            return
         
         # Send confirmation
-        status_emoji = "✅" if enabled else "⚠️"
-        status_text = "enabled" if enabled else "disabled"
-
         await interaction.followup.send(
-            f"{status_emoji} Debug logging {status_text} for {channel.mention}\n"
-            f"**Log Level:** {server_config['log_level']}\n\n"
-            f"💡 Use `/debug_level` to change the log level\n"
-            f"💡 Use `/toggle_debug` to enable/disable logging",
+            f"✅ Debug channel configured: {channel.mention}\n\n"
+            f"💡 Use `/debug` to toggle debug embeds on/off\n"
+            f"💡 Use `/debug_status` to view statistics",
             ephemeral=True
         )
     
-    @app_commands.command(name="debug_level", description="Change the debug log level")
+    @app_commands.command(name="debug", description="Toggle debug embeds on/off")
     @app_commands.default_permissions(administrator=True)
-    @app_commands.describe(level="New log level")
-    @app_commands.choices(level=[
-        app_commands.Choice(name="DEBUG (All messages)", value="DEBUG"),
-        app_commands.Choice(name="INFO (Informational and above)", value="INFO"),
-        app_commands.Choice(name="WARNING (Warnings and errors only)", value="WARNING"),
-        app_commands.Choice(name="ERROR (Errors only)", value="ERROR"),
-        app_commands.Choice(name="CRITICAL (Critical errors only)", value="CRITICAL")
-    ])
-    async def debug_level(
-        self,
-        interaction: discord.Interaction,
-        level: app_commands.Choice[str]
-    ):
-        """Change the debug log level."""
+    async def debug(self, interaction: discord.Interaction):
+        """Toggle debug embeds for this server."""
         server_id = str(interaction.guild.id)
-
-        # Load config for this server
+        
+        # Load config
         from utils.core.paths import DataPaths
-
         data_paths = DataPaths()
         debug_config_file = data_paths.get_debug_config_file(server_id)
-
-        if not os.path.exists(debug_config_file):
-            await interaction.response.send_message(
-                "❌ Debug channel not configured. Use `/set_debug_channel` first.",
-                ephemeral=True
-            )
-            return
-
-        server_config = func.read_json(debug_config_file) or {}
-
-        if not server_config.get("debug_channel_id"):
-            await interaction.response.send_message(
-                "❌ Debug channel not configured. Use `/set_debug_channel` first.",
-                ephemeral=True
-            )
-            return
-
-        # Update level
-        old_level = server_config.get("log_level", "INFO")
-        server_config["log_level"] = level.value
-        func.write_json(debug_config_file, server_config)
-
-        # Update handler
-        handler = self._get_or_create_handler()
-        handler.invalidate_cache()
-
-        # Set handler level to minimum across all enabled configs
-        min_level = logging.CRITICAL
-        for srv_id in data_paths.list_servers():
-            cfg_file = data_paths.get_debug_config_file(srv_id)
-            if os.path.exists(cfg_file):
-                cfg = func.read_json(cfg_file) or {}
-                if cfg.get("enabled", False):
-                    lvl_name = cfg.get("log_level", "INFO")
-                    lvl = getattr(logging, lvl_name, logging.INFO)
-                    min_level = min(min_level, lvl)
-        handler.setLevel(min_level)
+        data_paths.ensure_directory(debug_config_file)
         
-        await interaction.response.send_message(
-            f"✅ Debug log level changed from **{old_level}** to **{level.value}**\n"
-            f"💡 This channel will now receive logs at level **{level.value}** and above",
-            ephemeral=True
-        )
-        
-        func.log.info(f"Debug log level changed to {level.value}")
-    
-    @app_commands.command(name="toggle_debug", description="Enable or disable debug logging")
-    @app_commands.default_permissions(administrator=True)
-    async def toggle_debug(self, interaction: discord.Interaction):
-        """Toggle debug logging on/off."""
-        server_id = str(interaction.guild.id)
-
-        # Load config for this server
-        from utils.core.paths import DataPaths
-
-        data_paths = DataPaths()
-        debug_config_file = data_paths.get_debug_config_file(server_id)
-
-        if not os.path.exists(debug_config_file):
-            await interaction.response.send_message(
-                "❌ Debug channel not configured. Use `/set_debug_channel` first.",
-                ephemeral=True
-            )
-            return
-
-        server_config = func.read_json(debug_config_file) or {}
-
-        if not server_config.get("debug_channel_id"):
-            await interaction.response.send_message(
-                "❌ Debug channel not configured. Use `/set_debug_channel` first.",
-                ephemeral=True
-            )
-            return
-
-        # Toggle enabled status
-        current_status = server_config.get("enabled", False)
+        config = func.read_json(debug_config_file) or {}
+        current_status = config.get("enabled", False)
         new_status = not current_status
-        server_config["enabled"] = new_status
-        func.write_json(debug_config_file, server_config)
-
-        # Update handler
-        handler = self._get_or_create_handler()
-        handler.invalidate_cache()
-
-        # Recalculate handler level based on remaining enabled configs
-        min_level = logging.CRITICAL
-        for srv_id in data_paths.list_servers():
-            cfg_file = data_paths.get_debug_config_file(srv_id)
-            if os.path.exists(cfg_file):
-                cfg = func.read_json(cfg_file) or {}
-                if cfg.get("enabled", False):
-                    lvl_name = cfg.get("log_level", "INFO")
-                    lvl = getattr(logging, lvl_name, logging.INFO)
-                    min_level = min(min_level, lvl)
-        handler.setLevel(min_level)
+        
+        # Ensure debug_channel_id is set
+        if not config.get("debug_channel_id"):
+            await interaction.response.send_message(
+                "❌ Debug channel not configured. Use `/set_debug_channel` first.",
+                ephemeral=True
+            )
+            return
+        
+        config["enabled"] = new_status
+        func.write_json(debug_config_file, config)
         
         status_emoji = "✅" if new_status else "⚠️"
         status_text = "enabled" if new_status else "disabled"
         
         await interaction.response.send_message(
-            f"{status_emoji} Debug logging {status_text} for this server",
+            f"{status_emoji} Debug embeds {status_text} for this server\n\n"
+            f"💡 Debug embeds provide structured information about commands, LLM responses, and errors.\n"
+            f"💡 Use `/debug_status` to view statistics.",
             ephemeral=True
         )
         
+        # Send a test embed if enabled
         if new_status:
-            func.log.debug("Debug logging enabled")
-        else:
-            func.log.debug("Debug logging disabled")
+            from utils.core.debug_embed import DebugEmbed
+            await DebugEmbed.send(
+                guild=interaction.guild,
+                event="bot_status_change",
+                data={
+                    "old_status": "disabled",
+                    "new_status": "enabled",
+                    "reason": f"Debug embeds enabled by {interaction.user.name}"
+                },
+                force=True
+            )
     
-    @app_commands.command(name="debug_status", description="Show debug system status and statistics")
+    @app_commands.command(name="debug_test", description="Send a test embed to the debug channel")
     @app_commands.default_permissions(administrator=True)
-    async def debug_status(self, interaction: discord.Interaction):
-        """Display debug system status."""
-        await interaction.response.defer(ephemeral=True)
-
+    async def debug_test(self, interaction: discord.Interaction):
+        """Send a test debug embed to verify configuration."""
         server_id = str(interaction.guild.id)
 
         # Load config for this server
@@ -345,86 +166,58 @@ class DebugCommands(commands.Cog):
         data_paths = DataPaths()
         debug_config_file = data_paths.get_debug_config_file(server_id)
 
-        server_config = {}
-        if os.path.exists(debug_config_file):
-            server_config = func.read_json(debug_config_file) or {}
+        if not os.path.exists(debug_config_file):
+            await interaction.response.send_message(
+                "❌ Debug channel not configured. Use `/debug_setup` first.",
+                ephemeral=True
+            )
+            return
+
+        server_config = func.read_json(debug_config_file) or {}
+        channel_id = server_config.get("debug_channel_id")
         
-        # Create embed
-        embed = discord.Embed(
-            title="🔧 Debug System Status",
-            color=discord.Color.blue(),
-            timestamp=datetime.now()
+        if not channel_id:
+            await interaction.response.send_message(
+                "❌ Debug channel not configured. Use `/debug_setup` first.",
+                ephemeral=True
+            )
+            return
+        
+        channel = self.bot.get_channel(int(channel_id))
+        if not channel:
+            await interaction.response.send_message(
+                "❌ Debug channel not found. It may have been deleted.",
+                ephemeral=True
+            )
+            return
+        
+        # Send test embed using DebugEmbed system
+        from utils.core.debug_embed import DebugEmbed
+        
+        success = await DebugEmbed.send(
+            guild=interaction.guild,
+            event="bot_status_change",
+            data={
+                "old_status": "testing",
+                "new_status": "active",
+                "reason": f"Test embed requested by {interaction.user.name}"
+            },
+            force=True  # Send even if debug is disabled
         )
         
-        # Configuration section
-        if server_config:
-            channel_id = server_config.get("debug_channel_id")
-            channel = self.bot.get_channel(int(channel_id)) if channel_id else None
-            
-            config_value = f"**Channel:** {channel.mention if channel else 'Not found'}\n"
-            config_value += f"**Log Level:** {server_config.get('log_level', 'Not set')}\n"
-            config_value += f"**Status:** {'✅ Enabled' if server_config.get('enabled') else '❌ Disabled'}"
-            
-            embed.add_field(
-                name="📋 Configuration",
-                value=config_value,
-                inline=False
+        if success:
+            await interaction.response.send_message(
+                f"✅ Test embed sent to {channel.mention}\n\n"
+                f"Check the debug channel to verify it's working correctly.",
+                ephemeral=True
             )
         else:
-            embed.add_field(
-                name="📋 Configuration",
-                value="❌ Debug channel not configured",
-                inline=False
+            await interaction.response.send_message(
+                f"❌ Failed to send test embed to {channel.mention}\n\n"
+                f"Check bot permissions in that channel.",
+                ephemeral=True
             )
         
-        # Handler statistics
-        handler = self._get_or_create_handler()
-        stats = handler.get_stats()
-        
-        stats_value = f"**Messages Sent:** {stats['messages_sent']}\n"
-        stats_value += f"**Queue Size:** {stats['queue_size']}\n"
-        stats_value += f"**Errors:** {stats['errors']}\n"
-        stats_value += f"**Processing:** {'Yes' if stats['is_processing'] else 'No'}"
-        
-        if stats['last_send_time']:
-            stats_value += f"\n**Last Send:** <t:{int(stats['last_send_time'].timestamp())}:R>"
-        
-        embed.add_field(
-            name="📊 Statistics",
-            value=stats_value,
-            inline=False
-        )
-        
-        # Bot uptime
-        uptime_seconds = time.time() - self.start_time
-        uptime_str = str(timedelta(seconds=int(uptime_seconds)))
-        
-        embed.add_field(
-            name="⏱️ Uptime",
-            value=f"`{uptime_str}`",
-            inline=True
-        )
-        
-        # Server count
-        embed.add_field(
-            name="🌐 Servers",
-            value=f"`{len(self.bot.guilds)}`",
-            inline=True
-        )
-        
-        # AI count
-        total_ais = 0
-        for server_data in func.session_cache.values():
-            for channel_data in server_data.get("channels", {}).values():
-                total_ais += len(channel_data)
-        
-        embed.add_field(
-            name="🤖 Active AIs",
-            value=f"`{total_ais}`",
-            inline=True
-        )
-        
-        await interaction.followup.send(embed=embed, ephemeral=True)
     
     def _create_progress_bar(self, percentage: float, length: int = 10) -> str:
         """

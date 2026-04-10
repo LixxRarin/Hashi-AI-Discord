@@ -1,6 +1,7 @@
 import asyncio
 import platform
 import os
+import time
 
 import discord
 from discord import app_commands
@@ -35,6 +36,7 @@ class BridgeBot(commands.Bot):
             help_command=None
         )
         self.synced = False  # Sync control flag
+        self.start_time = None  # Will be set in on_ready for uptime tracking
 
     async def setup_hook(self):
         """Initial async setup"""
@@ -83,6 +85,26 @@ class BridgeBot(commands.Bot):
 
     async def close(self):
         """Cleanup when bot is shutting down"""
+        # Send bot shutdown debug embed to all guilds
+        try:
+            from utils.core.debug_embed import DebugEmbed
+            
+            # Calculate uptime
+            uptime = 0
+            if hasattr(self, 'start_time') and self.start_time:
+                uptime = int(time.time() - self.start_time)
+            
+            await DebugEmbed.send_to_all_guilds(
+                bot=self,
+                event="bot_shutdown",
+                data={
+                    "reason": "Manual shutdown",
+                    "uptime": uptime
+                }
+            )
+        except Exception as e:
+            func.log.warning(f"Failed to send bot shutdown debug embed: {e}")
+        
         # Shutdown Rich Presence
         try:
             from utils.rich_presence import get_rpc_manager
@@ -104,6 +126,11 @@ class BridgeBot(commands.Bot):
         if not self.synced:
             await self.tree.sync()  # Sync slash commands
             self.synced = True
+            
+            # Track startup time for uptime calculation
+            if self.start_time is None:
+                self.start_time = time.time()
+            
             func.log.info("Logged in as %s!", self.user)
 
             # Clean up orphaned data (servers/channels bot is no longer part of)
@@ -138,6 +165,37 @@ class BridgeBot(commands.Bot):
             except Exception as e:
                 func.log.warning(f"Failed to initialize Bot Status Manager: {e}")
                 func.log.debug("Bot will continue running without status management")
+            
+            # Send bot startup debug embed to all guilds
+            try:
+                from utils.core.debug_embed import DebugEmbed
+                
+                # Count total AIs across all servers
+                total_ais = 0
+                for server_id, server_data in func.session_cache.items():
+                    channels = server_data.get("channels", {})
+                    for channel_id, channel_data in channels.items():
+                        if channel_data:
+                            total_ais += len(channel_data)
+                
+                # Read version
+                try:
+                    with open("version.txt", "r") as f:
+                        version = f.read().strip()
+                except:
+                    version = "Unknown"
+                
+                await DebugEmbed.send_to_all_guilds(
+                    bot=self,
+                    event="bot_startup",
+                    data={
+                        "version": version,
+                        "servers": len(self.guilds),
+                        "total_ais": total_ais
+                    }
+                )
+            except Exception as e:
+                func.log.warning(f"Failed to send bot startup debug embed: {e}")
 
     async def _initialize_all_webhooks(self):
         """Initialize all webhooks with their respective character configurations"""

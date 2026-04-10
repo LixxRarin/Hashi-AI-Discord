@@ -89,15 +89,8 @@ class ClaudeClient(BaseAIClient):
         return AsyncAnthropic(**client_kwargs)
     
     def count_tokens(self, text: str, model: str) -> int:
-        """
-        Count the number of tokens in a text string.
-        
-        Note: Anthropic uses a different tokenizer than OpenAI.
-        We use character-based approximation since we can't easily access
-        Anthropic's tokenizer synchronously.
-        """
-        # Anthropic's approximation: ~3.5 characters per token for English
-        return len(text) // 4
+        """Count the number of tokens in a text string using tiktoken."""
+        return self.count_tokens_with_tiktoken(text, model)
     
     def _extract_system_message(self, messages: List[Dict[str, str]]) -> tuple[Optional[str], List[Dict[str, str]]]:
         """

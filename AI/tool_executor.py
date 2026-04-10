@@ -107,6 +107,18 @@ class ToolExecutor:
             result = await tool_func(**arguments)
             
             log.info(f"Tool '{tool_name}' executed successfully")
+            
+            # Track executed tool for debug embed
+            if "_executed_tools" not in context:
+                context["_executed_tools"] = []
+            
+            # Create result summary (avoid storing full result)
+            result_summary = self._create_result_summary(tool_name, result)
+            context["_executed_tools"].append({
+                "name": tool_name,
+                "result": result_summary
+            })
+            
             return result
             
         except TypeError as e:
@@ -238,6 +250,49 @@ class ToolExecutor:
                 })
         
         return results
+    
+    def _create_result_summary(self, tool_name: str, result: Any) -> str:
+        """
+        Create a concise summary of tool execution result for debug embed.
+        
+        Args:
+            tool_name: Name of the tool that was executed
+            result: Tool execution result
+            
+        Returns:
+            str: Human-readable summary
+        """
+        try:
+            # Handle error results
+            if isinstance(result, dict) and "error" in result:
+                return f"❌ Error: {result['error'][:100]}"
+            
+            # Handle success results
+            if isinstance(result, dict):
+                # Check for common success indicators
+                if result.get("success"):
+                    message = result.get("message", "Operation completed")
+                    return f"✅ {message[:100]}"
+                
+                # Try to extract meaningful info
+                if "data" in result:
+                    return f"✅ Success (returned data)"
+                elif "message" in result:
+                    return f"✅ {result['message'][:100]}"
+                else:
+                    # Generic success
+                    return f"✅ Success"
+            
+            # Handle string results
+            if isinstance(result, str):
+                return f"✅ {result[:100]}"
+            
+            # Handle other types
+            return f"✅ Success (returned {type(result).__name__})"
+            
+        except Exception as e:
+            log.debug(f"Error creating result summary: {e}")
+            return "✅ Executed"
     
     def _count_tokens(self, text: str, model: str = "gpt-4", provider: str = None) -> int:
         """

@@ -126,7 +126,7 @@ class RichPresenceManager:
             if self.rpc:
                 try:
                     loop = asyncio.get_event_loop()
-                    await loop.run_in_executor(None, self.rpc.disconnect)
+                    await loop.run_in_executor(None, self._safe_disconnect)
                 except:
                     pass
             
@@ -425,15 +425,33 @@ class RichPresenceManager:
             
             # Disconnect RPC
             if self.rpc:
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, self.rpc.disconnect)
-                func.log.info("Discord Rich Presence disconnected")
+                try:
+                    loop = asyncio.get_event_loop()
+                    # The discord-rpc library calls sys.exit() in disconnect()
+                    # We need to catch SystemExit to prevent it from killing the shutdown process
+                    await loop.run_in_executor(None, self._safe_disconnect)
+                    func.log.info("Discord Rich Presence disconnected")
+                except SystemExit:
+                    # discord-rpc library calls sys.exit(), ignore it
+                    func.log.debug("Caught SystemExit from discord-rpc disconnect (expected)")
             
             self.connected = False
             self.rpc = None
             
         except Exception as e:
             func.log.warning(f"Error stopping Rich Presence: {e}")
+    
+    def _safe_disconnect(self) -> None:
+        """Safely disconnect RPC, catching SystemExit from the library."""
+        try:
+            if self.rpc:
+                self.rpc.disconnect()
+        except SystemExit:
+            # discord-rpc library calls sys.exit() in disconnect()
+            # This is a bug in the library, but we need to handle it
+            pass
+        except Exception as e:
+            func.log.debug(f"Error in RPC disconnect: {e}")
 
 
 # Global instance
