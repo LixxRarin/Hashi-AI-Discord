@@ -423,10 +423,11 @@ class CreateConnectionButton(ui.Button):
             create_data={}
         )
         
-        embed = discord.Embed(
-            title="➕ New Connection - Select Provider",
-            description="First, select the API provider you want to use:",
-            color=discord.Color.green()
+        embed = (
+            EmbedBuilder(EmbedStyle.SUCCESS)
+            .set_title("New Connection - Select Provider", emoji="➕", auto_emoji=False)
+            .set_description("First, select the API provider you want to use:")
+            .build()
         )
         
         await interaction.response.edit_message(
@@ -763,13 +764,16 @@ class CreateConnectionStep2Modal(ui.Modal):
             registry = get_registry()
             provider_meta = registry.get_metadata(self.create_data["provider"])
             
-            embed = discord.Embed(
-                title="➕ New Connection - Step 3/3 (Optional)",
-                description=f"**Connection:** `{self.create_data['connection_name']}`\n"
-                           f"**Provider:** {provider_meta.display_name}\n"
-                           f"**Model:** `{model}`\n\n"
-                           "Configure advanced parameters (optional) or finish creation:",
-                color=discord.Color.green()
+            embed = (
+                EmbedBuilder(EmbedStyle.SUCCESS)
+                .set_title("New Connection - Step 3/3 (Optional)", emoji="➕", auto_emoji=False)
+                .set_description(
+                    f"**Connection:** `{self.create_data['connection_name']}`\n"
+                    f"**Provider:** {provider_meta.display_name}\n"
+                    f"**Model:** `{model}`\n\n"
+                    "Configure advanced parameters (optional) or finish creation:"
+                )
+                .build()
             )
             
             await interaction.response.edit_message(
@@ -958,10 +962,11 @@ class EditConnectionButton(ui.Button):
             user_id=interaction.user.id
         )
         
-        embed = discord.Embed(
-            title="✏️ Edit API Connection",
-            description="Select a connection to edit its parameters:",
-            color=discord.Color.blue()
+        embed = (
+            EmbedBuilder(EmbedStyle.INFO)
+            .set_title("Edit API Connection", emoji="✏️", auto_emoji=False)
+            .set_description("Select a connection to edit its parameters:")
+            .build()
         )
         
         await interaction.response.edit_message(
@@ -1008,10 +1013,10 @@ class EditConnectionSelectView(ui.View):
                 user_id=self.user_id
             )
             
-            embed = discord.Embed(
-                title=f"✏️ Edit: {connection_name}",
-                description="Select a category to edit:",
-                color=discord.Color.blue()
+            builder = (
+                EmbedBuilder(EmbedStyle.INFO)
+                .set_title(f"Edit: {connection_name}", emoji="✏️", auto_emoji=False)
+                .set_description("Select a category to edit:")
             )
             
             # Add category info
@@ -1019,14 +1024,14 @@ class EditConnectionSelectView(ui.View):
             for category in get_all_categories():
                 params = get_category_params(category)
                 emoji = get_category_emoji(category)
-                embed.add_field(
+                builder.add_field(
                     name=f"{emoji} {category}",
                     value=f"{len(params)} parameter(s)",
                     inline=True
                 )
             
             await interaction.response.edit_message(
-                embed=embed,
+                embed=builder.build(),
                 view=view
             )
         
@@ -1086,10 +1091,10 @@ class EditCategorySelectView(ui.View):
             metadata = get_api_metadata()
             emoji = get_category_emoji(category)
             
-            embed = discord.Embed(
-                title=f"{emoji} {self.connection_name} - {category}",
-                description=f"Current values for {len(params)} parameter(s):",
-                color=discord.Color.blue()
+            builder = (
+                EmbedBuilder(EmbedStyle.INFO)
+                .set_title(f"{self.connection_name} - {category}", emoji=emoji, auto_emoji=False)
+                .set_description(f"Current values for {len(params)} parameter(s):")
             )
             
             # Add each parameter as a field
@@ -1098,13 +1103,13 @@ class EditCategorySelectView(ui.View):
                 formatted_value = metadata.format_value_for_display(current_value, param)
                 label = metadata.get_label(param)
                 
-                embed.add_field(
+                builder.add_field(
                     name=f"**{label}**",
                     value=f"`{formatted_value}`",
                     inline=True
                 )
             
-            embed.set_footer(text="Select a parameter below to edit")
+            embed = builder.set_footer("Select a parameter below to edit").build()
             
             await interaction.response.edit_message(
                 embed=embed,
@@ -1202,10 +1207,11 @@ class EditParameterSelectView(ui.View):
                 label = metadata.get_label(param)
                 description = metadata.get_description(param)
                 
-                embed = discord.Embed(
-                    title=f"{emoji} {self.connection_name} - {label}",
-                    description=f"**Current value:** `{current_display}`\n\n{description}\n\nSelect a new value:",
-                    color=discord.Color.blue()
+                embed = (
+                    EmbedBuilder(EmbedStyle.INFO)
+                    .set_title(f"{self.connection_name} - {label}", emoji=emoji, auto_emoji=False)
+                    .set_description(f"**Current value:** `{current_display}`\n\n{description}\n\nSelect a new value:")
+                    .build()
                 )
                 
                 # Create view with choice select
@@ -1294,10 +1300,11 @@ class BackToConnectionListButton(ui.Button):
             user_id=self.user_id
         )
         
-        embed = discord.Embed(
-            title="✏️ Edit API Connection",
-            description="Select a connection to edit its parameters:",
-            color=discord.Color.blue()
+        embed = (
+            EmbedBuilder(EmbedStyle.INFO)
+            .set_title("Edit API Connection", emoji="✏️", auto_emoji=False)
+            .set_description("Select a connection to edit its parameters:")
+            .build()
         )
         
         await interaction.response.edit_message(
@@ -1334,21 +1341,23 @@ class BackToCategoryButton(ui.Button):
             user_id=self.user_id
         )
         
-        embed = discord.Embed(
-            title=f"✏️ Edit: {self.connection_name}",
-            description="Select a category to edit:",
-            color=discord.Color.blue()
+        builder = (
+            EmbedBuilder(EmbedStyle.INFO)
+            .set_title(f"Edit: {self.connection_name}", emoji="✏️", auto_emoji=False)
+            .set_description("Select a category to edit:")
         )
         
         # Add category info
         for category in get_all_categories():
             params = get_category_params(category)
             emoji = get_category_emoji(category)
-            embed.add_field(
+            builder.add_field(
                 name=f"{emoji} {category}",
                 value=f"{len(params)} parameter(s)",
                 inline=True
             )
+        
+        embed = builder.build()
         
         await interaction.response.edit_message(
             embed=embed,
@@ -1384,11 +1393,12 @@ class RemoveConnectionButton(ui.Button):
             user_id=interaction.user.id
         )
         
-        embed = discord.Embed(
-            title="🗑️ Remove API Connection",
-            description="⚠️ **Warning:** Removing a connection may break AIs that use it.\n\n"
-                       "Select a connection to remove:",
-            color=discord.Color.red()
+        embed = (
+            EmbedBuilder(EmbedStyle.WARNING)
+            .set_title("Remove API Connection", emoji="🗑️", auto_emoji=False)
+            .set_description("⚠️ **Warning:** Removing a connection may break AIs that use it.\n\n"
+                           "Select a connection to remove:")
+            .build()
         )
         
         await interaction.response.edit_message(
@@ -1441,12 +1451,12 @@ class RemoveConnectionSelectView(ui.View):
                 provider_display = provider_raw
 
             # Create confirmation embed
-            embed = discord.Embed(
-                title="⚠️ Confirm Removal",
-                description=f"**Connection:** `{connection_name}`\n"
-                           f"**Provider:** {provider_display}\n"
-                           f"**Model:** `{connection.get('model', 'Unknown')}`",
-                color=discord.Color.red()
+            builder = (
+                EmbedBuilder(EmbedStyle.WARNING)
+                .set_title("Confirm Removal", emoji="⚠️", auto_emoji=False)
+                .set_description(f"**Connection:** `{connection_name}`\n"
+                               f"**Provider:** {provider_display}\n"
+                               f"**Model:** `{connection.get('model', 'Unknown')}`")
             )
             
             if ais_using:
@@ -1457,23 +1467,23 @@ class RemoveConnectionSelectView(ui.View):
                     warning_text += f"• ... and {len(ais_using) - 10} more\n"
                 warning_text += "\n⚠️ **Removing this connection will break these AIs!**"
                 
-                embed.add_field(
+                builder.add_field(
                     name="⚠️ Warning",
                     value=warning_text,
                     inline=False
                 )
             else:
-                embed.add_field(
+                builder.add_field(
                     name="✅ Safe to Remove",
                     value="This connection is not currently used by any AI.",
                     inline=False
                 )
             
-            embed.add_field(
+            embed = builder.add_field(
                 name="❓ Are you sure?",
                 value="This action cannot be undone.",
                 inline=False
-            )
+            ).build()
             
             # Create confirmation view
             view = RemoveConfirmView(
@@ -1649,10 +1659,11 @@ class ViewDetailsButton(ui.Button):
             user_id=interaction.user.id
         )
         
-        embed = discord.Embed(
-            title="👁️ View Connection Details",
-            description="Select a connection to view its detailed configuration:",
-            color=discord.Color.blue()
+        embed = (
+            EmbedBuilder(EmbedStyle.INFO)
+            .set_title("View Connection Details", emoji="👁️", auto_emoji=False)
+            .set_description("Select a connection to view its detailed configuration:")
+            .build()
         )
         
         await interaction.response.edit_message(
@@ -2122,10 +2133,10 @@ class BackToParameterListButton(ui.Button):
             metadata = get_api_metadata()
             emoji = get_category_emoji(self.category)
             
-            embed = discord.Embed(
-                title=f"{emoji} {self.connection_name} - {self.category}",
-                description=f"Current values for {len(self.params)} parameter(s):",
-                color=discord.Color.blue()
+            builder = (
+                EmbedBuilder(EmbedStyle.INFO)
+                .set_title(f"{self.connection_name} - {self.category}", emoji=emoji, auto_emoji=False)
+                .set_description(f"Current values for {len(self.params)} parameter(s):")
             )
             
             # Add each parameter as a field
@@ -2134,13 +2145,13 @@ class BackToParameterListButton(ui.Button):
                 formatted_value = metadata.format_value_for_display(current_value, param)
                 label = metadata.get_label(param)
                 
-                embed.add_field(
+                builder.add_field(
                     name=f"**{label}**",
                     value=f"`{formatted_value}`",
                     inline=True
                 )
             
-            embed.set_footer(text="Select a parameter below to edit")
+            embed = builder.set_footer("Select a parameter below to edit").build()
             
             await interaction.response.edit_message(
                 embed=embed,

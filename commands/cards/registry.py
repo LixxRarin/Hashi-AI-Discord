@@ -19,6 +19,7 @@ from utils.media.thumbnails import get_thumbnail_for_card_registry
 from utils.discord.confirmation_ui import confirm_dangerous_action
 from utils.discord.embed_builder import EmbedBuilder
 from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
+from utils.media.color_extraction import get_dominant_color_from_url
 
 
 # Module-level autocomplete functions (must be defined before class)
@@ -608,6 +609,7 @@ class CardRegistry(commands.Cog):
         # Upload thumbnails to Discord CDN before creating embeds
         # Since we show 1 card per page, upload thumbnail for EACH card
         thumbnail_urls = {}  # card_name -> thumbnail_url
+        card_colors = {}  # card_name -> discord.Color (extracted from image)
         
         # Upload thumbnail for each card in use
         for card_data in cards_in_use:
@@ -619,6 +621,10 @@ class CardRegistry(commands.Cog):
             )
             if thumbnail_url:
                 thumbnail_urls[card_name] = thumbnail_url
+                # Extract dominant color from thumbnail
+                dominant_color = await get_dominant_color_from_url(thumbnail_url)
+                if dominant_color:
+                    card_colors[card_name] = dominant_color
         
         # Upload thumbnail for each available card
         for card_data in cards_available:
@@ -630,6 +636,10 @@ class CardRegistry(commands.Cog):
             )
             if thumbnail_url:
                 thumbnail_urls[card_name] = thumbnail_url
+                # Extract dominant color from thumbnail
+                dominant_color = await get_dominant_color_from_url(thumbnail_url)
+                if dominant_color:
+                    card_colors[card_name] = dominant_color
         
         # Create embeds list
         embeds = []
@@ -702,7 +712,12 @@ class CardRegistry(commands.Cog):
             # Footer with position and helpful tip
             builder.set_footer(f"Card {idx + 1}/{total_cards} • Use /set_card to apply • /character_info for details")
             
-            embeds.append(builder.build())
+            # Build embed and apply dynamic color if available
+            embed = builder.build()
+            if card_name in card_colors:
+                embed.color = card_colors[card_name]
+            
+            embeds.append(embed)
         
         # Send with pagination if multiple embeds
         if len(embeds) == 0:

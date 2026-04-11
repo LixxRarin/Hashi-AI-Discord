@@ -220,6 +220,11 @@ class AIListing(commands.Cog):
                 
                 embed = builder.build()
             
+            # Set bot avatar as author
+            bot_user = interaction.client.user
+            if bot_user:
+                embed.set_author(name=f"@{bot_user.name}", icon_url=bot_user.display_avatar.url)
+            
             # Set footer with position and helpful tip
             embed.set_footer(text=f"AI {idx + 1}/{total_ais} • Use /character_info for details")
             
