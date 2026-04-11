@@ -15,7 +15,9 @@ from AI.services.chat_service import get_service
 from messaging.response import get_response_manager
 from messaging.store import get_store
 from commands.shared.autocomplete import AutocompleteHelpers
-from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.discord.confirmation_ui import confirm_dangerous_action
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 from utils.media.thumbnails import get_thumbnail_url
 
 
@@ -123,19 +125,20 @@ class HistoryManager(commands.Cog):
             await service.clear_ai_history(server_id, found_channel_id, actual_ai_name, current_chat_id)
             
             # Create success embed
-            success_embed = create_success_embed(
-                title="✅ History Cleared Successfully",
-                description=f"The conversation history for **{actual_ai_name}** has been permanently deleted.",
-                fields=[
-                    {
-                        "name": "📊 Summary",
-                        "value": f"• **AI:** {actual_ai_name}\n"
-                                f"• **Channel:** <#{found_channel_id}>\n"
-                                f"• **Messages Cleared:** {len(existing_history)}\n"
-                                f"• **Cleared by:** {interaction.user.mention}"
-                    }
-                ],
-                thumbnail_url=thumbnail_url
+            success_embed = (
+                EmbedBuilder(EmbedStyle.SUCCESS)
+                .set_title("History Cleared Successfully")
+                .set_description(f"The conversation history for **{actual_ai_name}** has been permanently deleted.")
+                .add_field(
+                    name="Summary",
+                    value=f"• **AI:** {actual_ai_name}\n"
+                          f"• **Channel:** <#{found_channel_id}>\n"
+                          f"• **Messages Cleared:** {len(existing_history)}\n"
+                          f"• **Cleared by:** {interaction.user.mention}",
+                    emoji=EmbedEmojis.STATS
+                )
+                .set_thumbnail(thumbnail_url)
+                .build()
             )
             
             await confirm_interaction.response.edit_message(

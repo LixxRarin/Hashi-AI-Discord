@@ -13,6 +13,8 @@ import utils.func as func
 from utils.pagination import PaginatedView
 from utils.media.thumbnails import get_thumbnail_url
 from AI.core.registry import get_registry
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 
 
 class AIListing(commands.Cog):
@@ -129,14 +131,7 @@ class AIListing(commands.Cog):
                 creator = card_data.get("creator", "Unknown")
                 
                 # Build description
-                description = f"🎭 Character Card • {provider_icon} {provider_display} • {channel_mention}"
-                
-                # Create embed
-                embed = discord.Embed(
-                    title=ai_name,
-                    description=description,
-                    color=provider_color
-                )
+                description = f"{EmbedEmojis.CHARACTER} Character Card • {provider_icon} {provider_display} • {channel_mention}"
                 
                 # Get model info
                 api_connection = ai_data.get("api_connection")
@@ -155,12 +150,6 @@ class AIListing(commands.Cog):
                 config_value += f"• **Model:** `{model_info}`\n"
                 config_value += f"• **Connection:** `{connection_name}`"
                 
-                embed.add_field(
-                    name="⚙️ Configuration",
-                    value=config_value,
-                    inline=False
-                )
-                
                 # Character details field
                 alt_greetings = card_data.get("alternate_greetings") or []
                 total_greetings = 1 + len(alt_greetings)
@@ -171,22 +160,33 @@ class AIListing(commands.Cog):
                 if lorebook_entries > 0:
                     details_value += f"\n• **Lorebook:** {lorebook_entries} entries"
                 
-                embed.add_field(
-                    name="📚 Character Details",
-                    value=details_value,
-                    inline=False
+                # Create embed with custom color
+                builder = EmbedBuilder(EmbedStyle.CHARACTER)
+                builder.embed.color = provider_color  # Override with provider color
+                builder.set_title(ai_name, auto_emoji=False)
+                builder.set_description(description)
+                builder.add_field(
+                    name="Configuration",
+                    value=config_value,
+                    inline=False,
+                    emoji=EmbedEmojis.SETTINGS
                 )
+                builder.add_field(
+                    name="Character Details",
+                    value=details_value,
+                    inline=False,
+                    emoji="📚"
+                )
+                
+                # Add thumbnail if available
+                if ai_name in thumbnail_urls:
+                    builder.set_thumbnail(thumbnail_urls[ai_name])
+                
+                embed = builder.build()
                 
             else:
                 # Regular AI
-                description = f"🤖 Regular AI • {provider_icon} {provider_display} • {channel_mention}"
-                
-                # Create embed
-                embed = discord.Embed(
-                    title=ai_name,
-                    description=description,
-                    color=provider_color
-                )
+                description = f"{EmbedEmojis.LLM} Regular AI • {provider_icon} {provider_display} • {channel_mention}"
                 
                 # Get model info
                 api_connection = ai_data.get("api_connection")
@@ -206,17 +206,21 @@ class AIListing(commands.Cog):
                     config_value = f"• **Model:** `{model}`\n"
                     config_value += f"• **Connection:** Legacy (direct config)"
                 
-                embed.add_field(
-                    name="⚙️ Configuration",
+                # Create embed with custom color
+                builder = EmbedBuilder(EmbedStyle.INFO)
+                builder.embed.color = provider_color  # Override with provider color
+                builder.set_title(ai_name, auto_emoji=False)
+                builder.set_description(description)
+                builder.add_field(
+                    name="Configuration",
                     value=config_value,
-                    inline=False
+                    inline=False,
+                    emoji=EmbedEmojis.SETTINGS
                 )
+                
+                embed = builder.build()
             
-            # Add thumbnail if available
-            if ai_name in thumbnail_urls:
-                embed.set_thumbnail(url=thumbnail_urls[ai_name])
-            
-            # Footer with position and helpful tip
+            # Set footer with position and helpful tip
             embed.set_footer(text=f"AI {idx + 1}/{total_ais} • Use /character_info for details")
             
             embeds.append(embed)

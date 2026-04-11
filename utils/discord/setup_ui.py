@@ -14,6 +14,9 @@ import asyncio
 
 import utils.func as func
 from AI.core.registry import get_registry
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
+from utils.discord.embed_templates import EmbedTemplate
 
 
 @dataclass
@@ -80,11 +83,10 @@ def create_step_embed(
     color: discord.Color = discord.Color.blue()
 ) -> discord.Embed:
     """Create embed with consistent formatting for each step."""
-    embed = discord.Embed(
-        title=f"🔧 AI Setup - Step {step}/7",
-        description=f"**{title}**\n\n{description}",
-        color=color
-    )
+    builder = EmbedBuilder(EmbedStyle.INFO)
+    builder.embed.color = color  # Override with custom color if provided
+    builder.set_title(f"AI Setup - Step {step}/7", emoji="🔧", auto_emoji=False)
+    builder.set_description(f"**{title}**\n\n{description}")
     
     # Add progress info
     progress_text = []
@@ -100,15 +102,16 @@ def create_step_embed(
         progress_text.append(f"🎭 Card: {card_info}")
     
     if progress_text:
-        embed.add_field(
-            name="📊 Progress",
+        builder.add_field(
+            name="Progress",
             value="\n".join(progress_text),
-            inline=False
+            inline=False,
+            emoji=EmbedEmojis.STATS
         )
     
-    embed.set_footer(text=f"Server: {wizard_data.guild_name}")
+    builder.set_footer(f"Server: {wizard_data.guild_name}")
     
-    return embed
+    return builder.build()
 
 
 class Step1_ChannelSelectView(ui.View):
@@ -509,10 +512,11 @@ class CancelButton(ui.Button):
     
     async def callback(self, interaction: discord.Interaction):
         """Cancel the wizard."""
-        embed = discord.Embed(
-            title="❌ Setup Cancelled",
-            description="AI setup has been cancelled.\n\nRun `/setup` again when you're ready.",
-            color=discord.Color.red()
+        embed = (
+            EmbedBuilder(EmbedStyle.ERROR)
+            .set_title("Setup Cancelled", emoji="❌", auto_emoji=False)
+            .set_description("AI setup has been cancelled.\n\nRun `/setup` again when you're ready.")
+            .build()
         )
         
         await interaction.response.edit_message(embed=embed, view=None)
@@ -657,9 +661,10 @@ class ImportFileInstructionsButton(ui.Button):
     
     async def callback(self, interaction: discord.Interaction):
         """Show instructions."""
-        embed = discord.Embed(
-            title="📁 Import Character Card File",
-            description=(
+        embed = (
+            EmbedBuilder(EmbedStyle.INFO)
+            .set_title("Import Character Card File", emoji="📁", auto_emoji=False)
+            .set_description(
                 "Discord doesn't allow file uploads during interactions.\n\n"
                 "**To import a card file:**\n"
                 "1. Use `/import_card` command\n"
@@ -667,8 +672,8 @@ class ImportFileInstructionsButton(ui.Button):
                 "3. Return here and select it from the list\n\n"
                 "**Or use a URL instead:**\n"
                 "Click the 'Import from URL' button"
-            ),
-            color=discord.Color.blue()
+            )
+            .build()
         )
         
         await interaction.response.send_message(
@@ -1008,19 +1013,20 @@ class PresetSelectMenu(ui.Select):
 
 def create_confirmation_embed(wizard_data: SetupWizardData) -> discord.Embed:
     """Cria embed de confirmação com todos os dados."""
-    embed = discord.Embed(
-        title="✅ Confirm AI Setup",
-        description="Please review your configuration before creating the AI:",
-        color=discord.Color.green()
+    builder = (
+        EmbedBuilder(EmbedStyle.SUCCESS)
+        .set_title("Confirm AI Setup", emoji="✅", auto_emoji=False)
+        .set_description("Please review your configuration before creating the AI:")
     )
     
     # Channel & Mode
     mode_emoji = "🤖" if wizard_data.mode == "bot" else "🔗"
-    embed.add_field(
-        name="📍 Channel & Mode",
+    builder.add_field(
+        name="Channel & Mode",
         value=f"**Channel:** <#{wizard_data.channel_id}>\n"
               f"**Mode:** {mode_emoji} {wizard_data.mode.title()}",
-        inline=False
+        inline=False,
+        emoji="📍"
     )
     
     # API Connection
@@ -1037,12 +1043,13 @@ def create_confirmation_embed(wizard_data: SetupWizardData) -> discord.Embed:
         except:
             provider_display = provider_raw
 
-        embed.add_field(
-            name="🔌 API Connection",
+        builder.add_field(
+            name="API Connection",
             value=f"**Name:** {wizard_data.api_connection_name}\n"
                   f"**Provider:** {provider_display}\n"
                   f"**Model:** {model}",
-            inline=False
+            inline=False,
+            emoji="🔌"
         )
     
     # Character Card
@@ -1052,30 +1059,33 @@ def create_confirmation_embed(wizard_data: SetupWizardData) -> discord.Embed:
     if wizard_data.card_url:
         card_info += f"**URL:** {wizard_data.card_url[:50]}...\n"
     
-    embed.add_field(
-        name="🎭 Character Card",
+    builder.add_field(
+        name="Character Card",
         value=card_info,
-        inline=False
+        inline=False,
+        emoji=EmbedEmojis.CHARACTER
     )
     
     # Greeting
-    embed.add_field(
-        name="💬 Greeting",
+    builder.add_field(
+        name="Greeting",
         value=f"Greeting {wizard_data.greeting_index + 1} of {wizard_data.total_greetings}",
-        inline=True
+        inline=True,
+        emoji="💬"
     )
     
     # Preset
     preset_text = wizard_data.preset_name if wizard_data.preset_name else "Default settings"
-    embed.add_field(
-        name="⚙️ Configuration",
+    builder.add_field(
+        name="Configuration",
         value=preset_text,
-        inline=True
+        inline=True,
+        emoji=EmbedEmojis.SETTINGS
     )
     
-    embed.set_footer(text="Click 'Confirm & Create' to proceed")
+    builder.set_footer("Click 'Confirm & Create' to proceed")
     
-    return embed
+    return builder.build()
 
 
 class Step7_ConfirmationView(ui.View):
@@ -1118,16 +1128,18 @@ class ConfirmSetupButton(ui.Button):
             )
             
             if success:
-                embed = discord.Embed(
-                    title="✅ Setup Complete!",
-                    description=message,
-                    color=discord.Color.green()
+                embed = (
+                    EmbedBuilder(EmbedStyle.SUCCESS)
+                    .set_title("Setup Complete!", emoji="✅", auto_emoji=False)
+                    .set_description(message)
+                    .build()
                 )
             else:
-                embed = discord.Embed(
-                    title="❌ Setup Failed",
-                    description=message,
-                    color=discord.Color.red()
+                embed = (
+                    EmbedBuilder(EmbedStyle.ERROR)
+                    .set_title("Setup Failed", emoji="❌", auto_emoji=False)
+                    .set_description(message)
+                    .build()
                 )
             
             # Edit the original setup message instead of creating a new one
@@ -1137,10 +1149,11 @@ class ConfirmSetupButton(ui.Button):
             func.log.error(f"Error executing setup: {e}\n{traceback.format_exc()}")
             try:
                 await interaction.edit_original_response(
-                    embed=discord.Embed(
-                        title="❌ Error",
-                        description=f"Error executing setup: {str(e)}",
-                        color=discord.Color.red()
+                    embed=(
+                        EmbedBuilder(EmbedStyle.ERROR)
+                        .set_title("Error", emoji="❌", auto_emoji=False)
+                        .set_description(f"Error executing setup: {str(e)}")
+                        .build()
                     ),
                     view=None
                 )

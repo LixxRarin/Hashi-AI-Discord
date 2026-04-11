@@ -23,6 +23,8 @@ from discord import app_commands
 from discord.ext import commands
 
 import utils.func as func
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 
 
 class DebugCommands(commands.Cog):
@@ -76,18 +78,6 @@ class DebugCommands(commands.Cog):
         
         # Send test message to debug channel
         try:
-            test_embed = discord.Embed(
-                title="✅ Debug Channels Configured",
-                description=f"Debug system has been configured successfully.\n\n"
-                           f"**Debug embeds** provide detailed information about:\n"
-                           f"• Command executions\n"
-                           f"• LLM responses with token usage\n"
-                           f"• Configuration changes\n"
-                           f"• Errors and warnings",
-                color=discord.Color.green(),
-                timestamp=datetime.now()
-            )
-            
             config_value = f"**Debug Channel:** {debug_channel.mention}\n"
             config_value += f"**Status:** Enabled\n"
             if cdn_cache_channel:
@@ -97,12 +87,25 @@ class DebugCommands(commands.Cog):
                 config_value += f"**CDN Cache Channel:** Not configured\n"
                 config_value += f"**Cache:** Using temporary uploads"
             
-            test_embed.add_field(
-                name="Configuration",
-                value=config_value,
-                inline=False
+            test_embed = (
+                EmbedBuilder(EmbedStyle.SUCCESS)
+                .set_title("Debug Channels Configured")
+                .set_description(
+                    f"Debug system has been configured successfully.\n\n"
+                    f"**Debug embeds** provide detailed information about:\n"
+                    f"• Command executions\n"
+                    f"• LLM responses with token usage\n"
+                    f"• Configuration changes\n"
+                    f"• Errors and warnings"
+                )
+                .add_field(
+                    name="Configuration",
+                    value=config_value,
+                    inline=False
+                )
+                .set_footer(f"Configured by {interaction.user.name}")
+                .build()
             )
-            test_embed.set_footer(text=f"Configured by {interaction.user.name}")
             
             await debug_channel.send(embed=test_embed)
             
@@ -478,11 +481,10 @@ class DebugCommands(commands.Cog):
         storage_stats = self._get_storage_stats()
         
         # Create embed
-        embed = discord.Embed(
-            title="💻 System Information",
-            description="Detailed bot and system resource status",
-            color=discord.Color.blue(),
-            timestamp=datetime.now()
+        builder = (
+            EmbedBuilder(EmbedStyle.SYSTEM)
+            .set_title("System Information", emoji=EmbedEmojis.SYSTEM)
+            .set_description("Detailed bot and system resource status")
         )
         
         # Section 1: Versions
@@ -492,12 +494,13 @@ class DebugCommands(commands.Cog):
         except:
             version = "Unknown"
         
-        embed.add_field(
-            name="📦 Versions",
+        builder.add_field(
+            name="Versions",
             value=f"**Project Hashi:** `{version}`\n"
                   f"**Python:** `{sys.version.split()[0]}`\n"
                   f"**Discord.py:** `{discord.__version__}`",
-            inline=False
+            inline=False,
+            emoji="📦"
         )
         
         # Section 2: System Information
@@ -505,12 +508,13 @@ class DebugCommands(commands.Cog):
         arch = sys_stats.get("architecture", "Unknown")
         hostname = sys_stats.get("hostname", "Unknown")
         
-        embed.add_field(
-            name="💻 System",
+        builder.add_field(
+            name="System",
             value=f"**OS:** {os_name}\n"
                   f"**Architecture:** {arch}\n"
                   f"**Hostname:** `{hostname}`",
-            inline=True
+            inline=True,
+            emoji="💻"
         )
         
         # Section 3: CPU Information
@@ -524,10 +528,11 @@ class DebugCommands(commands.Cog):
             cpu_value += f"**Frequency:** {cpu_freq.current:.0f} MHz\n"
         cpu_value += f"**Usage:** {self._create_progress_bar(cpu_percent)} {cpu_percent:.1f}% {self._get_health_indicator(cpu_percent)}"
         
-        embed.add_field(
-            name="⚡ CPU",
+        builder.add_field(
+            name="CPU",
             value=cpu_value,
-            inline=True
+            inline=True,
+            emoji="⚡"
         )
         
         # Section 4: Memory Information
@@ -535,12 +540,13 @@ class DebugCommands(commands.Cog):
         mem_used = sys_stats.get("memory_used", 0) / (1024**3)  # GB
         mem_percent = sys_stats.get("memory_percent", 0)
         
-        embed.add_field(
-            name="💾 Memory",
+        builder.add_field(
+            name="Memory",
             value=f"**Total:** {mem_total:.2f} GB\n"
                   f"**Used:** {mem_used:.2f} GB\n"
                   f"**Usage:** {self._create_progress_bar(mem_percent)} {mem_percent:.1f}% {self._get_health_indicator(mem_percent)}",
-            inline=False
+            inline=False,
+            emoji="💾"
         )
         
         # Section 5: Disk Information
@@ -549,12 +555,13 @@ class DebugCommands(commands.Cog):
         disk_free = sys_stats.get("disk_free", 0) / (1024**3)  # GB
         disk_percent = sys_stats.get("disk_percent", 0)
         
-        embed.add_field(
-            name="💿 Disk",
+        builder.add_field(
+            name="Disk",
             value=f"**Total:** {disk_total:.2f} GB\n"
                   f"**Used:** {disk_used:.2f} GB | **Free:** {disk_free:.2f} GB\n"
                   f"**Usage:** {self._create_progress_bar(disk_percent)} {disk_percent:.1f}% {self._get_health_indicator(disk_percent)}",
-            inline=False
+            inline=False,
+            emoji="💿"
         )
         
         # Section 6: Bot Statistics
@@ -562,12 +569,13 @@ class DebugCommands(commands.Cog):
         uptime_str = str(timedelta(seconds=int(uptime_seconds)))
         total_channels = sum(len(guild.channels) for guild in self.bot.guilds)
         
-        embed.add_field(
-            name="🤖 Bot Statistics",
+        builder.add_field(
+            name="Bot Statistics",
             value=f"**Servers:** `{len(self.bot.guilds)}`\n"
                   f"**Channels:** `{total_channels}`\n"
                   f"**Uptime:** `{uptime_str}`",
-            inline=True
+            inline=True,
+            emoji=EmbedEmojis.LLM
         )
         
         # Section 7: AI Statistics
@@ -586,10 +594,11 @@ class DebugCommands(commands.Cog):
             top_providers = sorted(providers.items(), key=lambda x: x[1], reverse=True)[:3]
             ai_value += f"**Most Used:** " + ", ".join([f"{p} ({c})" for p, c in top_providers])
         
-        embed.add_field(
-            name="🧠 Artificial Intelligence",
+        builder.add_field(
+            name="Artificial Intelligence",
             value=ai_value,
-            inline=True
+            inline=True,
+            emoji="🧠"
         )
         
         # Section 8: API Connections & Character Cards
@@ -597,11 +606,12 @@ class DebugCommands(commands.Cog):
         total_cards = ai_stats.get("total_cards", 0)
         cards_in_use = ai_stats.get("cards_in_use", 0)
         
-        embed.add_field(
-            name="📚 Resources",
+        builder.add_field(
+            name="Resources",
             value=f"**API Connections:** `{total_connections}`\n"
                   f"**Character Cards:** `{total_cards}` (in use: `{cards_in_use}`)",
-            inline=True
+            inline=True,
+            emoji="📚"
         )
         
         # Section 9: Process Information
@@ -610,13 +620,14 @@ class DebugCommands(commands.Cog):
         process_memory = sys_stats.get("process_memory", 0) / (1024**2)  # MB
         process_cpu = sys_stats.get("process_cpu", 0)
         
-        embed.add_field(
-            name="📊 Process",
+        builder.add_field(
+            name="Process",
             value=f"**Threads:** `{process_threads}`\n"
                   f"**File Descriptors:** `{process_fds}`\n"
                   f"**Memory:** `{process_memory:.2f} MB`\n"
                   f"**CPU:** `{process_cpu:.1f}%`",
-            inline=True
+            inline=True,
+            emoji=EmbedEmojis.STATS
         )
         
         # Section 10: Storage
@@ -624,27 +635,29 @@ class DebugCommands(commands.Cog):
         conversations_size = storage_stats.get("conversations_size", 0) / 1024  # KB
         total_data_size = storage_stats.get("total_data_size", 0) / 1024  # KB
         
-        embed.add_field(
-            name="💾 Storage",
+        builder.add_field(
+            name="Storage",
             value=f"**session.json:** `{session_size:.2f} KB`\n"
                   f"**conversations.json:** `{conversations_size:.2f} KB`\n"
                   f"**Total Data:** `{total_data_size:.2f} KB`",
-            inline=True
+            inline=True,
+            emoji=EmbedEmojis.FILE
         )
         
         # Section 11: Network (Gateway latency)
         gateway_ping = round(self.bot.latency * 1000)
         gateway_indicator = self._get_health_indicator(min(gateway_ping / 5, 100))  # Scale to percentage
         
-        embed.add_field(
-            name="🌐 Network",
+        builder.add_field(
+            name="Network",
             value=f"**Discord Gateway:** `{gateway_ping}ms` {gateway_indicator}",
-            inline=True
+            inline=True,
+            emoji="🌐"
         )
         
-        embed.set_footer(text="System monitored • Use /debug_status for more details")
+        builder.set_footer("System monitored • Use /debug_status for more details")
         
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=builder.build(), ephemeral=True)
     
     @app_commands.command(name="clear_debug", description="Clear messages from the debug channel")
     @app_commands.default_permissions(administrator=True)
@@ -788,11 +801,10 @@ class DebugCommands(commands.Cog):
             all_stats = get_all_stats()
             
             # Create embed
-            embed = discord.Embed(
-                title="📊 Cache & Rate Limiting Statistics",
-                description="Comprehensive view of the message caching and rate limiting systems",
-                color=discord.Color.blue(),
-                timestamp=datetime.now()
+            builder = (
+                EmbedBuilder(EmbedStyle.INFO)
+                .set_title("Cache & Rate Limiting Statistics", emoji=EmbedEmojis.STATS)
+                .set_description("Comprehensive view of the message caching and rate limiting systems")
             )
             
             # Cache Statistics
@@ -807,10 +819,11 @@ class DebugCommands(commands.Cog):
             cache_value += f"**Expirations:** {cache_stats.get('expirations', 0)}\n"
             cache_value += f"**Channels Tracked:** {cache_stats.get('channels_tracked', 0)}"
             
-            embed.add_field(
-                name="💾 Message Cache",
+            builder.add_field(
+                name="Message Cache",
                 value=cache_value,
-                inline=False
+                inline=False,
+                emoji="💾"
             )
             
             # Request Deduplication Statistics
@@ -821,10 +834,11 @@ class DebugCommands(commands.Cog):
             if dedup_stats.get('dedup_saves', 0) > 0:
                 dedup_value += f"\n\n✅ **Prevented {dedup_stats.get('dedup_saves', 0)} duplicate API calls!**"
             
-            embed.add_field(
-                name="🔄 Request Deduplication",
+            builder.add_field(
+                name="Request Deduplication",
                 value=dedup_value,
-                inline=True
+                inline=True,
+                emoji="🔄"
             )
             
             # Semaphore Manager Statistics
@@ -832,10 +846,11 @@ class DebugCommands(commands.Cog):
             sem_value = f"**Channels:** {sem_stats.get('total_channels', 0)}\n"
             sem_value += f"**Max Concurrent/Channel:** {sem_stats.get('max_concurrent_per_channel', 1)}"
             
-            embed.add_field(
-                name="🚦 Semaphore Manager",
+            builder.add_field(
+                name="Semaphore Manager",
                 value=sem_value,
-                inline=True
+                inline=True,
+                emoji="🚦"
             )
             
             # Channel Rate Limiter Statistics
@@ -856,10 +871,11 @@ class DebugCommands(commands.Cog):
             else:
                 limiter_value += f"\n\n✅ **No rate limits!**"
             
-            embed.add_field(
-                name="⏱️ Channel Rate Limiter",
+            builder.add_field(
+                name="Channel Rate Limiter",
                 value=limiter_value,
-                inline=False
+                inline=False,
+                emoji=EmbedEmojis.TIME
             )
             
             # Adaptive Backoff Statistics
@@ -889,10 +905,11 @@ class DebugCommands(commands.Cog):
             else:
                 backoff_value = "✅ **No channels with penalties**"
             
-            embed.add_field(
-                name="🎯 Adaptive Backoff",
+            builder.add_field(
+                name="Adaptive Backoff",
                 value=backoff_value,
-                inline=True
+                inline=True,
+                emoji="🎯"
             )
             
             # Circuit Breaker Statistics
@@ -914,10 +931,11 @@ class DebugCommands(commands.Cog):
             else:
                 breaker_value = "✅ **All circuits closed**"
             
-            embed.add_field(
-                name="🔌 Circuit Breaker",
+            builder.add_field(
+                name="Circuit Breaker",
                 value=breaker_value,
-                inline=True
+                inline=True,
+                emoji="🔌"
             )
             
             # Per-channel statistics if requested
@@ -932,16 +950,18 @@ class DebugCommands(commands.Cog):
                         channel_value += f"**API Requests:** {channel_stats.get('api_requests', 0)}\n"
                         channel_value += f"**Hit Rate:** {channel_stats.get('hit_rate', '0.0%')}"
                         
-                        embed.add_field(
-                            name=f"📍 Channel {channel_id}",
+                        builder.add_field(
+                            name=f"Channel {channel_id}",
                             value=channel_value,
-                            inline=False
+                            inline=False,
+                            emoji="📍"
                         )
                     else:
-                        embed.add_field(
-                            name=f"📍 Channel {channel_id}",
+                        builder.add_field(
+                            name=f"Channel {channel_id}",
                             value="No statistics available for this channel",
-                            inline=False
+                            inline=False,
+                            emoji="📍"
                         )
                 except Exception as e:
                     func.log.error(f"Error getting channel stats: {e}")
@@ -961,15 +981,16 @@ class DebugCommands(commands.Cog):
                     summary += f"**Reduction:** {reduction:.1f}%\n\n"
                     summary += f"✅ **Saved {dedup_saves} API calls through deduplication!**"
                     
-                    embed.add_field(
-                        name="📈 Performance Summary",
+                    builder.add_field(
+                        name="Performance Summary",
                         value=summary,
-                        inline=False
+                        inline=False,
+                        emoji="📈"
                     )
             
-            embed.set_footer(text="Use /cache_stats channel_id:<id> for per-channel stats")
+            builder.set_footer("Use /cache_stats channel_id:<id> for per-channel stats")
             
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=builder.build(), ephemeral=True)
             
         except Exception as e:
             func.log.error(f"Error displaying cache stats: {e}")

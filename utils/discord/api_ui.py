@@ -19,6 +19,8 @@ from utils.api_metadata import (
 )
 from utils.pagination import PaginatedView
 from AI.core.registry import get_registry
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 
 def create_connection_list_embed(
     server_id: str,
@@ -41,11 +43,14 @@ def create_connection_list_embed(
     connections = func.list_api_connections(server_id)
     
     if not connections:
-        embed = discord.Embed(
-            title=f"🔌 API Connections - {guild_name}",
-            description="No API connections configured in this server.\n\n"
-                       "💡 Click **Create New** to create your first connection!",
-            color=discord.Color.blue()
+        embed = (
+            EmbedBuilder(EmbedStyle.INFO)
+            .set_title(f"API Connections - {guild_name}", emoji="🔌", auto_emoji=False)
+            .set_description(
+                "No API connections configured in this server.\n\n"
+                "💡 Click **Create New** to create your first connection!"
+            )
+            .build()
         )
         return embed
     
@@ -58,11 +63,13 @@ def create_connection_list_embed(
     registry = get_registry()
     
     # Create embed
-    embed = discord.Embed(
-        title=f"🔌 API Connections - {guild_name}",
-        description=f"📊 Total: {total} connection(s)\n\n"
-                   f"Select an action below to manage your connections.",
-        color=discord.Color.blue()
+    builder = (
+        EmbedBuilder(EmbedStyle.INFO)
+        .set_title(f"API Connections - {guild_name}", emoji="🔌", auto_emoji=False)
+        .set_description(
+            f"📊 Total: {total} connection(s)\n\n"
+            f"Select an action below to manage your connections."
+        )
     )
     
     # Add connections
@@ -91,7 +98,7 @@ def create_connection_list_embed(
         
         field_value = f"{provider_icon} **{provider_display}** • `{model}`\n{status}"
         
-        embed.add_field(
+        builder.add_field(
             name=f"{idx}. {conn_name}",
             value=field_value,
             inline=False
@@ -99,9 +106,9 @@ def create_connection_list_embed(
     
     # Add footer with pagination info
     total_pages = (total + per_page - 1) // per_page
-    embed.set_footer(text=f"Page {page + 1}/{total_pages} • Use buttons below to manage connections")
+    builder.set_footer(f"Page {page + 1}/{total_pages} • Use buttons below to manage connections")
     
-    return embed
+    return builder.build()
 
 
 def create_connection_details_embed(
@@ -136,11 +143,10 @@ def create_connection_details_embed(
         color = discord.Color.blue()
     
     # Create embed
-    embed = discord.Embed(
-        title=f"🔌 {connection_name}",
-        description=f"{provider_icon} **{provider_display}**",
-        color=color
-    )
+    builder = EmbedBuilder(EmbedStyle.INFO)
+    builder.embed.color = color  # Override with provider-specific color
+    builder.set_title(connection_name, emoji="🔌", auto_emoji=False)
+    builder.set_description(f"{provider_icon} **{provider_display}**")
     
     # Credentials section
     cred_text = f"• **Provider:** {provider_display}\n"
@@ -151,7 +157,7 @@ def create_connection_details_embed(
     if base_url:
         cred_text += f"\n• **Base URL:** `{base_url}`"
     
-    embed.add_field(name="🔑 Credentials", value=cred_text, inline=False)
+    builder.add_field(name="Credentials", value=cred_text, inline=False, emoji=EmbedEmojis.KEY)
     
     # Generation parameters
     gen_text = f"• **Max Tokens:** `{connection_data.get('max_tokens', 1000)}`\n"
@@ -161,7 +167,7 @@ def create_connection_details_embed(
     gen_text += f"• **Presence Penalty:** `{connection_data.get('presence_penalty', 0.0)}`\n"
     gen_text += f"• **Context Size:** `{connection_data.get('context_size', 16000)}` tokens"
     
-    embed.add_field(name="⚙️ Generation", value=gen_text, inline=False)
+    builder.add_field(name="Generation", value=gen_text, inline=False, emoji=EmbedEmojis.SETTINGS)
     
     # Thinking parameters
     think_switch = connection_data.get('think_switch', True)
@@ -178,13 +184,13 @@ def create_connection_details_embed(
     if thinking_patterns:
         think_text += f"\n• **Tag Patterns:** {len(thinking_patterns)} pattern(s)"
     
-    embed.add_field(name="🧠 Thinking", value=think_text, inline=False)
+    builder.add_field(name="Thinking", value=think_text, inline=False, emoji="🧠")
     
     # Tools
     max_tool_rounds = connection_data.get('max_tool_rounds', 5)
     tools_text = f"• **Max Tool Rounds:** `{max_tool_rounds}`"
     
-    embed.add_field(name="🔧 Tools", value=tools_text, inline=False)
+    builder.add_field(name="Tools", value=tools_text, inline=False, emoji="🔧")
     
     # Vision
     vision_enabled = connection_data.get('vision_enabled', False)
@@ -196,7 +202,7 @@ def create_connection_details_embed(
         vision_text += f"\n• **Detail Level:** `{vision_detail}`"
         vision_text += f"\n• **Max Image Size:** `{max_image_size} MB`"
     
-    embed.add_field(name="🖼️ Vision", value=vision_text, inline=False)
+    builder.add_field(name="Vision", value=vision_text, inline=False, emoji="🖼️")
     
     # Advanced
     custom_extra_body = connection_data.get('custom_extra_body')
@@ -209,7 +215,7 @@ def create_connection_details_embed(
             extra_body_preview = extra_body_str
         
         adv_text = f"**Custom Extra Body:**\n```json\n{extra_body_preview}\n```"
-        embed.add_field(name="🔬 Advanced", value=adv_text, inline=False)
+        builder.add_field(name="Advanced", value=adv_text, inline=False, emoji="🔬")
 
     # Usage
     ais_using = func.get_ais_using_connection(server_id, connection_name)
@@ -223,17 +229,17 @@ def create_connection_details_embed(
     else:
         usage_text = "Not currently used by any AI"
     
-    embed.add_field(name="📊 Usage", value=usage_text, inline=False)
+    builder.add_field(name="Usage", value=usage_text, inline=False, emoji=EmbedEmojis.STATS)
     
     # Metadata
     created_at = connection_data.get("created_at", "Unknown")
     created_by = connection_data.get("created_by")
     if created_by:
-        embed.set_footer(text=f"Created by user ID {created_by} • {created_at}")
+        builder.set_footer(f"Created by user ID {created_by} • {created_at}")
     else:
-        embed.set_footer(text=f"Created at {created_at}")
+        builder.set_footer(f"Created at {created_at}")
     
-    return embed
+    return builder.build()
 
 class APIConnectionListView(ui.View):
     """Main view for API connection management."""

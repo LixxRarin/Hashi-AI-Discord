@@ -16,7 +16,9 @@ import utils.func as func
 from commands.shared.autocomplete import AutocompleteHelpers
 from utils.pagination import PaginatedView
 from utils.media.thumbnails import get_thumbnail_for_card_registry
-from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.discord.confirmation_ui import confirm_dangerous_action
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 
 
 # Module-level autocomplete functions (must be defined before class)
@@ -406,10 +408,11 @@ class CardRegistry(commands.Cog):
             success = await func.unregister_character_card(server_id, card_name)
             
             if not success:
-                from utils.discord.confirmation_ui import create_error_embed
-                error_embed = create_error_embed(
-                    title="❌ Removal Failed",
-                    description="Failed to remove card from registry. Check logs for details."
+                error_embed = (
+                    EmbedBuilder(EmbedStyle.ERROR)
+                    .set_title("Removal Failed")
+                    .set_description("Failed to remove card from registry. Check logs for details.")
+                    .build()
                 )
                 await confirm_interaction.response.edit_message(
                     embed=error_embed,
@@ -449,22 +452,21 @@ class CardRegistry(commands.Cog):
             func.log.info(f"Removed card '{card_name}' from server {server_id}")
             
             # Create success embed
-            success_fields = [
-                {
-                    "name": "📊 Summary",
-                    "value": f"• **Card:** `{card_name}`\n"
-                            f"• **Character:** {char_name}\n"
-                            f"• **File Deleted:** {'Yes' if file_deleted else 'No'}\n"
-                            f"• **AI References Cleaned:** {len(cleaned_ais)}\n"
-                            f"• **Removed by:** {interaction.user.mention}"
-                }
-            ]
-            
-            success_embed = create_success_embed(
-                title="✅ Card Removed Successfully",
-                description=f"The character card **{char_name}** has been removed from the registry.",
-                fields=success_fields,
-                thumbnail_url=thumbnail_url
+            success_embed = (
+                EmbedBuilder(EmbedStyle.SUCCESS)
+                .set_title("Card Removed Successfully")
+                .set_description(f"The character card **{char_name}** has been removed from the registry.")
+                .add_field(
+                    name="Summary",
+                    value=f"• **Card:** `{card_name}`\n"
+                          f"• **Character:** {char_name}\n"
+                          f"• **File Deleted:** {'Yes' if file_deleted else 'No'}\n"
+                          f"• **AI References Cleaned:** {len(cleaned_ais)}\n"
+                          f"• **Removed by:** {interaction.user.mention}",
+                    emoji=EmbedEmojis.STATS
+                )
+                .set_thumbnail(thumbnail_url)
+                .build()
             )
             
             await confirm_interaction.response.edit_message(
@@ -646,32 +648,29 @@ class CardRegistry(commands.Cog):
             char_name = card_info.get("name", card_name)
             creator = card_info.get("creator", "Unknown")
             
-            # Determine status and color
+            # Determine status and style
             if usage_count > 0:
-                status_emoji = "🟢"
+                status_emoji = EmbedEmojis.ACTIVE
                 status_text = f"In Use • {usage_count} AI{'s' if usage_count != 1 else ''} using this card"
-                color = discord.Color.green()
+                style = EmbedStyle.ACTIVE
             else:
-                status_emoji = "⚪"
+                status_emoji = EmbedEmojis.INACTIVE
                 status_text = "Available • Ready to use"
-                color = discord.Color.greyple()
+                style = EmbedStyle.INACTIVE
             
-            # Create embed with character name as title
-            embed = discord.Embed(
-                title=f"{char_name}",
-                description=f"{status_emoji} {status_text}",
-                color=color
-            )
-            
-            # Add main information field
-            info_value = f"• **Character:** {char_name}\n"
-            info_value += f"• **Creator:** {creator}\n"
-            info_value += f"• **Card ID:** `{card_name}`"
-            
-            embed.add_field(
-                name="📊 Information",
-                value=info_value,
-                inline=False
+            # Build embed
+            builder = (
+                EmbedBuilder(style)
+                .set_title(char_name, auto_emoji=False)
+                .set_description(f"{status_emoji} {status_text}")
+                .add_field(
+                    name="Information",
+                    value=f"• **Character:** {char_name}\n"
+                          f"• **Creator:** {creator}\n"
+                          f"• **Card ID:** `{card_name}`",
+                    inline=False,
+                    emoji=EmbedEmojis.STATS
+                )
             )
             
             # Add usage information if card is in use
@@ -689,20 +688,21 @@ class CardRegistry(commands.Cog):
                 if len(ais_using) > 3:
                     usage_value += f"\n• **+{len(ais_using) - 3} more**"
                 
-                embed.add_field(
-                    name="🤖 Current Usage",
+                builder.add_field(
+                    name="Current Usage",
                     value=usage_value,
-                    inline=False
+                    inline=False,
+                    emoji=EmbedEmojis.LLM
                 )
             
             # Add thumbnail if available
             if card_name in thumbnail_urls:
-                embed.set_thumbnail(url=thumbnail_urls[card_name])
+                builder.set_thumbnail(thumbnail_urls[card_name])
             
             # Footer with position and helpful tip
-            embed.set_footer(text=f"Card {idx + 1}/{total_cards} • Use /set_card to apply • /character_info for details")
+            builder.set_footer(f"Card {idx + 1}/{total_cards} • Use /set_card to apply • /character_info for details")
             
-            embeds.append(embed)
+            embeds.append(builder.build())
         
         # Send with pagination if multiple embeds
         if len(embeds) == 0:

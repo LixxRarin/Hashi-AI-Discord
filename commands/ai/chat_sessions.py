@@ -19,7 +19,9 @@ from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.webhook_utils import WebhookUtils
 from utils.pagination import PaginatedView
 from utils.media.thumbnails import get_thumbnail_url
-from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.discord.confirmation_ui import confirm_dangerous_action
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 
 
 # Module-level autocomplete functions (must be defined before class)
@@ -375,14 +377,14 @@ class ChatSessions(commands.Cog):
             created = datetime.datetime.fromtimestamp(info["created_at"]).strftime("%Y-%m-%d %H:%M")
             updated = datetime.datetime.fromtimestamp(info["updated_at"]).strftime("%Y-%m-%d %H:%M")
             
-            # Determine color and status
+            # Determine style and status
             if is_active:
-                color = discord.Color.green()
-                status_emoji = "🟢"
+                style = EmbedStyle.ACTIVE
+                status_emoji = EmbedEmojis.ACTIVE
                 status_text = "Active"
             else:
-                color = discord.Color.greyple()
-                status_emoji = "⚪"
+                style = EmbedStyle.INACTIVE
+                status_emoji = EmbedEmojis.INACTIVE
                 status_text = "Inactive"
             
             # Create title - use chat name or shortened ID
@@ -397,22 +399,23 @@ class ChatSessions(commands.Cog):
             description = f"{status_emoji} {status_text} • {info['message_count']} messages • AI: {actual_ai_name}"
             
             # Create embed
-            embed = discord.Embed(
-                title=title,
-                description=description,
-                color=color
+            builder = (
+                EmbedBuilder(style)
+                .set_title(title, auto_emoji=False)
+                .set_description(description)
             )
             
             # Add thumbnail to first page only
             if idx == 0 and thumbnail_url:
-                embed.set_thumbnail(url=thumbnail_url)
+                builder.set_thumbnail(url=thumbnail_url)
             
             # Dates field
-            embed.add_field(
-                name="📅 Dates",
+            builder.add_field(
+                name="Dates",
                 value=f"• **Created:** {created}\n"
                       f"• **Updated:** {updated}",
-                inline=False
+                inline=False,
+                emoji="📅"
             )
             
             # Greeting (if available)
@@ -421,10 +424,11 @@ class ChatSessions(commands.Cog):
                 if len(info["greeting"]) > 200:
                     greeting_preview += "..."
                 
-                embed.add_field(
-                    name="👋 First Message",
+                builder.add_field(
+                    name="First Message",
                     value=f"```{greeting_preview}```",
-                    inline=False
+                    inline=False,
+                    emoji="👋"
                 )
             
             # Recent messages history
@@ -436,19 +440,20 @@ class ChatSessions(commands.Cog):
                         preview = preview[:100] + "..."
                     history_text += f"{preview}\n"
                 
-                embed.add_field(
-                    name="💬 Recent Messages",
+                builder.add_field(
+                    name="Recent Messages",
                     value=f"```{history_text}```",
-                    inline=False
+                    inline=False,
+                    emoji=EmbedEmojis.MESSAGE
                 )
             
             # Footer with navigation info
-            embed.set_footer(
-                text=f"Chat {idx + 1}/{len(sorted_chats)} • "
-                     f"{'Currently active' if is_active else 'Use /switch_chat to activate'}"
+            builder.set_footer(
+                f"Chat {idx + 1}/{len(sorted_chats)} • "
+                f"{'Currently active' if is_active else 'Use /switch_chat to activate'}"
             )
             
-            embeds.append(embed)
+            embeds.append(builder.build())
         
         # Send with pagination
         if len(embeds) == 1:
@@ -573,19 +578,20 @@ class ChatSessions(commands.Cog):
                 
                 if success:
                     # Create success embed
-                    success_embed = create_success_embed(
-                        title="✅ Chat Deleted Successfully",
-                        description=f"The chat session **{chat_id_display}** has been permanently deleted.",
-                        fields=[
-                            {
-                                "name": "📊 Summary",
-                                "value": f"• **AI:** {ai_name}\n"
-                                        f"• **Chat ID:** `{chat_id_display}`\n"
-                                        f"• **Messages Deleted:** {info['message_count']}\n"
-                                        f"• **Deleted by:** {interaction.user.mention}"
-                            }
-                        ],
-                        thumbnail_url=thumbnail_url
+                    success_embed = (
+                        EmbedBuilder(EmbedStyle.SUCCESS)
+                        .set_title("Chat Deleted Successfully")
+                        .set_description(f"The chat session **{chat_id_display}** has been permanently deleted.")
+                        .add_field(
+                            name="Summary",
+                            value=f"• **AI:** {ai_name}\n"
+                                  f"• **Chat ID:** `{chat_id_display}`\n"
+                                  f"• **Messages Deleted:** {info['message_count']}\n"
+                                  f"• **Deleted by:** {interaction.user.mention}",
+                            emoji=EmbedEmojis.STATS
+                        )
+                        .set_thumbnail(thumbnail_url)
+                        .build()
                     )
                     
                     await confirm_interaction.response.edit_message(
@@ -596,10 +602,11 @@ class ChatSessions(commands.Cog):
                     func.log.info(f"Deleted chat '{chat_id}' for AI '{ai_name}' in server {server_id}")
                 else:
                     # Failed to delete
-                    from utils.discord.confirmation_ui import create_error_embed
-                    error_embed = create_error_embed(
-                        title="❌ Delete Failed",
-                        description="Failed to delete the chat session. Check logs for details."
+                    error_embed = (
+                        EmbedBuilder(EmbedStyle.ERROR)
+                        .set_title("Delete Failed")
+                        .set_description("Failed to delete the chat session. Check logs for details.")
+                        .build()
                     )
                     await confirm_interaction.response.edit_message(
                         embed=error_embed,
@@ -607,10 +614,11 @@ class ChatSessions(commands.Cog):
                     )
             except ValueError as e:
                 # Error during deletion
-                from utils.discord.confirmation_ui import create_error_embed
-                error_embed = create_error_embed(
-                    title="❌ Error",
-                    description=f"An error occurred: {str(e)}"
+                error_embed = (
+                    EmbedBuilder(EmbedStyle.ERROR)
+                    .set_title("Error")
+                    .set_description(f"An error occurred: {str(e)}")
+                    .build()
                 )
                 await confirm_interaction.response.edit_message(
                     embed=error_embed,
@@ -798,11 +806,11 @@ class ChatSessions(commands.Cog):
             else:
                 updated_relative = "just now"
             
-            # Determine status and color
+            # Determine status and style
             is_active = (chat_id == active_chat_id)
-            status_emoji = "🟢" if is_active else "⚪"
+            status_emoji = EmbedEmojis.ACTIVE if is_active else EmbedEmojis.INACTIVE
             status_text = "Active" if is_active else "Inactive"
-            color = discord.Color.green() if is_active else discord.Color.greyple()
+            style = EmbedStyle.ACTIVE if is_active else EmbedStyle.INACTIVE
             
             # Create title - use chat name or shortened ID
             if len(chat_id) > 30:
@@ -814,17 +822,18 @@ class ChatSessions(commands.Cog):
             description = f"{status_emoji} {status_text} • {info['message_count']} messages • AI: {actual_ai_name}"
             
             # Build embed
-            embed = discord.Embed(
-                title=title,
-                description=description,
-                color=color
+            builder = (
+                EmbedBuilder(style)
+                .set_title(title, auto_emoji=False)
+                .set_description(description)
             )
             
             # Dates field
-            embed.add_field(
-                name="📅 Dates",
+            builder.add_field(
+                name="Dates",
                 value=f"• **Created:** {created}\n• **Updated:** {updated_relative}",
-                inline=False
+                inline=False,
+                emoji="📅"
             )
             
             # First message (greeting)
@@ -832,10 +841,11 @@ class ChatSessions(commands.Cog):
                 greeting_preview = info["greeting"][:200]
                 if len(info["greeting"]) > 200:
                     greeting_preview += "..."
-                embed.add_field(
-                    name="👋 First Message",
+                builder.add_field(
+                    name="First Message",
                     value=f"```{greeting_preview}```",
-                    inline=False
+                    inline=False,
+                    emoji="👋"
                 )
             
             # Recent messages
@@ -847,15 +857,16 @@ class ChatSessions(commands.Cog):
                         preview = preview[:100] + "..."
                     recent_text += f"{preview}\n"
                 
-                embed.add_field(
-                    name="💬 Recent Messages",
+                builder.add_field(
+                    name="Recent Messages",
                     value=f"```{recent_text[:1018]}```",
-                    inline=False
+                    inline=False,
+                    emoji=EmbedEmojis.MESSAGE
                 )
             
-            embed.set_footer(text="Use /switch_chat to activate • /delete_chat to remove")
+            builder.set_footer("Use /switch_chat to activate • /delete_chat to remove")
             
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=builder.build(), ephemeral=True)
             
         else:
             # Show general info for all chats (overview)
@@ -882,10 +893,10 @@ class ChatSessions(commands.Cog):
                 active_chat_display = f"{active_chat_id[:20]}...{active_chat_id[-8:]}"
             
             # Build embed with simplified layout
-            embed = discord.Embed(
-                title="Chat Overview",
-                description=f"AI: {actual_ai_name} • Channel: <#{found_channel_id}>",
-                color=discord.Color.purple()
+            builder = (
+                EmbedBuilder(EmbedStyle.CHARACTER)
+                .set_title("Chat Overview", auto_emoji=False)
+                .set_description(f"AI: {actual_ai_name} • Channel: <#{found_channel_id}>")
             )
             
             # Statistics field
@@ -893,17 +904,18 @@ class ChatSessions(commands.Cog):
             stats_value += f"• **Total Messages:** {total_messages}\n"
             stats_value += f"• **Active Chat:** {active_chat_display}"
             
-            embed.add_field(
-                name="📊 Statistics",
+            builder.add_field(
+                name="Statistics",
                 value=stats_value,
-                inline=False
+                inline=False,
+                emoji=EmbedEmojis.STATS
             )
             
             # Sessions field - list chats with status
             sessions_list = ""
             for i, cid in enumerate(chat_ids[:5]):
                 info = await get_store(server_id, found_channel_id).get_chat_info(server_id, found_channel_id, actual_ai_name, cid)
-                indicator = "🟢" if cid == active_chat_id else "⚪"
+                indicator = EmbedEmojis.ACTIVE if cid == active_chat_id else EmbedEmojis.INACTIVE
                 
                 # Format chat name
                 if len(cid) > 25:
@@ -916,15 +928,16 @@ class ChatSessions(commands.Cog):
             if len(chat_ids) > 5:
                 sessions_list += f"\n*...and {len(chat_ids) - 5} more*"
             
-            embed.add_field(
-                name="💬 Sessions",
+            builder.add_field(
+                name="Sessions",
                 value=sessions_list,
-                inline=False
+                inline=False,
+                emoji=EmbedEmojis.MESSAGE
             )
             
-            embed.set_footer(text="Use /chat_info <chat_id> for details of a specific chat")
+            builder.set_footer("Use /chat_info <chat_id> for details of a specific chat")
             
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            await interaction.followup.send(embed=builder.build(), ephemeral=True)
 
 
 async def setup(bot):

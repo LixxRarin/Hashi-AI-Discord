@@ -15,6 +15,8 @@ Features:
 from datetime import datetime
 from typing import Callable, Optional, List, Dict, Any
 import discord
+from .embed_builder import EmbedBuilder
+from .embed_constants import EmbedStyle
 
 def create_confirmation_embed(
     title: str,
@@ -40,31 +42,24 @@ def create_confirmation_embed(
     Returns:
         Configured Discord embed
     """
-    embed = discord.Embed(
-        title=title,
-        description=description,
-        color=color,
-        timestamp=datetime.now()
-    )
+    builder = EmbedBuilder(EmbedStyle.WARNING)
+    builder.embed.color = color  # Override with custom color
+    builder.set_title(title, auto_emoji=False)
+    builder.set_description(description)
     
     # Add fields
     if fields:
-        for field in fields:
-            embed.add_field(
-                name=field.get("name", ""),
-                value=field.get("value", ""),
-                inline=field.get("inline", False)
-            )
+        builder.add_fields(fields)
     
     # Add thumbnail
     if thumbnail_url:
-        embed.set_thumbnail(url=thumbnail_url)
+        builder.set_thumbnail(thumbnail_url)
     
     # Add footer
     if footer_text:
-        embed.set_footer(text=footer_text, icon_url=footer_icon_url)
+        builder.embed.set_footer(text=footer_text, icon_url=footer_icon_url)
     
-    return embed
+    return builder.build()
 
 
 def create_success_embed(
@@ -77,7 +72,7 @@ def create_success_embed(
     Create a standardized success embed.
     
     Args:
-        title: Embed title (should start with ✅)
+        title: Embed title
         description: Success message
         fields: Optional additional fields
         thumbnail_url: Optional thumbnail URL
@@ -85,17 +80,21 @@ def create_success_embed(
     Returns:
         Green success embed
     """
-    return create_confirmation_embed(
-        title=title,
-        description=description,
-        fields=fields,
-        color=discord.Color.green(),
-        thumbnail_url=thumbnail_url
-    )
+    builder = EmbedBuilder(EmbedStyle.SUCCESS)
+    builder.set_title(title, auto_emoji=False)
+    builder.set_description(description)
+    
+    if fields:
+        builder.add_fields(fields)
+    
+    if thumbnail_url:
+        builder.set_thumbnail(thumbnail_url)
+    
+    return builder.build()
 
 
 def create_cancellation_embed(
-    title: str = "❌ Cancelled",
+    title: str = "Cancelled",
     description: str = "Operation cancelled. No changes were made.",
     fields: Optional[List[Dict[str, Any]]] = None
 ) -> discord.Embed:
@@ -110,12 +109,14 @@ def create_cancellation_embed(
     Returns:
         Grey cancellation embed
     """
-    return create_confirmation_embed(
-        title=title,
-        description=description,
-        fields=fields,
-        color=discord.Color.greyple()
-    )
+    builder = EmbedBuilder(EmbedStyle.INACTIVE)
+    builder.set_title(title, emoji="❌", auto_emoji=False)
+    builder.set_description(description)
+    
+    if fields:
+        builder.add_fields(fields)
+    
+    return builder.build()
 
 
 def create_error_embed(
@@ -127,19 +128,21 @@ def create_error_embed(
     Create a standardized error embed.
     
     Args:
-        title: Error title (should start with ❌)
+        title: Error title
         description: Error message
         fields: Optional additional fields
         
     Returns:
         Red error embed
     """
-    return create_confirmation_embed(
-        title=title,
-        description=description,
-        fields=fields,
-        color=discord.Color.red()
-    )
+    builder = EmbedBuilder(EmbedStyle.ERROR)
+    builder.set_title(title, auto_emoji=False)
+    builder.set_description(description)
+    
+    if fields:
+        builder.add_fields(fields)
+    
+    return builder.build()
 
 class ConfirmationView(discord.ui.View):
     """

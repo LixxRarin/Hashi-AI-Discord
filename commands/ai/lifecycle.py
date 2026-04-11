@@ -27,7 +27,9 @@ from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.avatar_utils import AvatarUtils
 from commands.shared.webhook_utils import WebhookUtils
 from utils.http_client import create_http_session
-from utils.discord.confirmation_ui import confirm_dangerous_action, create_success_embed
+from utils.discord.confirmation_ui import confirm_dangerous_action
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 from utils.media.thumbnails import get_thumbnail_url
 
 
@@ -338,29 +340,31 @@ class AILifecycle(commands.Cog):
             )
             
             # Create success embed
-            success_embed = create_success_embed(
-                title="✅ AI Removed Successfully",
-                description=f"The AI **{ai_name}** has been permanently removed from {channel_mention}.",
-                fields=[
-                    {
-                        "name": "📊 Summary",
-                        "value": f"• **AI:** {ai_name}\n"
-                                f"• **Channel:** {channel_mention}\n"
-                                f"• **Chats Deleted:** {total_chats}\n"
-                                f"• **Messages Deleted:** {total_messages}\n"
-                                f"• **Removed by:** {interaction.user.mention}"
-                    },
-                    {
-                        "name": "💾 Deleted Data",
-                        "value": "• Session configuration\n"
-                                "• All conversation history\n"
-                                "• Memory files\n"
-                                "• Response manager data\n"
-                                "• Message buffer\n"
-                                "• Webhook (if applicable)"
-                    }
-                ],
-                thumbnail_url=thumbnail_url
+            success_embed = (
+                EmbedBuilder(EmbedStyle.SUCCESS)
+                .set_title("AI Removed Successfully")
+                .set_description(f"The AI **{ai_name}** has been permanently removed from {channel_mention}.")
+                .add_field(
+                    name="Summary",
+                    value=f"• **AI:** {ai_name}\n"
+                          f"• **Channel:** {channel_mention}\n"
+                          f"• **Chats Deleted:** {total_chats}\n"
+                          f"• **Messages Deleted:** {total_messages}\n"
+                          f"• **Removed by:** {interaction.user.mention}",
+                    emoji=EmbedEmojis.STATS
+                )
+                .add_field(
+                    name="Deleted Data",
+                    value="• Session configuration\n"
+                          "• All conversation history\n"
+                          "• Memory files\n"
+                          "• Response manager data\n"
+                          "• Message buffer\n"
+                          "• Webhook (if applicable)",
+                    emoji="💾"
+                )
+                .set_thumbnail(thumbnail_url)
+                .build()
             )
             
             await confirm_interaction.response.edit_message(

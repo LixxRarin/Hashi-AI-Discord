@@ -19,6 +19,8 @@ from utils.config.metadata import (
     get_category_emoji,
     CONFIG_CATEGORIES
 )
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 
 
 def create_category_selection_embed(ai_name: str) -> discord.Embed:
@@ -29,10 +31,10 @@ def create_category_selection_embed(ai_name: str) -> discord.Embed:
     """
     categories = get_all_categories()
     
-    embed = discord.Embed(
-        title=f"⚙️ Configure: {ai_name}",
-        description="Choose a category to configure:",
-        color=discord.Color.blue()
+    builder = (
+        EmbedBuilder(EmbedStyle.INFO)
+        .set_title(f"Configure: {ai_name}", emoji=EmbedEmojis.SETTINGS)
+        .set_description("Choose a category to configure:")
     )
     
     # Add category info
@@ -45,15 +47,15 @@ def create_category_selection_embed(ai_name: str) -> discord.Embed:
     if len(categories) > 10:
         category_info.append(f"... and {len(categories) - 10} more categories")
     
-    embed.add_field(
+    builder.add_field(
         name="Available Categories",
         value="\n".join(category_info),
         inline=False
     )
     
-    embed.set_footer(text="Select a category from the menu below")
+    builder.set_footer("Select a category from the menu below")
     
-    return embed
+    return builder.build()
 
 
 class ConfigCategorySelect(ui.Select):
@@ -125,10 +127,10 @@ class ConfigCategorySelectView(ui.View):
             
             # Create embed showing all configs with values
             emoji = get_category_emoji(category)
-            embed = discord.Embed(
-                title=f"{emoji} {self.ai_name} - {category}",
-                description=f"Current values for {len(config_keys)} configuration(s):",
-                color=discord.Color.blue()
+            builder = (
+                EmbedBuilder(EmbedStyle.INFO)
+                .set_title(f"{self.ai_name} - {category}", emoji=emoji, auto_emoji=False)
+                .set_description(f"Current values for {len(config_keys)} configuration(s):")
             )
             
             # Add each config as a field
@@ -140,13 +142,13 @@ class ConfigCategorySelectView(ui.View):
                 # Get label
                 label = self.metadata.get_label(config_key.split('.')[-1])
                 
-                embed.add_field(
+                builder.add_field(
                     name=f"**{label}**",
                     value=f"`{formatted_value}`",
                     inline=True
                 )
             
-            embed.set_footer(text="Select a configuration below to edit")
+            builder.set_footer("Select a configuration below to edit")
             
             # Create view with config selection
             view = ConfigItemSelectView(
@@ -158,7 +160,7 @@ class ConfigCategorySelectView(ui.View):
                 config_keys=config_keys
             )
             
-            await interaction.response.edit_message(embed=embed, view=view)
+            await interaction.response.edit_message(embed=builder.build(), view=view)
         
         except Exception as e:
             func.log.error(f"Error in category selection: {e}\n{traceback.format_exc()}")
@@ -269,10 +271,10 @@ class ConfigItemSelectView(ui.View):
                 label = self.metadata.get_label(config_key.split('.')[-1])
                 description = self.metadata.get_description(config_key)
                 
-                embed = discord.Embed(
-                    title=f"{emoji} {self.ai_name} - {label}",
-                    description=f"**Current value:** `{current_display}`\n\n{description}\n\nSelect a new value from the options below:",
-                    color=discord.Color.blue()
+                builder = (
+                    EmbedBuilder(EmbedStyle.INFO)
+                    .set_title(f"{self.ai_name} - {label}", emoji=emoji, auto_emoji=False)
+                    .set_description(f"**Current value:** `{current_display}`\n\n{description}\n\nSelect a new value from the options below:")
                 )
                 
                 # Add available options as field
@@ -281,7 +283,7 @@ class ConfigItemSelectView(ui.View):
                 else:
                     options_text = "\n".join([f"• **{str(choice).replace('_', ' ').title()}**" for choice in choices])
                 
-                embed.add_field(
+                builder.add_field(
                     name="Available Options",
                     value=options_text,
                     inline=False
@@ -300,7 +302,7 @@ class ConfigItemSelectView(ui.View):
                     current_value=current_value
                 )
                 
-                await interaction.response.edit_message(embed=embed, view=view)
+                await interaction.response.edit_message(embed=builder.build(), view=view)
             else:
                 # Use Modal for other configs (existing behavior)
                 # Get config type from parser
@@ -376,10 +378,10 @@ class BackToCategoryButton(ui.Button):
             
             # Create embed showing all configs with values
             emoji = get_category_emoji(self.category)
-            embed = discord.Embed(
-                title=f"{emoji} {self.view.ai_name} - {self.category}",
-                description=f"Current values for {len(self.config_keys)} configuration(s):",
-                color=discord.Color.blue()
+            builder = (
+                EmbedBuilder(EmbedStyle.INFO)
+                .set_title(f"{self.view.ai_name} - {self.category}", emoji=emoji, auto_emoji=False)
+                .set_description(f"Current values for {len(self.config_keys)} configuration(s):")
             )
             
             # Add each config as a field
@@ -394,13 +396,13 @@ class BackToCategoryButton(ui.Button):
                 # Get label
                 label = metadata.get_label(config_key.split('.')[-1])
                 
-                embed.add_field(
+                builder.add_field(
                     name=f"**{label}**",
                     value=f"`{formatted_value}`",
                     inline=True
                 )
             
-            embed.set_footer(text="Select a configuration below to edit")
+            builder.set_footer("Select a configuration below to edit")
             
             # Create view with config selection
             view = ConfigItemSelectView(
@@ -412,7 +414,7 @@ class BackToCategoryButton(ui.Button):
                 config_keys=self.config_keys
             )
             
-            await interaction.response.edit_message(embed=embed, view=view)
+            await interaction.response.edit_message(embed=builder.build(), view=view)
         
         except Exception as e:
             func.log.error(f"Error going back to category: {e}\n{traceback.format_exc()}")

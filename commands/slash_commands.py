@@ -7,6 +7,8 @@ from typing import List
 import utils.func as func
 from commands.shared.autocomplete import AutocompleteHelpers
 from utils.pagination import PaginatedView
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 
 # Import AI module to trigger provider registration
 import AI
@@ -268,15 +270,15 @@ class SlashCommands(commands.Cog):
         creator_notes = card_data.get("creator_notes", "")
         
         # Build compact description with metadata
-        embed_description = f"🎭 Character Card V{spec_version}\n**By:** {creator}"
+        embed_description = f"{EmbedEmojis.CHARACTER} Character Card V{spec_version}\n**By:** {creator}"
         if character_version != "N/A":
             embed_description += f"\n**Version:** {character_version}"
         
         # Create embed with character name as title
-        embed = discord.Embed(
-            title=display_name,
-            description=embed_description,
-            color=discord.Color.purple()
+        builder = (
+            EmbedBuilder(EmbedStyle.CHARACTER)
+            .set_title(display_name, auto_emoji=False)
+            .set_description(embed_description)
         )
         
         # Add character card image
@@ -326,7 +328,7 @@ class SlashCommands(commands.Cog):
                 
                 if avatar_file.exists():
                     file = discord.File(avatar_file, filename="character_avatar.png")
-                    embed.set_image(url="attachment://character_avatar.png")
+                    builder.set_image("attachment://character_avatar.png")
                     func.log.debug(f"Loaded character image from {avatar_path}")
                 else:
                     func.log.warning(f"Avatar file does not exist at: {avatar_file}")
@@ -338,10 +340,11 @@ class SlashCommands(commands.Cog):
             desc_preview = description[:200]
             if len(description) > 200:
                 desc_preview += "..."
-            embed.add_field(
-                name="📝 About",
+            builder.add_field(
+                name="About",
                 value=desc_preview,
-                inline=False
+                inline=False,
+                emoji="📝"
             )
         
         # Personality field - short preview (150 chars)
@@ -349,10 +352,11 @@ class SlashCommands(commands.Cog):
             personality_preview = personality[:150]
             if len(personality) > 150:
                 personality_preview += "..."
-            embed.add_field(
-                name="💭 Personality",
+            builder.add_field(
+                name="Personality",
                 value=personality_preview,
-                inline=False
+                inline=False,
+                emoji="💭"
             )
         
         # Configuration field - AI, channel, greetings, lorebook
@@ -379,10 +383,11 @@ class SlashCommands(commands.Cog):
         if lorebook_entries > 0:
             config_lines.append(f"• **Lorebook:** {lorebook_entries} entries")
         
-        embed.add_field(
-            name="⚙️ Configuration",
+        builder.add_field(
+            name="Configuration",
             value="\n".join(config_lines),
-            inline=False
+            inline=False,
+            emoji=EmbedEmojis.SETTINGS
         )
         
         # Dates field (inline)
@@ -394,15 +399,16 @@ class SlashCommands(commands.Cog):
                 date_lines.append(f"**Modified:** <t:{modification_date}:D>")
             
             if date_lines:
-                embed.add_field(
-                    name="📊 Details",
+                builder.add_field(
+                    name="Details",
                     value="\n".join(date_lines),
-                    inline=True
+                    inline=True,
+                    emoji=EmbedEmojis.STATS
                 )
         
-        embed.set_footer(text="Use /select_greeting to change greeting")
+        builder.set_footer("Use /select_greeting to change greeting")
         
-        return embed, file
+        return builder.build(), file
 
     @app_commands.command(name="ping", description="Displays latency and possible connection issues.")
     async def ping(self, interaction: discord.Interaction):
@@ -746,10 +752,10 @@ class SlashCommands(commands.Cog):
             return
 
         # Create embed with simplified layout
-        embed = discord.Embed(
-            title="Muted Users",
-            description=f"AI: {ai_name} • {len(muted_users)} muted users",
-            color=discord.Color.red()
+        builder = (
+            EmbedBuilder(EmbedStyle.ERROR)
+            .set_title("Muted Users", auto_emoji=False)
+            .set_description(f"AI: {ai_name} • {len(muted_users)} muted users")
         )
         
         # Add users inline (more compact) - group in chunks of 5 per line
@@ -764,10 +770,11 @@ class SlashCommands(commands.Cog):
         
         # If text is too long, split into multiple fields
         if len(users_text) <= 1024:
-            embed.add_field(
-                name="👥 List",
+            builder.add_field(
+                name="List",
                 value=users_text,
-                inline=False
+                inline=False,
+                emoji=EmbedEmojis.USER
             )
         else:
             # Split into multiple fields if needed
@@ -775,10 +782,11 @@ class SlashCommands(commands.Cog):
             field_num = 1
             for line in user_lines:
                 if len(current_text) + len(line) + 1 > 1024:
-                    embed.add_field(
-                        name=f"👥 List (part {field_num})",
+                    builder.add_field(
+                        name=f"List (part {field_num})",
                         value=current_text,
-                        inline=False
+                        inline=False,
+                        emoji=EmbedEmojis.USER
                     )
                     current_text = line
                     field_num += 1
@@ -789,15 +797,16 @@ class SlashCommands(commands.Cog):
             
             # Add remaining text
             if current_text:
-                embed.add_field(
-                    name=f"👥 List (part {field_num})",
+                builder.add_field(
+                    name=f"List (part {field_num})",
                     value=current_text,
-                    inline=False
+                    inline=False,
+                    emoji=EmbedEmojis.USER
                 )
         
-        embed.set_footer(text="Use /unmute to unmute")
+        builder.set_footer("Use /unmute to unmute")
         
-        await interaction.followup.send(embed=embed, ephemeral=True)
+        await interaction.followup.send(embed=builder.build(), ephemeral=True)
 
 
 async def setup(bot):

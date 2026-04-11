@@ -19,6 +19,8 @@ from AI.tools.memory_tools import _count_tokens
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.avatar_utils import AvatarUtils
 from commands.shared.webhook_utils import WebhookUtils
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 
 
 # Module-level autocomplete functions (must be defined before class)
@@ -499,18 +501,12 @@ async def ai_name_with_cards_autocomplete(
         char_name = card_data.get("nickname") or card_data.get("name", "Unknown")
         creator = card_data.get("creator", "Unknown")
         
-        embed = discord.Embed(
-            title=f"🎭 Greetings - {char_name}",
-            description=f"**Creator:** {creator}\n**Total:** {greetings['total_count']} greetings",
-            color=discord.Color.purple()
-        )
-        
         greeting_list = []
         current_index = 0
         
         # Add first_mes
         if greetings["first_mes"]:
-            emoji = "🟢" if active_index == 0 else "⚪"
+            emoji = EmbedEmojis.ACTIVE if active_index == 0 else EmbedEmojis.INACTIVE
             text = greetings["first_mes"]
             preview = text[:100] + "..." if len(text) > 100 else text
             tokens = _count_tokens(text)
@@ -523,7 +519,7 @@ async def ai_name_with_cards_autocomplete(
         
         # Add alternate greetings
         for i, text in enumerate(greetings["alternate_greetings"]):
-            emoji = "🟢" if active_index == current_index else "⚪"
+            emoji = EmbedEmojis.ACTIVE if active_index == current_index else EmbedEmojis.INACTIVE
             preview = text[:100] + "..." if len(text) > 100 else text
             tokens = _count_tokens(text)
             greeting_list.append(
@@ -535,7 +531,7 @@ async def ai_name_with_cards_autocomplete(
         
         # Add group_only greetings
         for i, text in enumerate(greetings["group_only_greetings"]):
-            emoji = "⚪"  # Group greetings are never active in normal mode
+            emoji = EmbedEmojis.INACTIVE  # Group greetings are never active in normal mode
             preview = text[:100] + "..." if len(text) > 100 else text
             tokens = _count_tokens(text)
             greeting_list.append(
@@ -552,15 +548,22 @@ async def ai_name_with_cards_autocomplete(
         if len(greetings_text) > 3900:
             greetings_text = greetings_text[:3900] + "\n\n... (list truncated)"
         
-        embed.description += f"\n\n{greetings_text}"
+        full_description = f"**Creator:** {creator}\n**Total:** {greetings['total_count']} greetings\n\n{greetings_text}"
+        
+        # Build embed
+        builder = (
+            EmbedBuilder(EmbedStyle.CHARACTER)
+            .set_title(f"Greetings - {char_name}", emoji=EmbedEmojis.CHARACTER)
+            .set_description(full_description)
+        )
         
         # Add footer with helpful tip
         if source_type == "ai":
-            embed.set_footer(text="💡 Use greeting_index to see details • /select_greeting to change • /new_chat to start fresh")
+            builder.set_footer_hint("Use greeting_index to see details • /select_greeting to change • /new_chat to start fresh")
         else:
-            embed.set_footer(text="💡 Use greeting_index to see details • /set_card to apply")
+            builder.set_footer_hint("Use greeting_index to see details • /set_card to apply")
         
-        return embed
+        return builder.build()
     
     def _build_detail_embed(
         self,
@@ -574,8 +577,8 @@ async def ai_name_with_cards_autocomplete(
         """Build embed showing detailed view of a specific greeting."""
         char_name = card_data.get("nickname") or card_data.get("name", "Unknown")
         
-        # Choose color based on active status
-        color = discord.Color.green() if is_active else discord.Color.purple()
+        # Choose style based on active status
+        style = EmbedStyle.ACTIVE if is_active else EmbedStyle.CHARACTER
         
         # Prepare greeting text for description (max 16000 characters)
         max_text_length = 3900  # Leave room for code block markers and warning
@@ -587,10 +590,11 @@ async def ai_name_with_cards_autocomplete(
             truncated = greeting_text[:max_text_length]
             description = f"```{truncated}```\n⚠️ *Text truncated - showing first {max_text_length} of {len(greeting_text)} characters*"
         
-        embed = discord.Embed(
-            title=f"🎭 Greeting #{greeting_index} - {char_name}",
-            description=description,
-            color=color
+        # Build embed
+        builder = (
+            EmbedBuilder(style)
+            .set_title(f"Greeting #{greeting_index} - {char_name}", emoji=EmbedEmojis.CHARACTER)
+            .set_description(description)
         )
         
         # Add type field
@@ -607,36 +611,36 @@ async def ai_name_with_cards_autocomplete(
         else:
             type_text = type_display.get(greeting_type, greeting_type)
         
-        embed.add_field(name="📋 Type", value=type_text, inline=True)
+        builder.add_field(name="Type", value=type_text, inline=True, emoji="📋")
         
         # Add status field (only for AI source)
         if source_type == "ai":
             status_text = "✅ In use" if is_active else "⚪ Not in use"
-            embed.add_field(name="📊 Status", value=status_text, inline=True)
+            builder.add_field(name="Status", value=status_text, inline=True, emoji=EmbedEmojis.STATS)
         
         # Add statistics
         stats = self._get_greeting_stats(greeting_text)
         stats_text = f"**Tokens:** ~{stats['tokens']}\n"
         stats_text += f"**Words:** {stats['words']}\n"
         stats_text += f"**Lines:** {stats['lines']}"
-        embed.add_field(name="📈 Statistics", value=stats_text, inline=True)
+        builder.add_field(name="Statistics", value=stats_text, inline=True, emoji="📈")
         
         # Detect CBS variables
         cbs_vars = self._detect_cbs_variables(greeting_text)
         if cbs_vars:
             vars_text = ", ".join([f"`{var}`" for var in cbs_vars])
-            embed.add_field(name="🔧 CBS Variables Detected", value=vars_text, inline=False)
+            builder.add_field(name="CBS Variables Detected", value=vars_text, inline=False, emoji="🔧")
         
         # Add footer with helpful tip
         if source_type == "ai":
             if not is_active:
-                embed.set_footer(text="💡 /select_greeting to activate • /new_chat to start fresh")
+                builder.set_footer_hint("/select_greeting to activate • /new_chat to start fresh")
             else:
-                embed.set_footer(text="✅ Currently active • /new_chat to start fresh")
+                builder.set_footer("✅ Currently active • /new_chat to start fresh")
         else:
-            embed.set_footer(text="💡 Use /set_card to apply this card to an AI")
+            builder.set_footer_hint("Use /set_card to apply this card to an AI")
         
-        return embed
+        return builder.build()
     
     def _detect_cbs_variables(self, text: str) -> List[str]:
         """

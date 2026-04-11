@@ -14,10 +14,9 @@ from AI.services.chat_service import get_service
 from commands.shared.autocomplete import AutocompleteHelpers
 from commands.shared.avatar_utils import AvatarUtils
 from commands.shared.webhook_utils import WebhookUtils
-from utils.discord.confirmation_ui import (
-    confirm_dangerous_action,
-    create_success_embed
-)
+from utils.discord.confirmation_ui import confirm_dangerous_action
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle
 from utils.discord.guild_profile import set_guild_profile
 from utils.media.thumbnails import get_thumbnail_url
 
@@ -155,16 +154,17 @@ class CardApplication(commands.Cog):
             # Update config
             channel_data = func.get_session_data(server_id, found_channel_id)
             if not channel_data or actual_ai_name not in channel_data:
-                error_msg = f"❌ Failed to update configuration."
+                error_msg = "Failed to update configuration."
                 if confirm_interaction:
-                    error_embed = discord.Embed(
-                        title="❌ Error",
-                        description=error_msg,
-                        color=discord.Color.red()
+                    error_embed = (
+                        EmbedBuilder(EmbedStyle.ERROR)
+                        .set_title("Error")
+                        .set_description(error_msg)
+                        .build()
                     )
                     await confirm_interaction.response.edit_message(embed=error_embed, view=None)
                 else:
-                    await interaction.followup.send(error_msg, ephemeral=True)
+                    await interaction.followup.send(f"❌ {error_msg}", ephemeral=True)
                 return
             
             channel_data[actual_ai_name]["config"]["greeting_index"] = greeting_index
@@ -191,18 +191,19 @@ class CardApplication(commands.Cog):
             success_msg = f"✅ Greeting #{greeting_index} selected for '{actual_ai_name}'.\nHistory has been cleared and the new greeting has been set."
             
             if confirm_interaction:
-                success_embed = create_success_embed(
-                    title="✅ Greeting Changed Successfully",
-                    description=f"The greeting for **{actual_ai_name}** has been updated.",
-                    fields=[
-                        {
-                            "name": "📊 Summary",
-                            "value": f"• **AI:** {actual_ai_name}\n"
-                                    f"• **New Greeting:** #{greeting_index}\n"
-                                    f"• **Messages Cleared:** {len(existing_history)}\n"
-                                    f"• **Changed by:** {interaction.user.mention}"
-                        }
-                    ]
+                success_embed = (
+                    EmbedBuilder(EmbedStyle.SUCCESS)
+                    .set_title("Greeting Changed Successfully")
+                    .set_description(f"The greeting for **{actual_ai_name}** has been updated.")
+                    .add_field(
+                        name="Summary",
+                        value=f"• **AI:** {actual_ai_name}\n"
+                              f"• **New Greeting:** #{greeting_index}\n"
+                              f"• **Messages Cleared:** {len(existing_history)}\n"
+                              f"• **Changed by:** {interaction.user.mention}",
+                        emoji="📊"
+                    )
+                    .build()
                 )
                 await confirm_interaction.response.edit_message(embed=success_embed, view=None)
             else:
@@ -480,16 +481,17 @@ class CardApplication(commands.Cog):
             # Update session data with new card
             channel_data = func.get_session_data(server_id, found_channel_id)
             if not channel_data or actual_ai_name not in channel_data:
-                error_msg = f"❌ Failed to update configuration."
+                error_msg = "Failed to update configuration."
                 if confirm_interaction:
-                    error_embed = discord.Embed(
-                        title="❌ Error",
-                        description=error_msg,
-                        color=discord.Color.red()
+                    error_embed = (
+                        EmbedBuilder(EmbedStyle.ERROR)
+                        .set_title("Error")
+                        .set_description(error_msg)
+                        .build()
                     )
                     await confirm_interaction.response.edit_message(embed=error_embed, view=None)
                 else:
-                    await interaction.followup.send(error_msg, ephemeral=True)
+                    await interaction.followup.send(f"❌ {error_msg}", ephemeral=True)
                 return
             
             # Update character card data
@@ -579,37 +581,41 @@ class CardApplication(commands.Cog):
             
             if confirm_interaction:
                 # Create success embed for confirmation flow
-                success_embed = create_success_embed(
-                    title="✅ Character Card Applied Successfully",
-                    description=f"The character card has been applied to **{actual_ai_name}**.",
-                    fields=[
-                        {
-                            "name": "📊 Card Details",
-                            "value": f"• **Card:** {card_name}\n"
-                                    f"• **Character:** {char_name}\n"
-                                    f"• **Creator:** {creator}\n"
-                                    f"• **Greeting:** #{greeting_index}"
-                        },
-                        {
-                            "name": "🔄 Updates Applied",
-                            "value": f"• **Avatar:** {'✅ Updated' if avatar_updated else '⏭️ Skipped'}\n"
-                                    f"• **Display Name:** {'✅ Updated' if name_updated else '⏭️ Skipped'}\n"
-                                    f"• **History:** {'🗑️ Cleared' if clear_history else '💾 Preserved'}"
-                        },
-                        {
-                            "name": "👤 Applied By",
-                            "value": interaction.user.mention
-                        }
-                    ]
+                builder = (
+                    EmbedBuilder(EmbedStyle.SUCCESS)
+                    .set_title("Character Card Applied Successfully")
+                    .set_description(f"The character card has been applied to **{actual_ai_name}**.")
+                    .add_field(
+                        name="Card Details",
+                        value=f"• **Card:** {card_name}\n"
+                              f"• **Character:** {char_name}\n"
+                              f"• **Creator:** {creator}\n"
+                              f"• **Greeting:** #{greeting_index}",
+                        emoji="📊"
+                    )
+                    .add_field(
+                        name="Updates Applied",
+                        value=f"• **Avatar:** {'✅ Updated' if avatar_updated else '⏭️ Skipped'}\n"
+                              f"• **Display Name:** {'✅ Updated' if name_updated else '⏭️ Skipped'}\n"
+                              f"• **History:** {'🗑️ Cleared' if clear_history else '💾 Preserved'}",
+                        emoji="🔄"
+                    )
+                    .add_field(
+                        name="Applied By",
+                        value=interaction.user.mention,
+                        emoji="👤"
+                    )
                 )
                 
                 if clear_history:
-                    success_embed.add_field(
-                        name="💡 Note",
+                    builder.add_field(
+                        name="Note",
                         value=f"Conversation history cleared. Messages deleted: {len(existing_history)}",
-                        inline=False
+                        inline=False,
+                        emoji="💡"
                     )
                 
+                success_embed = builder.build()
                 await confirm_interaction.response.edit_message(embed=success_embed, view=None)
             else:
                 # Simple text message for non-confirmation flow

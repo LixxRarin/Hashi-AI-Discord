@@ -11,6 +11,8 @@ from discord.ext import commands
 import utils.func as func
 from utils.config.ai_manager import get_ai_config_manager
 from commands.shared.autocomplete import AutocompleteHelpers
+from utils.discord.embed_builder import EmbedBuilder
+from utils.discord.embed_constants import EmbedStyle, EmbedEmojis
 
 
 # Module-level autocomplete functions (must be defined before class)
@@ -230,17 +232,18 @@ class PresetCommands(commands.Cog):
             preset_config = self.config_manager.load_preset(name)
             
             # Create embed with preset name as title
-            embed = discord.Embed(
-                title=name,
-                description=f"📦 Configuration Preset • By: {author}",
-                color=discord.Color.blue()
+            builder = (
+                EmbedBuilder(EmbedStyle.INFO)
+                .set_title(name, auto_emoji=False)
+                .set_description(f"📦 Configuration Preset • By: {author}")
             )
             
             # Description field
-            embed.add_field(
-                name="📝 Description",
+            builder.add_field(
+                name="Description",
                 value=description if description else "No description provided",
-                inline=False
+                inline=False,
+                emoji="📝"
             )
             
             # Main configurations preview
@@ -266,16 +269,17 @@ class PresetCommands(commands.Cog):
                     config_lines.append(f"• Sleep Mode: {'✅' if preset_config['sleep_mode_enabled'] else '❌'}")
                 
                 if config_lines:
-                    embed.add_field(
-                        name="⚙️ Main Settings",
+                    builder.add_field(
+                        name="Main Settings",
                         value="\n".join(config_lines[:10]),  # Limit to 10 lines
-                        inline=False
+                        inline=False,
+                        emoji=EmbedEmojis.SETTINGS
                     )
             
             # Footer with position and helpful tip
-            embed.set_footer(text=f"Preset {idx + 1}/{len(presets)} • Use /preset_info for full details")
+            builder.set_footer(f"Preset {idx + 1}/{len(presets)} • Use /preset_info for full details")
             
-            embeds.append(embed)
+            embeds.append(builder.build())
         
         # Send with pagination if multiple presets
         if len(embeds) == 1:
@@ -357,18 +361,19 @@ class PresetCommands(commands.Cog):
         description += f" • {modified_count} modified settings"
         
         # Build comprehensive embed
-        embed = discord.Embed(
-            title=preset_data.get('name', preset_name),
-            description=description,
-            color=discord.Color.blue()
+        builder = (
+            EmbedBuilder(EmbedStyle.INFO)
+            .set_title(preset_data.get('name', preset_name), auto_emoji=False)
+            .set_description(description)
         )
         
         # Description field
         preset_description = preset_data.get("description", "No description available")
-        embed.add_field(
-            name="📝 Description",
+        builder.add_field(
+            name="Description",
             value=preset_description,
-            inline=False
+            inline=False,
+            emoji="📝"
         )
         
         # Main Settings - compact inline format
@@ -411,10 +416,11 @@ class PresetCommands(commands.Cog):
             main_settings.append(f"• **Systems:** {' • '.join(systems_parts)}")
         
         if main_settings:
-            embed.add_field(
-                name="⭐ Main Settings",
+            builder.add_field(
+                name="Main Settings",
                 value="\n".join(main_settings),
-                inline=False
+                inline=False,
+                emoji="⭐"
             )
         
         # AI & Tools field
@@ -449,10 +455,11 @@ class PresetCommands(commands.Cog):
             ai_tools.append(f"• **Moderation:** {'⚠️ Enabled' if moderation_enabled else 'Disabled'}")
         
         if ai_tools:
-            embed.add_field(
-                name="🧠 AI & Tools",
+            builder.add_field(
+                name="AI & Tools",
                 value="\n".join(ai_tools),
-                inline=False
+                inline=False,
+                emoji=EmbedEmojis.LLM
             )
         
         # Processing field
@@ -473,15 +480,16 @@ class PresetCommands(commands.Cog):
             processing.append(f"• **Error Mode:** {error_mode_display}")
         
         if processing:
-            embed.add_field(
-                name="✂️ Processing",
+            builder.add_field(
+                name="Processing",
                 value="\n".join(processing),
-                inline=False
+                inline=False,
+                emoji="✂️"
             )
         
-        embed.set_footer(text=f"Use /preset_apply to apply • /preset_export to share")
+        builder.set_footer("Use /preset_apply to apply • /preset_export to share")
         
-        await interaction.response.send_message(embed=embed, ephemeral=False)
+        await interaction.response.send_message(embed=builder.build(), ephemeral=False)
     
     @app_commands.command(name="preset_export", description="Export a preset to a shareable file")
     @app_commands.default_permissions(administrator=True)
