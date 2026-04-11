@@ -113,6 +113,14 @@ async def _process_direct_url(
         from utils.media.attachments import get_attachment_processor
         from urllib.parse import urlparse
         import os
+        import html
+
+        # Decode HTML entities in URL (LLM may encode & as &amp;, etc.)
+        # This fixes issues where the AI generates tool calls with HTML-encoded URLs
+        original_url = url
+        url = html.unescape(url)
+        if url != original_url:
+            log.info(f"Decoded HTML entities in URL: ...{original_url[-50:]} -> ...{url[-50:]}")
 
         # Extract filename from URL path (not from query params)
         parsed_url = urlparse(url)
@@ -308,11 +316,17 @@ async def get_attachment_content(
             }
         
         # Convert Discord attachments to dict format
+        import html
+        
         attachments_data = []
         for att in message.attachments:
+            # Decode HTML entities in URL (defensive programming)
+            # Discord API URLs should be correct, but this ensures consistency
+            decoded_url = html.unescape(att.url)
+            
             attachments_data.append({
                 "filename": att.filename,
-                "url": att.url,
+                "url": decoded_url,
                 "content_type": att.content_type or "unknown",
                 "size": att.size,
                 "message_id": str(message.id)

@@ -139,6 +139,15 @@ class AttachmentProcessor:
         Returns:
             File data as bytes, or None if download failed
         """
+        import html
+        
+        # Decode HTML entities in URL (safety net for HTML-encoded URLs)
+        # This handles cases where URLs have &amp; instead of &, etc.
+        original_url = url
+        url = html.unescape(url)
+        if url != original_url:
+            logger.debug(f"Decoded HTML entities in download URL for {filename or 'file'}")
+        
         try:
             async with create_http_session(timeout_total=self.download_timeout) as session:
                 async with session.get(url) as response:
