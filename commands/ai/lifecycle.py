@@ -397,7 +397,7 @@ async def execute_setup_from_wizard(
     """
     try:
         from pathlib import Path
-        from utils.ccv3.parser import parse_character_card
+        from utils.cc_format.parser import parse_character_card
         from utils.discord.guild_profile import set_guild_profile
         from commands.shared.avatar_utils import AvatarUtils
         from commands.shared.webhook_utils import WebhookUtils
@@ -479,7 +479,7 @@ async def execute_setup_from_wizard(
         session["character_card"] = {
             "spec": character_card.spec,
             "spec_version": character_card.spec_version,
-            "data": character_card.to_dict()["data"],
+            "data": character_card.raw_data,
             "cache_path": card_cache_path,
             "card_url": wizard_data.card_url if wizard_data.card_url else "local://default"
         }

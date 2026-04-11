@@ -352,7 +352,7 @@ async def ai_name_with_cards_autocomplete(
                 return
             
             # Parse character card
-            from utils.ccv3.parser import parse_character_card
+            from utils.cc_format.parser import parse_character_card
             try:
                 with open(card_file_path, 'rb') as f:
                     raw_data = f.read()
@@ -366,7 +366,7 @@ async def ai_name_with_cards_autocomplete(
                     )
                     return
                 
-                card_data = character_card.to_dict()["data"]
+                card_data = character_card.raw_data
                 source_type = "card"
                 
             except Exception as e:

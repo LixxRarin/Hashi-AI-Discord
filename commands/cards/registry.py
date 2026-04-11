@@ -75,8 +75,8 @@ class CardRegistry(commands.Cog):
             return
         
         try:
-            from utils.ccv3 import download_card
-            from utils.ccv3.parser import parse_character_card
+            from utils.cc_format import download_card
+            from utils.cc_format.parser import parse_character_card
             
             character_card = None
             cache_path = None
@@ -207,7 +207,7 @@ class CardRegistry(commands.Cog):
             registered_name = await func.register_character_card(
                 server_id=server_id,
                 card_name=card_name,
-                card_data=character_card.to_dict()["data"],
+                card_data=character_card.raw_data,
                 card_url=card_url if card_url else f"attachment://{card_attachment.filename if card_attachment else 'unknown'}",
                 cache_path=cache_path,
                 registered_by=str(interaction.user.id)
@@ -222,7 +222,7 @@ class CardRegistry(commands.Cog):
                     from utils.media.thumbnails import upload_to_cdn_cache, update_thumbnail_cache, get_avatar_url_from_card, validate_cdn_url
 
                     # Check if card has avatar URL - if yes, skip CDN upload
-                    card_data_wrapped = {"data": character_card.to_dict()["data"]}
+                    card_data_wrapped = {"data": character_card.raw_data}
                     avatar_url = get_avatar_url_from_card(card_data_wrapped)
 
                     should_upload = True
@@ -256,7 +256,7 @@ class CardRegistry(commands.Cog):
                     # Don't fail the import if thumbnail caching fails
             
             # Build success message
-            card_data = character_card.to_dict()["data"]
+            card_data = character_card.raw_data
             char_name = card_data.get("name", registered_name)
             creator = card_data.get("creator", "Unknown")
             alt_greetings = card_data.get("alternate_greetings") or []

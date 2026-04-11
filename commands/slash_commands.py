@@ -180,7 +180,7 @@ class SlashCommands(commands.Cog):
                 return
             
             # Parse card file
-            from utils.ccv3.parser import parse_character_card
+            from utils.cc_format.parser import parse_character_card
             with open(card_file, 'rb') as f:
                 raw_data = f.read()
             
@@ -192,7 +192,7 @@ class SlashCommands(commands.Cog):
                 )
                 return
             
-            card_data = character_card.to_dict()["data"]
+            card_data = character_card.raw_data
             
             # Create a minimal session-like dict for the embed builder
             session = {

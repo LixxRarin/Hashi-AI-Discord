@@ -18,7 +18,7 @@ import AI
 from AI.core.registry import get_registry
 
 # Import character cards support
-from utils.ccv3 import process_cbs, process_lorebook
+from utils.cc_format import process_cbs, process_lorebook
 
 # Import expressions system
 from expressions import get_expression_registry

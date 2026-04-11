@@ -147,7 +147,7 @@ class CardApplication(commands.Cog):
         async def apply_greeting_change(confirm_interaction: discord.Interaction = None):
             """Apply the greeting change and update history."""
             # Process CBS in greeting
-            from utils.ccv3 import process_cbs
+            from utils.cc_format import process_cbs
             char_name = card_data.get("nickname") or card_data.get("name", actual_ai_name)
             user_name = "{{user}}"
             processed_greeting = process_cbs(greeting_text, char_name, user_name, session)
@@ -324,7 +324,7 @@ class CardApplication(commands.Cog):
             func.log.info("User selected __default__ card, loading hashi.png")
             
             from pathlib import Path
-            from utils.ccv3 import load_local_card
+            from utils.cc_format import load_local_card
             
             default_card_path = "character_cards/hashi.png"
             
@@ -370,7 +370,7 @@ class CardApplication(commands.Cog):
                         card_name = await func.register_character_card(
                             server_id=server_id,
                             card_name=character_card.name,
-                            card_data=character_card.to_dict()["data"],
+                            card_data=character_card.raw_data,
                             card_url="local://hashi.png",
                             cache_path=cache_path,
                             registered_by=str(interaction.user.id)
@@ -422,7 +422,7 @@ class CardApplication(commands.Cog):
             return
         
         # Parse character card
-        from utils.ccv3.parser import parse_character_card
+        from utils.cc_format.parser import parse_character_card
         try:
             with open(card_file_path, 'rb') as f:
                 raw_data = f.read()
@@ -444,7 +444,7 @@ class CardApplication(commands.Cog):
             return
         
         # Validate greeting index
-        card_data = character_card.to_dict()["data"]
+        card_data = character_card.raw_data
         alt_greetings = card_data.get("alternate_greetings") or []
         total_greetings = 1 + len(alt_greetings)
         
@@ -504,7 +504,7 @@ class CardApplication(commands.Cog):
             # Clear conversation history and add new greeting (only if clear_history=True)
             if clear_history:
                 # Process CBS in greeting
-                from utils.ccv3 import process_cbs
+                from utils.cc_format import process_cbs
                 char_name = card_data.get("nickname") or card_data.get("name", actual_ai_name)
                 user_name = "{{user}}"
                 processed_greeting = process_cbs(greeting_text, char_name, user_name, session)

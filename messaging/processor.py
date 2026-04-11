@@ -387,7 +387,7 @@ class MessageProcessor:
             Processed text with CBS replaced
         """
         try:
-            from utils.ccv3 import process_cbs
+            from utils.cc_format import process_cbs
             
             # Get character card data
             card_data = (session.get("character_card") or {}).get("data", {})

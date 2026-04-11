@@ -6,12 +6,11 @@ including parsing PNG/JSON/CHARX formats, CBS processing, and lorebook support.
 """
 
 from .parser import (
-    CharacterCardV3,
+    CharacterCard,
     parse_character_card,
     parse_png_card,
     parse_json_card,
-    parse_charx_card,
-    validate_card_v3
+    parse_charx_card
 )
 
 from .loader import (
@@ -35,12 +34,11 @@ from .lorebook import (
 
 __all__ = [
     # Parser
-    'CharacterCardV3',
+    'CharacterCard',
     'parse_character_card',
     'parse_png_card',
     'parse_json_card',
     'parse_charx_card',
-    'validate_card_v3',
     
     # Loader
     'CharacterCardLoader',

@@ -301,12 +301,12 @@ async def get_thumbnail_for_card_registry(
             cache_path = card_info.get("cache_path")
             if cache_path and Path(cache_path).exists():
                 try:
-                    from utils.ccv3.loader import load_local_card
+                    from utils.cc_format.loader import load_local_card
                     log.debug("Loading card from PNG to extract avatar URL...")
                     result = await load_local_card(cache_path)
                     if result:
                         character_card, _ = result
-                        card_data = {"data": character_card.to_dict()["data"]}
+                        card_data = {"data": character_card.raw_data}
                         avatar_url = get_avatar_url_from_card(card_data)
 
                         if avatar_url and isinstance(avatar_url, str) and avatar_url.startswith("http"):
@@ -410,12 +410,12 @@ async def get_thumbnail_url(
         # Step 1.5: If no avatar in session, try loading from PNG file
         if not avatar_url and cache_path and Path(cache_path).exists():
             try:
-                from utils.ccv3.loader import load_local_card
+                from utils.cc_format.loader import load_local_card
                 log.debug("Loading card from PNG to extract avatar URL...")
                 result = await load_local_card(cache_path)
                 if result:
                     character_card_obj, _ = result
-                    card_data = {"data": character_card_obj.to_dict()["data"]}
+                    card_data = {"data": character_card_obj.raw_data}
                     avatar_url = get_avatar_url_from_card(card_data)
 
                     if avatar_url and isinstance(avatar_url, str) and avatar_url.startswith("http"):

@@ -17,7 +17,7 @@ from urllib.parse import urlparse, unquote
 
 import aiohttp
 
-from .parser import CharacterCardV3, parse_character_card
+from .parser import CharacterCard, parse_character_card
 
 log = logging.getLogger(__name__)
 
@@ -67,7 +67,7 @@ class CharacterCardLoader:
         self,
         url: str,
         force_reload: bool = False
-    ) -> Optional[Tuple[CharacterCardV3, str]]:
+    ) -> Optional[Tuple[CharacterCard, str]]:
         """
         Load a character card from URL or cache.
         Downloads and saves file with original filename.
@@ -77,7 +77,7 @@ class CharacterCardLoader:
             force_reload: Force re-download even if cached
             
         Returns:
-            Tuple of (CharacterCardV3, file_path) or None
+            Tuple of (CharacterCard, file_path) or None
         """
         try:
             # Extract filename from URL
@@ -286,7 +286,7 @@ class CharacterCardLoader:
 _loader = CharacterCardLoader()
 
 
-async def load_local_card(file_path: str) -> Optional[Tuple[CharacterCardV3, str]]:
+async def load_local_card(file_path: str) -> Optional[Tuple[CharacterCard, str]]:
     """
     Load a character card from a local file.
     
@@ -294,7 +294,7 @@ async def load_local_card(file_path: str) -> Optional[Tuple[CharacterCardV3, str
         file_path: Path to the local character card file
         
     Returns:
-        Tuple of (CharacterCardV3, file_path) or None if failed
+        Tuple of (CharacterCard, file_path) or None if failed
     """
     try:
         path = Path(file_path)
@@ -323,7 +323,7 @@ async def load_local_card(file_path: str) -> Optional[Tuple[CharacterCardV3, str
         return None
 
 
-async def download_card(url: str, force_reload: bool = False) -> Optional[Tuple[CharacterCardV3, str]]:
+async def download_card(url: str, force_reload: bool = False) -> Optional[Tuple[CharacterCard, str]]:
     """
     Download and cache a character card.
     
@@ -332,7 +332,7 @@ async def download_card(url: str, force_reload: bool = False) -> Optional[Tuple[
         force_reload: Force re-download
         
     Returns:
-        Tuple of (CharacterCardV3, file_path) or None
+        Tuple of (CharacterCard, file_path) or None
     """
     return await _loader.load_card(url, force_reload)
 

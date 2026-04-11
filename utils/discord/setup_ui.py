@@ -563,7 +563,7 @@ class Step4_CharacterCardView(ui.View):
             
             # Load card to get greeting count
             from pathlib import Path
-            from utils.ccv3.parser import parse_character_card
+            from utils.cc_format.parser import parse_character_card
             
             card_file = Path(card_info.get("cache_path"))
             if card_file.exists():
@@ -691,7 +691,7 @@ class UseDefaultButton(ui.Button):
     async def callback(self, interaction: discord.Interaction):
         """Use default card."""
         try:
-            from utils.ccv3 import load_local_card
+            from utils.cc_format import load_local_card
             
             default_card_path = "character_cards/hashi.png"
             result = await load_local_card(default_card_path)
@@ -758,7 +758,7 @@ class ImportCardURLModal(ui.Modal):
             card_url = self.url_input.value.strip()
             
             # Download and parse card
-            from utils.ccv3 import download_card
+            from utils.cc_format import download_card
             
             result = await download_card(card_url)
             
