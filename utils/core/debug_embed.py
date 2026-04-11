@@ -46,6 +46,41 @@ def truncate(text: str, limit: int = 1000) -> str:
     return text[:limit] + "..." if len(text) > limit else text
 
 
+def _escape_code_blocks(text: str) -> str:
+    """
+    Escape triple backticks in text to prevent markdown conflicts.
+    Uses zero-width spaces to preserve visual appearance.
+    
+    When LLM responses contain code blocks (```), they break the outer
+    code block formatting in embeds. This function inserts zero-width
+    spaces between backticks to prevent the conflict.
+    """
+    # Replace ``` with `​`​` (backtick + zero-width space + backtick + zero-width space + backtick)
+    return text.replace("```", "`\u200b`\u200b`")
+
+
+def _format_duration(seconds: float) -> str:
+    """
+    Format duration in human-readable form.
+    
+    Examples:
+        0.0005 -> "500µs"
+        0.123 -> "123ms"
+        1.234 -> "1.23s"
+        65.5 -> "1m 5.5s"
+    """
+    if seconds < 0.001:
+        return f"{seconds * 1000000:.0f}µs"
+    elif seconds < 1:
+        return f"{seconds * 1000:.0f}ms"
+    elif seconds < 60:
+        return f"{seconds:.2f}s"
+    else:
+        minutes = int(seconds // 60)
+        secs = seconds % 60
+        return f"{minutes}m {secs:.1f}s"
+
+
 def _get_version() -> str:
     """Read bot version from version.txt."""
     try:
@@ -159,10 +194,12 @@ def _fields_llm_response(data: Dict[str, Any]) -> List[tuple]:
             parts.append(f"**Speed:** {tps:.1f} tok/s")
         fields.append(("Performance", " · ".join(parts), True))
     
-    # Raw response
+    # Raw response (with markdown escape fix)
     raw = data.get("raw_response", "")
     if raw:
-        fields.append(("Raw Response", f"```\n{truncate(raw, 900)}\n```", False))
+        # Escape triple backticks to prevent markdown conflicts
+        raw_escaped = _escape_code_blocks(raw)
+        fields.append(("Raw Response", f"```\n{truncate(raw_escaped, 900)}\n```", False))
     
     return fields
 
@@ -204,43 +241,81 @@ def _fields_ignore(data: Dict[str, Any]) -> List[tuple]:
 
 
 def _fields_system(data: Dict[str, Any]) -> List[tuple]:
-    """Extract fields for system lifecycle events (startup, shutdown, sleep, status)."""
+    """Extract fields for system lifecycle events (startup, shutdown, sleep, status) - Enhanced."""
     fields = []
     
-    # Generic fields
-    for key in ("version", "reason"):
-        if key in data:
-            fields.append((key.title(), str(data[key]), True))
+    # Version with emoji
+    version = data.get("version")
+    if version:
+        fields.append(("Version", f"🏷️ `{version}`", True))
     
-    for key in ("servers", "total_ais"):
-        if key in data:
-            fields.append((key.replace("_", " ").title(), str(data[key]), True))
+    # Servers count
+    servers = data.get("servers")
+    if servers is not None:
+        fields.append(("Servers", f"🌐 {servers}", True))
     
-    # Status change
-    if "old_status" in data and "new_status" in data:
-        fields.append(("Status", f"{data['old_status']} → {data['new_status']}", False))
+    # Total AIs
+    total_ais = data.get("total_ais")
+    if total_ais is not None:
+        fields.append(("Total AIs", f"🤖 {total_ais}", True))
     
-    # Sleep mode specifics
-    if "status" in data:
-        fields.append(("Status", data["status"].title(), True))
+    # Features (for startup)
+    features = data.get("features", [])
+    if features:
+        feature_text = "\n".join(f"✅ {f}" for f in features)
+        fields.append(("Features", feature_text, False))
     
-    channel = data.get("channel")
-    if channel:
-        fields.append(("Channel", str(channel), True))
-    
-    # Uptime
+    # Uptime (for shutdown)
     uptime = data.get("uptime")
     if uptime is not None:
         h, m = int(uptime // 3600), int((uptime % 3600) // 60)
-        fields.append(("Uptime", f"{h}h {m}m", True))
+        s = int(uptime % 60)
+        uptime_str = f"⏱️ {h}h {m}m {s}s"
+        fields.append(("Uptime", uptime_str, True))
+    
+    # Reason
+    reason = data.get("reason")
+    if reason:
+        fields.append(("Reason", reason, False))
+    
+    # Status change with emoji indicators
+    if "old_status" in data and "new_status" in data:
+        old = data["old_status"].title()
+        new = data["new_status"].title()
+        
+        # Add emoji indicators
+        status_emoji = {
+            "online": "🟢",
+            "idle": "🌙",
+            "dnd": "🔴",
+            "offline": "⚫"
+        }
+        old_emoji = status_emoji.get(data["old_status"], "")
+        new_emoji = status_emoji.get(data["new_status"], "")
+        
+        fields.append(("Status Change", f"{old_emoji} {old} → {new_emoji} {new}", False))
+    
+    # Sleep mode specifics
+    if "status" in data and "old_status" not in data:
+        fields.append(("Status", data["status"].title(), True))
     
     # AIs in sleep
     ais = data.get("ais_in_sleep", [])
     if ais:
-        text = "\n".join(f"• {a}" for a in ais[:10])
+        text = "\n".join(f"😴 {a}" for a in ais[:10])
         if len(ais) > 10:
             text += f"\n… and {len(ais) - 10} more"
-        fields.append(("AIs in Sleep", text, False))
+        fields.append(("Sleeping AIs", text, False))
+    
+    # Channel
+    channel = data.get("channel")
+    if channel:
+        fields.append(("Channel", str(channel), True))
+    
+    # Messages processed (for shutdown)
+    messages = data.get("messages_processed")
+    if messages is not None:
+        fields.append(("Messages Processed", f"💬 {messages:,}", True))
     
     return fields
 
@@ -301,6 +376,216 @@ def _fields_card_parsed(data: Dict[str, Any]) -> List[tuple]:
     return fields
 
 
+def _fields_tool_call_bash(data: Dict[str, Any]) -> List[tuple]:
+    """Extract fields for bash tool execution debug."""
+    fields = []
+    
+    # Command (with syntax highlighting)
+    command = data.get("command", "")
+    if command:
+        # Truncate very long commands
+        display_cmd = command if len(command) <= 500 else command[:497] + "..."
+        # Escape code blocks in command
+        display_cmd = _escape_code_blocks(display_cmd)
+        fields.append(("Command", f"```bash\n{display_cmd}\n```", False))
+    
+    # Mode and Container Info
+    mode = data.get("mode", "unknown")
+    container_id = data.get("container_id", "N/A")
+    container_info = f"**Mode:** {mode.title()}\n**Container:** `{container_id}`"
+    fields.append(("Execution Mode", container_info, True))
+    
+    # Working Directory
+    working_dir = data.get("working_dir", "/workspace")
+    fields.append(("Working Dir", f"`{working_dir}`", True))
+    
+    # Exit Code with visual indicator
+    exit_code = data.get("exit_code", -1)
+    success = data.get("success", False)
+    if success:
+        exit_status = f"✅ **Success** (exit code: {exit_code})"
+    else:
+        exit_status = f"❌ **Failed** (exit code: {exit_code})"
+    fields.append(("Status", exit_status, True))
+    
+    # Execution Time
+    exec_time = data.get("execution_time", 0)
+    time_str = _format_duration(exec_time)
+    fields.append(("Execution Time", f"⏱️ {time_str}", True))
+    
+    # Output (stdout)
+    stdout = data.get("stdout", "")
+    if stdout:
+        # Truncate long output
+        max_len = data.get("max_output_length", 1000)
+        if len(stdout) > max_len:
+            display_out = stdout[:max_len] + f"\n... (truncated {len(stdout) - max_len} chars)"
+        else:
+            display_out = stdout
+        # Escape code blocks in output
+        display_out = _escape_code_blocks(display_out)
+        fields.append(("Output", f"```\n{display_out}\n```", False))
+    else:
+        fields.append(("Output", "*No output*", False))
+    
+    # Errors (stderr) - only if present
+    stderr = data.get("stderr", "")
+    if stderr:
+        max_len = data.get("max_output_length", 1000)
+        if len(stderr) > max_len:
+            display_err = stderr[:max_len] + f"\n... (truncated {len(stderr) - max_len} chars)"
+        else:
+            display_err = stderr
+        # Escape code blocks in errors
+        display_err = _escape_code_blocks(display_err)
+        fields.append(("Errors", f"```\n{display_err}\n```", False))
+    
+    # Container Statistics (if available)
+    command_count = data.get("command_count")
+    container_uptime = data.get("container_uptime")
+    if command_count is not None or container_uptime is not None:
+        stats = []
+        if command_count is not None:
+            stats.append(f"**Commands:** {command_count}")
+        if container_uptime is not None:
+            uptime_str = _format_duration(container_uptime)
+            stats.append(f"**Uptime:** {uptime_str}")
+        if stats:
+            fields.append(("Container Stats", " · ".join(stats), False))
+    
+    return fields
+
+
+def _fields_tool_call_memory(data: Dict[str, Any]) -> List[tuple]:
+    """Extract fields for memory tool execution debug."""
+    fields = []
+    
+    # Operation Type
+    tool_name = data.get("tool_name", "unknown")
+    operation = tool_name.replace("_memory", "").title()  # read/edit/write
+    fields.append(("Operation", f"`{operation}`", True))
+    
+    # File Path
+    file_path = data.get("file_path", "N/A")
+    if file_path and file_path != "N/A":
+        # Show only filename for brevity
+        from pathlib import Path
+        filename = Path(file_path).name
+        fields.append(("File", f"`{filename}`", True))
+    
+    # Status with visual indicator
+    success = data.get("success", False)
+    error = data.get("error")
+    if error:
+        fields.append(("Status", f"❌ **Failed**", True))
+        fields.append(("Error", str(error)[:500], False))
+    else:
+        fields.append(("Status", f"✅ **Success**", True))
+    
+    # Execution Time
+    exec_time = data.get("execution_time", 0)
+    time_str = _format_duration(exec_time)
+    fields.append(("Duration", f"⏱️ {time_str}", True))
+    
+    # Token Usage (for edit/write operations)
+    tokens_used = data.get("tokens_used")
+    max_tokens = data.get("max_tokens")
+    if tokens_used is not None and max_tokens is not None:
+        percentage = (tokens_used / max_tokens * 100) if max_tokens > 0 else 0
+        bar = progress_bar(tokens_used, max_tokens)
+        token_info = f"{bar} {tokens_used}/{max_tokens} tokens ({percentage:.1f}%)"
+        fields.append(("Memory Usage", token_info, False))
+    
+    # Content Preview (for read operations)
+    if operation == "Read":
+        content = data.get("content", "")
+        if content:
+            preview = content[:300] + "..." if len(content) > 300 else content
+            preview = _escape_code_blocks(preview)
+            fields.append(("Content Preview", f"```\n{preview}\n```", False))
+        
+        metadata = data.get("metadata", {})
+        if metadata:
+            last_updated = metadata.get("last_updated", "Unknown")
+            fields.append(("Last Updated", last_updated, True))
+    
+    # Edit Details (for edit operations)
+    if operation == "Edit":
+        old_string = data.get("old_string", "")
+        new_string = data.get("new_string", "")
+        if old_string or new_string:
+            old_preview = (old_string[:100] + "...") if len(old_string) > 100 else old_string
+            new_preview = (new_string[:100] + "...") if len(new_string) > 100 else new_string
+            old_preview = _escape_code_blocks(old_preview)
+            new_preview = _escape_code_blocks(new_preview)
+            fields.append(("Change", f"**Old:**\n```\n{old_preview}\n```\n**New:**\n```\n{new_preview}\n```", False))
+    
+    return fields
+
+
+def _fields_tool_call_generic(data: Dict[str, Any]) -> List[tuple]:
+    """Extract fields for generic tool call debug."""
+    fields = []
+    
+    # Tool Name
+    tool_name = data.get("tool_name", "unknown")
+    fields.append(("Tool", f"`{tool_name}`", True))
+    
+    # Execution Time
+    exec_time = data.get("execution_time")
+    if exec_time is not None:
+        time_str = _format_duration(exec_time)
+        fields.append(("Duration", f"⏱️ {time_str}", True))
+    
+    # Status
+    success = data.get("success", True)
+    error = data.get("error")
+    if error:
+        fields.append(("Status", f"❌ **Error**", True))
+        fields.append(("Error Message", str(error)[:500], False))
+    else:
+        fields.append(("Status", f"✅ **Success**", True))
+    
+    # Arguments (formatted JSON)
+    arguments = data.get("arguments", {})
+    if arguments:
+        # Remove context from display
+        display_args = {k: v for k, v in arguments.items() if k != "context"}
+        if display_args:
+            import json
+            try:
+                args_json = json.dumps(display_args, indent=2, ensure_ascii=False)
+                # Truncate if too long
+                if len(args_json) > 800:
+                    args_json = args_json[:800] + "\n... (truncated)"
+                fields.append(("Arguments", f"```json\n{args_json}\n```", False))
+            except Exception:
+                # If JSON serialization fails, show as string
+                args_str = str(display_args)[:800]
+                fields.append(("Arguments", f"```\n{args_str}\n```", False))
+    
+    # Result Summary
+    result_summary = data.get("result_summary")
+    if result_summary:
+        fields.append(("Result", result_summary, False))
+    
+    # Full Result (truncated)
+    result = data.get("result")
+    if result and not error:
+        import json
+        try:
+            result_json = json.dumps(result, indent=2, ensure_ascii=False)
+            if len(result_json) > 1000:
+                result_json = result_json[:1000] + "\n... (truncated)"
+            fields.append(("Full Result", f"```json\n{result_json}\n```", False))
+        except Exception:
+            # If not JSON serializable, show as string
+            result_str = str(result)[:1000]
+            fields.append(("Full Result", f"```\n{result_str}\n```", False))
+    
+    return fields
+
+
 # ─── Event Schema Registry ───────────────────────────────────────────────────
 # Each event is declared as a schema dict. The builder reads these to produce
 # embeds generically. To add a new event type, just add a dict here.
@@ -347,11 +632,40 @@ EVENT_SCHEMAS: Dict[str, Dict[str, Any]] = {
         "fields": _fields_card_parsed,
     },
     
+    # ── Tool Call Events ───────────────────────────────────
+    "tool_call_bash": {
+        "emoji": "🔧",
+        "title": "Bash Tool: {ai_name}",
+        "color": "tool_bash",
+        "description": lambda d: f"Executed bash command in {d.get('mode', 'unknown')} container",
+        "fields": _fields_tool_call_bash,
+        "thumbnail": True,
+        "author": True,
+    },
+    "tool_call_memory": {
+        "emoji": "💾",
+        "title": "Memory Tool: {ai_name}",
+        "color": "tool_memory",
+        "description": lambda d: f"Executed memory operation: {d.get('tool_name', 'unknown').replace('_memory', '').title()}",
+        "fields": _fields_tool_call_memory,
+        "thumbnail": True,
+        "author": True,
+    },
+    "tool_call_generic": {
+        "emoji": "🔧",
+        "title": "Tool Call: {tool_name}",
+        "color": "tool_generic",
+        "description": lambda d: f"Executed tool: {d.get('tool_name', 'unknown')}",
+        "fields": _fields_tool_call_generic,
+        "thumbnail": True,
+        "author": True,
+    },
+    
     # ── System Events ──────────────────────────────────────
     "sleep_mode_change":  {"emoji": "😴", "title": "Sleep Mode: {ai_name}",   "color": "info",    "fields": _fields_system},
     "bot_status_change":  {"emoji": "🤖", "title": "Bot Status Changed",      "color": "info",    "fields": _fields_system},
-    "bot_startup":        {"emoji": "🚀", "title": "Bot Started",             "color": "success", "fields": _fields_system},
-    "bot_shutdown":       {"emoji": "🛑", "title": "Bot Shutdown",            "color": "warning", "fields": _fields_system},
+    "bot_startup":        {"emoji": "🥢", "title": "Hashi AI Started",        "color": "startup", "fields": _fields_system, "description": "Bot is now online and ready to serve!", "author": True},
+    "bot_shutdown":       {"emoji": "🛑", "title": "Hashi AI Shutting Down",  "color": "shutdown", "fields": _fields_system, "description": "Bot is shutting down gracefully...", "author": True},
     
     # ── Error Events ───────────────────────────────────────
     "error":    {"emoji": "🔴", "title": "{title}", "color": "error",    "fields": _fields_error},
@@ -363,12 +677,17 @@ EVENT_SCHEMAS: Dict[str, Dict[str, Any]] = {
 # ─── Color Palette ────────────────────────────────────────────────────────────
 
 COLORS = {
-    "success":  discord.Color.green(),
-    "info":     discord.Color.blue(),
-    "llm":      discord.Color.dark_embed(),
-    "warning":  discord.Color.gold(),
-    "error":    discord.Color.red(),
-    "critical": discord.Color.dark_red(),
+    "success":      discord.Color.green(),
+    "info":         discord.Color.blue(),
+    "llm":          discord.Color.dark_embed(),
+    "warning":      discord.Color.gold(),
+    "error":        discord.Color.red(),
+    "critical":     discord.Color.dark_red(),
+    "tool_bash":    discord.Color.purple(),
+    "tool_memory":  discord.Color.blue(),
+    "tool_generic": discord.Color.teal(),
+    "startup":      discord.Color.brand_green(),
+    "shutdown":     discord.Color.orange(),
 }
 
 
@@ -499,6 +818,7 @@ class DebugEmbed:
         title_vars = {
             "ai_name": data.get("ai_name", ""),
             "title": data.get("title", "Event"),
+            "tool_name": data.get("tool_name", ""),
         }
         title_text = title_template.format_map({k: v for k, v in title_vars.items() if f"{{{k}}}" in title_template})
         

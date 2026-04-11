@@ -5,8 +5,10 @@ This module handles the execution of tool calls requested by the LLM,
 including validation, context preparation, and result formatting.
 """
 
+import asyncio
 import json
 import logging
+import time
 from typing import Dict, Any, List, Optional, Callable
 import tiktoken
 
@@ -64,7 +66,7 @@ class ToolExecutor:
         context: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Execute a single tool call.
+        Execute a single tool call with debug embed support.
         
         Args:
             tool_name: Name of the tool to execute
@@ -76,6 +78,9 @@ class ToolExecutor:
         """
         log.info(f"Executing tool: {tool_name}")
         log.debug(f"Tool arguments: {arguments}")
+        
+        # Start timing
+        start_time = time.time()
         
         # Validate tool exists
         if tool_name not in self.tools:
@@ -106,9 +111,24 @@ class ToolExecutor:
             # Execute the tool
             result = await tool_func(**arguments)
             
-            log.info(f"Tool '{tool_name}' executed successfully")
+            # Calculate execution time
+            execution_time = time.time() - start_time
             
-            # Track executed tool for debug embed
+            log.info(f"Tool '{tool_name}' executed successfully in {execution_time:.2f}s")
+            
+            # Send debug embed (async, don't wait)
+            asyncio.create_task(
+                self._send_tool_debug_embed(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    result=result,
+                    execution_time=execution_time,
+                    context=context,
+                    success=True
+                )
+            )
+            
+            # Track executed tool for main debug embed
             if "_executed_tools" not in context:
                 context["_executed_tools"] = []
             
@@ -123,16 +143,44 @@ class ToolExecutor:
             
         except TypeError as e:
             # Invalid arguments
+            execution_time = time.time() - start_time
             error_msg = f"Invalid arguments for tool '{tool_name}': {str(e)}"
             log.error(error_msg, exc_info=True)
+            
+            # Send error debug embed
+            asyncio.create_task(
+                self._send_tool_debug_embed(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    result={"error": error_msg},
+                    execution_time=execution_time,
+                    context=context,
+                    success=False
+                )
+            )
+            
             return {
                 "error": error_msg
             }
         
         except Exception as e:
             # General error
+            execution_time = time.time() - start_time
             error_msg = f"Error executing tool '{tool_name}': {str(e)}"
             log.error(error_msg, exc_info=True)
+            
+            # Send error debug embed
+            asyncio.create_task(
+                self._send_tool_debug_embed(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    result={"error": error_msg},
+                    execution_time=execution_time,
+                    context=context,
+                    success=False
+                )
+            )
+            
             return {
                 "error": error_msg
             }
@@ -570,6 +618,102 @@ class ToolExecutor:
             return [self._remove_base64_from_result(item) for item in result]
         else:
             return result
+    
+    async def _send_tool_debug_embed(
+        self,
+        tool_name: str,
+        arguments: Dict[str, Any],
+        result: Dict[str, Any],
+        execution_time: float,
+        context: Dict[str, Any],
+        success: bool = True
+    ) -> None:
+        """
+        Send debug embed for tool execution.
+        
+        Args:
+            tool_name: Name of the tool that was executed
+            arguments: Arguments passed to the tool
+            result: Result returned by the tool
+            execution_time: Time taken to execute (seconds)
+            context: Execution context
+            success: Whether execution was successful
+        """
+        try:
+            # Check if debug embeds are enabled
+            bot_client = context.get("bot_client")
+            server_id = context.get("server_id")
+            
+            if not bot_client or not server_id:
+                return
+            
+            # Get guild
+            guild = bot_client.get_guild(int(server_id))
+            if not guild:
+                return
+            
+            # Get session for AI name
+            session = context.get("session", {})
+            ai_name = context.get("ai_name", "Unknown")
+            
+            # Prepare embed data based on tool type
+            if tool_name == "bash_tool":
+                # Bash tool specific embed
+                event = "tool_call_bash"
+                data = {
+                    "ai_name": ai_name,
+                    "command": arguments.get("command", ""),
+                    "mode": result.get("mode", arguments.get("mode", "unknown")),
+                    "container_id": result.get("container_id", "N/A"),
+                    "working_dir": arguments.get("working_dir", "/workspace"),
+                    "exit_code": result.get("exit_code", -1),
+                    "success": result.get("success", False),
+                    "execution_time": execution_time,
+                    "stdout": result.get("stdout", ""),
+                    "stderr": result.get("stderr", ""),
+                    "command_count": result.get("command_count"),
+                    "container_uptime": result.get("container_uptime"),
+                    "session": session,
+                }
+            elif tool_name in ["read_memory", "edit_memory", "write_memory"]:
+                # Memory tool specific embed
+                event = "tool_call_memory"
+                data = {
+                    "ai_name": ai_name,
+                    "tool_name": tool_name,
+                    "success": result.get("success", False),
+                    "error": result.get("error"),
+                    "execution_time": execution_time,
+                    "file_path": result.get("file_path"),
+                    "tokens_used": result.get("tokens_used") or result.get("tokens"),
+                    "max_tokens": result.get("max_tokens"),
+                    "content": result.get("content"),
+                    "metadata": result.get("metadata"),
+                    "old_string": arguments.get("old_string"),
+                    "new_string": arguments.get("new_string"),
+                    "session": session,
+                }
+            else:
+                # Generic tool embed
+                event = "tool_call_generic"
+                data = {
+                    "ai_name": ai_name,
+                    "tool_name": tool_name,
+                    "arguments": {k: v for k, v in arguments.items() if k != "context"},
+                    "result": result if success else None,
+                    "error": result.get("error") if not success else None,
+                    "success": success,
+                    "execution_time": execution_time,
+                    "result_summary": self._create_result_summary(tool_name, result),
+                    "session": session,
+                }
+            
+            # Send debug embed
+            from utils.core.debug_embed import DebugEmbed
+            await DebugEmbed.send(guild, event, data)
+            
+        except Exception as e:
+            log.error(f"Error sending tool debug embed: {e}", exc_info=True)
 
 
 # Global executor instance

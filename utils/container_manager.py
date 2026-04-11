@@ -491,6 +491,9 @@ class ContainerManager:
                     f"(will be cleaned up when LLM finishes responding)"
                 )
             
+            # Get container info for metadata
+            container_info = self.containers.get(chat_id) if mode == "persistent" else None
+            
             result = {
                 "success": exit_code == 0,
                 "stdout": stdout,
@@ -498,7 +501,10 @@ class ContainerManager:
                 "exit_code": exit_code,
                 "execution_time": round(execution_time, 3),
                 "container_id": container_id[:12],
-                "mode": mode
+                "mode": mode,
+                # Additional metadata for debug embeds
+                "command_count": container_info.command_count if container_info else None,
+                "container_uptime": time.time() - container_info.created_at if container_info else None,
             }
             
             log.info(
