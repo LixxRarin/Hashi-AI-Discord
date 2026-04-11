@@ -17,6 +17,14 @@ class CharacterCard:
         raise NotImplementedError()
         
     @property
+    def spec(self) -> str:
+        raise NotImplementedError()
+        
+    @property
+    def spec_version(self) -> str:
+        raise NotImplementedError()
+        
+    @property
     def raw_data(self) -> Dict[str, Any]:
         """Provides access to the raw internal dictionary for backwards-compatibility or direct access."""
         raise NotImplementedError()
@@ -41,6 +49,22 @@ class CharacterCard:
     @property
     def scenario(self) -> str:
         raise NotImplementedError()
+
+    @property
+    def system_prompt(self) -> Optional[str]:
+        return None
+
+    @property
+    def post_history_instructions(self) -> Optional[str]:
+        return None
+
+    @property
+    def depth_prompt(self) -> Optional[str]:
+        return None
+
+    @property
+    def creator_notes(self) -> Optional[str]:
+        return None
 
     @property
     def first_mes(self) -> str:
@@ -83,6 +107,14 @@ class CharacterCardV1(CharacterCard):
     @property
     def version(self) -> int:
         return 1
+        
+    @property
+    def spec(self) -> str:
+        return "chara_card_v1"
+        
+    @property
+    def spec_version(self) -> str:
+        return "1.0"
         
     @property
     def name(self) -> str: return self._name
@@ -160,6 +192,19 @@ class CharacterCardV2(CharacterCard):
     def scenario(self) -> str: return self._data.get("scenario", "")
     
     @property
+    def system_prompt(self) -> Optional[str]: return self._data.get("system_prompt")
+    
+    @property
+    def post_history_instructions(self) -> Optional[str]: return self._data.get("post_history_instructions")
+    
+    @property
+    def depth_prompt(self) -> Optional[str]: 
+        return self._data.get("extensions", {}).get("depth_prompt", {}).get("prompt")
+        
+    @property
+    def creator_notes(self) -> Optional[str]: return self._data.get("creator_notes")
+    
+    @property
     def first_mes(self) -> str: return self._data.get("first_mes", "")
     
     @property
@@ -222,6 +267,19 @@ class CharacterCardV3(CharacterCard):
     
     @property
     def scenario(self) -> str: return self._data.get("scenario", "")
+    
+    @property
+    def system_prompt(self) -> Optional[str]: return self._data.get("system_prompt")
+    
+    @property
+    def post_history_instructions(self) -> Optional[str]: return self._data.get("post_history_instructions")
+    
+    @property
+    def depth_prompt(self) -> Optional[str]: 
+        return self._data.get("extensions", {}).get("depth_prompt", {}).get("prompt")
+        
+    @property
+    def creator_notes(self) -> Optional[str]: return self._data.get("creator_notes")
     
     @property
     def first_mes(self) -> str: return self._data.get("first_mes", "")

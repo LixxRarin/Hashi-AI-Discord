@@ -258,15 +258,38 @@ class ChatService:
         """
         components = {}
         
+        from utils.cc_format.parser import dict_to_card
+        card = dict_to_card(session.get("character_card") or {})
+        
         # Character description
-        description = card_data.get("description", "")
+        description = card.description if card else card_data.get("description", "")
+        depth = card.depth_prompt if card else None
+        if depth:
+            description += f"\n\n{depth}"
+            
         if description:
             description = process_cbs(description, char_name, user_name, session)
             components["character_description"] = description
         else:
             components["character_description"] = None
+            
+        # Card System Prompt (From CCv2/v3)
+        card_system_prompt = card.system_prompt if card else None
+        if card_system_prompt:
+            card_system_prompt = process_cbs(card_system_prompt, char_name, user_name, session)
+            components["card_system_prompt"] = card_system_prompt
+        else:
+            components["card_system_prompt"] = None
+            
+        # Post History Instructions (From CCv2/v3)
+        post_history = card.post_history_instructions if card else None
+        if post_history:
+            post_history = process_cbs(post_history, char_name, user_name, session)
+            components["post_history_instructions"] = post_history
+        else:
+            components["post_history_instructions"] = None
         
-        # System message
+        # System message (From global/session config)
         system_message = config.get("system_message")
         if system_message:
             system_message = process_cbs(system_message, char_name, user_name, session)
@@ -392,9 +415,9 @@ class ChatService:
         
         # Get context order from config (with default fallback)
         context_order = config.get("context_order", [
-            "character_description", "system_message", "lorebook_entries",
+            "character_description", "card_system_prompt", "system_message", "lorebook_entries",
             "memory_prompt", "tool_calling_prompt", "ignore_prompt",
-            "reply_prompt", "reaction_prompt", "conversation_history", "user_message"
+            "reply_prompt", "reaction_prompt", "conversation_history", "post_history_instructions", "user_message"
         ])
         
         # Process context order

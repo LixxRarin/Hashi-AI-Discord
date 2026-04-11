@@ -630,6 +630,30 @@ class CardApplication(commands.Cog):
                 success_msg += f"Use `/character_info ai_name:{actual_ai_name}` to view card details."
                 
                 await interaction.followup.send(success_msg, ephemeral=True)
+            
+            # Send debug embed for card application
+            try:
+                from utils.core.debug_embed import DebugEmbed
+                await DebugEmbed.send(
+                    guild=interaction.guild,
+                    event="character",
+                    data={
+                        "ai_name": actual_ai_name,
+                        "executor": interaction.user.mention,
+                        "channel": interaction.channel.mention if interaction.channel else None,
+                        "changes": {
+                            "card": card_name,
+                            "character": char_name,
+                            "creator": creator,
+                            "greeting": f"#{greeting_index}",
+                            "avatar": "Updated" if avatar_updated else "Skipped",
+                            "display_name": "Updated" if name_updated else "Skipped",
+                            "history": "Cleared" if clear_history else "Preserved",
+                        }
+                    }
+                )
+            except Exception as debug_e:
+                func.log.debug(f"Failed to send card apply debug embed: {debug_e}")
         
         # If clear_history is True and there's existing history, ask for confirmation
         if clear_history and existing_history and len(existing_history) > 1:

@@ -221,7 +221,7 @@ async def update_thumbnail_cache(
         cards = func.read_json(cards_file) or {}
         
         if card_name not in cards:
-            log.warning(f"Card '{card_name}' not found in registry")
+            log.debug(f"Card '{card_name}' not found in registry, skipping registry cache")
             return False
         
         # Update cache fields
@@ -397,17 +397,25 @@ async def get_thumbnail_url(
         card_name = session.get("character_card_name")
         cache_path = character_card.get("cache_path")
         
-        # Step 1: Check for avatar URL in character card
+        # Step 1: Check for cached CDN URL in session (persistent across restarts)
+        session_cached_url = character_card.get("thumbnail_cdn_url")
+        if session_cached_url:
+            log.debug("Using cached thumbnail URL from session data")
+            return session_cached_url
+        
+        # Step 2: Check for avatar URL in character card
         avatar_url = get_avatar_url_from_card(character_card)
         if avatar_url:
             log.debug("Found avatar URL in character card, validating...")
             if await validate_cdn_url(avatar_url):
                 log.info("Using avatar URL from character card")
+                # Save to session for future use
+                character_card["thumbnail_cdn_url"] = avatar_url
                 return avatar_url
             else:
                 log.warning("Avatar URL validation failed, falling back to cache")
 
-        # Step 1.5: If no avatar in session, try loading from PNG file
+        # Step 2.5: If no avatar in session, try loading from PNG file
         if not avatar_url and cache_path and Path(cache_path).exists():
             try:
                 from utils.cc_format.loader import load_local_card
@@ -422,7 +430,9 @@ async def get_thumbnail_url(
                         log.debug("Found avatar URL in PNG file, validating...")
                         if await validate_cdn_url(avatar_url):
                             log.info("Using avatar URL from PNG file")
-                            # Save to registry for future use
+                            # Save to session for future use
+                            character_card["thumbnail_cdn_url"] = avatar_url
+                            # Also save to registry if card exists there
                             if card_name:
                                 import utils.func as func
                                 from utils.core.paths import DataPaths
@@ -438,7 +448,7 @@ async def get_thumbnail_url(
             except Exception as e:
                 log.warning(f"Failed to load avatar from PNG: {e}")
 
-        # Step 2: Check cache in character_cards.json
+        # Step 3: Check cache in character_cards.json (registry)
         if card_name:
             import utils.func as func
             from utils.core.paths import DataPaths
@@ -454,16 +464,16 @@ async def get_thumbnail_url(
                 
                 if cached_url:
                     # Always validate cached URLs dynamically
-                    log.debug("Validating cached URL...")
+                    log.debug("Validating cached URL from registry...")
                     if await validate_cdn_url(cached_url):
-                        log.info("Using cached thumbnail URL")
-                        # Update validation timestamp for tracking
-                        await update_thumbnail_cache(server_id, card_name, cached_url)
+                        log.info("Using cached thumbnail URL from registry")
+                        # Save to session so we don't check registry again
+                        character_card["thumbnail_cdn_url"] = cached_url
                         return cached_url
                     else:
                         log.warning("Cached URL validation failed, will re-upload")
         
-        # Step 3: Upload and cache
+        # Step 4: Upload and cache
         if not cache_path:
             log.debug("No cache path available for upload")
             return None
@@ -471,9 +481,13 @@ async def get_thumbnail_url(
         log.info("Uploading thumbnail to CDN cache...")
         cdn_url = await upload_to_cdn_cache(channel, cache_path, server_id)
         
-        if cdn_url and card_name:
-            # Save to cache
-            await update_thumbnail_cache(server_id, card_name, cdn_url)
+        if cdn_url:
+            # Always save to session (persistent, works for all cards)
+            character_card["thumbnail_cdn_url"] = cdn_url
+            log.debug("Saved thumbnail CDN URL to session data")
+            # Also save to registry if card exists there
+            if card_name:
+                await update_thumbnail_cache(server_id, card_name, cdn_url)
         
         return cdn_url
         

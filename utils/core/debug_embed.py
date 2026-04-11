@@ -1,9 +1,8 @@
 """
 Debug Embed System - Guild-Scoped Debug Information
 
-This module provides a structured debug embed system for sending informative
-embeds to configured debug channels. All embeds are guild-scoped to prevent
-cross-contamination between servers.
+Modular, data-driven debug embed system. Events are defined declaratively
+via schemas — no per-event builder methods needed.
 
 Usage:
     await DebugEmbed.send(guild, event="setup", data={...})
@@ -13,8 +12,7 @@ Usage:
 
 import logging
 from datetime import datetime
-from typing import Optional, Dict, Any, List
-from pathlib import Path
+from typing import Optional, Dict, Any, List, Callable
 
 import discord
 
@@ -23,46 +21,372 @@ import utils.func as func
 log = logging.getLogger(__name__)
 
 
+# ─── Formatting Helpers ──────────────────────────────────────────────────────
+
+def fmt_number(num: int) -> str:
+    """Format number with k/M suffix."""
+    if num >= 1_000_000:
+        return f"{num / 1_000_000:.1f}M"
+    elif num >= 1_000:
+        return f"{num / 1_000:.1f}k"
+    return str(num)
+
+
+def progress_bar(current: int, maximum: int, length: int = 10) -> str:
+    """Create a visual progress bar (e.g. ▓▓▓░░░░░░░)."""
+    if maximum <= 0:
+        return "░" * length
+    pct = min(current / maximum, 1.0)
+    filled = int(pct * length)
+    return "▓" * filled + "░" * (length - filled)
+
+
+def truncate(text: str, limit: int = 1000) -> str:
+    """Truncate text with ellipsis."""
+    return text[:limit] + "..." if len(text) > limit else text
+
+
+def _get_version() -> str:
+    """Read bot version from version.txt."""
+    try:
+        with open("version.txt", "r") as f:
+            return f.read().strip()
+    except Exception:
+        return "Unknown"
+
+
+# ─── Field Extractors ────────────────────────────────────────────────────────
+# Each extractor receives (data: dict) and returns a list of
+# (name: str, value: str, inline: bool) tuples to add as embed fields.
+# This keeps logic composable and reusable across events.
+
+def _fields_command(data: Dict[str, Any]) -> List[tuple]:
+    """Extract fields for generic command events."""
+    fields = []
+    
+    executor = data.get("executor")
+    channel = data.get("channel")
+    if executor:
+        fields.append(("Executed By", str(executor), True))
+    if channel:
+        fields.append(("Channel", str(channel), True))
+    
+    # Render arbitrary key-value changes
+    for key, value in data.get("changes", {}).items():
+        fields.append((key.replace("_", " ").title(), str(value), False))
+    
+    # API connection specifics
+    for key in ("connection_name", "provider", "endpoint", "model"):
+        if key in data:
+            fields.append((key.replace("_", " ").title(), str(data[key]), True))
+    
+    # Config change specifics
+    if "setting" in data:
+        fields.append(("Setting", data["setting"], True))
+    if "category" in data:
+        fields.append(("Category", data["category"], True))
+    if "old_value" in data and "new_value" in data:
+        fields.append(("Change", f"`{data['old_value']}` → `{data['new_value']}`", False))
+    
+    return fields
+
+
+def _fields_llm_response(data: Dict[str, Any]) -> List[tuple]:
+    """Extract fields for LLM response events."""
+    fields = []
+    
+    provider_raw = data.get("provider", "unknown")
+    model = data.get("model", "unknown")
+    
+    # Resolve display name
+    try:
+        from AI.core.registry import get_registry
+        registry = get_registry()
+        provider_display = registry.get_metadata(provider_raw.lower()).display_name
+    except Exception:
+        provider_display = provider_raw
+    
+    fields.append(("Provider & Model", f"{provider_display} • `{model}`", False))
+    
+    channel_mention = data.get("channel")
+    if channel_mention:
+        fields.append(("Channel", str(channel_mention), True))
+    
+    # Token breakdown
+    tokens = data.get("tokens", {})
+    if tokens:
+        sys_t = tokens.get("system", 0)
+        ctx_t = tokens.get("context", 0)
+        comp_t = tokens.get("completion", 0)
+        total_t = tokens.get("total", 0)
+        window = tokens.get("context_window", 0)
+        
+        lines = [
+            f"**System:** {fmt_number(sys_t)} · **Context:** {fmt_number(ctx_t)}",
+            f"**Completion:** {fmt_number(comp_t)} · **Total:** {fmt_number(total_t)}"
+        ]
+        
+        if window > 0:
+            pct = (total_t / window) * 100
+            bar = progress_bar(total_t, window)
+            lines.append(f"{bar} {fmt_number(total_t)}/{fmt_number(window)} ({pct:.1f}%)")
+        
+        fields.append(("Token Usage", "\n".join(lines), False))
+    
+    # Memory
+    memory = data.get("memory", {})
+    if memory:
+        msg_count = memory.get("messages_count", 0)
+        est = memory.get("estimated_tokens", 0)
+        fields.append(("Memory", f"{msg_count} messages · ~{fmt_number(est)} tokens", True))
+    
+    # Tool calls
+    tool_calls = data.get("tool_calls", [])
+    if tool_calls:
+        tool_lines = [f"• **{c.get('name', '?')}**: {c.get('result', 'N/A')}" for c in tool_calls[:5]]
+        if len(tool_calls) > 5:
+            tool_lines.append(f"… and {len(tool_calls) - 5} more")
+        fields.append(("Tool Calls", "\n".join(tool_lines), False))
+    
+    # Performance
+    latency = data.get("latency_ms")
+    tps = data.get("tps")
+    if latency is not None or tps is not None:
+        parts = []
+        if latency is not None:
+            parts.append(f"**Latency:** {latency}ms")
+        if tps is not None:
+            parts.append(f"**Speed:** {tps:.1f} tok/s")
+        fields.append(("Performance", " · ".join(parts), True))
+    
+    # Raw response
+    raw = data.get("raw_response", "")
+    if raw:
+        fields.append(("Raw Response", f"```\n{truncate(raw, 900)}\n```", False))
+    
+    return fields
+
+
+def _fields_ignore(data: Dict[str, Any]) -> List[tuple]:
+    """Extract fields for ignore detection events."""
+    fields = []
+    
+    ignore_type = data.get("ignore_type", "unknown")
+    is_pure = ignore_type == "pure"
+    
+    fields.append(("Ignore Type", ignore_type.title(), True))
+    
+    channel = data.get("channel")
+    if channel:
+        fields.append(("Channel", str(channel), True))
+    
+    raw = data.get("raw_response", "")
+    if raw:
+        fields.append(("Raw Response", f"```\n{truncate(raw, 500)}\n```", False))
+    
+    # Sleep mode (only for pure ignores)
+    if data.get("sleep_mode_enabled") and is_pure:
+        active = data.get("sleep_mode_active", False)
+        consecutive = data.get("consecutive_ignores", 0)
+        threshold = data.get("ignore_threshold", 3)
+        
+        fields.append(("Sleep Mode", "🟢 Active" if active else "⚪ Inactive", True))
+        fields.append(("Ignores", f"{consecutive} / {threshold}", True))
+        
+        if data.get("just_entered_sleep"):
+            fields.append(("⚡ Sleep Triggered", f"Entered after {consecutive} consecutive ignores", False))
+    
+    # Impure guidance
+    if not is_pure:
+        fields.append(("⚠️ Issue", "<IGNORE> tag found with additional content. Use ONLY `<IGNORE>` without extra text.", False))
+    
+    return fields
+
+
+def _fields_system(data: Dict[str, Any]) -> List[tuple]:
+    """Extract fields for system lifecycle events (startup, shutdown, sleep, status)."""
+    fields = []
+    
+    # Generic fields
+    for key in ("version", "reason"):
+        if key in data:
+            fields.append((key.title(), str(data[key]), True))
+    
+    for key in ("servers", "total_ais"):
+        if key in data:
+            fields.append((key.replace("_", " ").title(), str(data[key]), True))
+    
+    # Status change
+    if "old_status" in data and "new_status" in data:
+        fields.append(("Status", f"{data['old_status']} → {data['new_status']}", False))
+    
+    # Sleep mode specifics
+    if "status" in data:
+        fields.append(("Status", data["status"].title(), True))
+    
+    channel = data.get("channel")
+    if channel:
+        fields.append(("Channel", str(channel), True))
+    
+    # Uptime
+    uptime = data.get("uptime")
+    if uptime is not None:
+        h, m = int(uptime // 3600), int((uptime % 3600) // 60)
+        fields.append(("Uptime", f"{h}h {m}m", True))
+    
+    # AIs in sleep
+    ais = data.get("ais_in_sleep", [])
+    if ais:
+        text = "\n".join(f"• {a}" for a in ais[:10])
+        if len(ais) > 10:
+            text += f"\n… and {len(ais) - 10} more"
+        fields.append(("AIs in Sleep", text, False))
+    
+    return fields
+
+
+def _fields_error(data: Dict[str, Any]) -> List[tuple]:
+    """Extract fields for error/warning/critical events."""
+    fields = []
+    
+    if "error_type" in data:
+        fields.append(("Error Type", data["error_type"], True))
+    
+    msg = data.get("message")
+    if msg:
+        fields.append(("Message", truncate(msg, 1000), False))
+    
+    ctx = data.get("context", {})
+    if ctx:
+        text = "\n".join(f"**{k.replace('_', ' ').title()}:** {v}" for k, v in ctx.items())
+        fields.append(("Context", text, False))
+    
+    if "suggestion" in data:
+        fields.append(("Suggestion", data["suggestion"], False))
+    
+    return fields
+
+
+def _fields_card_parsed(data: Dict[str, Any]) -> List[tuple]:
+    """Extract fields for character card parsing debug."""
+    fields = []
+    
+    card = data.get("character_card")
+    if not card:
+        return fields
+    
+    raw = getattr(card, 'raw_data', card) if not isinstance(card, dict) else card
+    
+    fields.append(("Spec", f"`{raw.get('spec', 'chara_card_v1')}`", True))
+    fields.append(("Version", f"`{raw.get('spec_version', '1.0')}`", True))
+    
+    if not isinstance(card, dict):
+        components = {
+            "System Prompt": bool(getattr(card, 'system_prompt', None)),
+            "Post-History": bool(getattr(card, 'post_history_instructions', None)),
+            "Depth Prompt": bool(getattr(card, 'depth_prompt', None)),
+        }
+        status_text = "\n".join(f"{'✅' if v else '❌'} {k}" for k, v in components.items())
+        fields.append(("V2/V3 Components", status_text, False))
+        
+        alt = getattr(card, 'alternate_greetings', None)
+        if alt:
+            fields.append(("Alt Greetings", str(len(alt)), True))
+        
+        book = getattr(card, 'character_book', None)
+        if book:
+            entries = len(book.get('entries', [])) if isinstance(book, dict) else 0
+            fields.append(("Lorebook", f"{entries} entries", True))
+    
+    return fields
+
+
+# ─── Event Schema Registry ───────────────────────────────────────────────────
+# Each event is declared as a schema dict. The builder reads these to produce
+# embeds generically. To add a new event type, just add a dict here.
+#
+# Schema keys:
+#   emoji: str          — Prefix emoji for the title
+#   title: str          — Title template (supports {ai_name}, {title} placeholders)
+#   color: str          — Key into COLORS palette
+#   description: str|fn — Static text or callable(data) -> str
+#   fields: callable    — Function(data) -> list of (name, value, inline) tuples
+#   thumbnail: bool     — If True, attempt to set character card thumbnail
+#   author: bool        — If True, set bot user as embed author
+
+EVENT_SCHEMAS: Dict[str, Dict[str, Any]] = {
+    # ── Command Events ─────────────────────────────────────
+    "setup":                    {"emoji": "✅", "title": "Setup Complete",              "color": "success", "fields": _fields_command},
+    "character":                {"emoji": "🎭", "title": "Character Applied",           "color": "success", "fields": _fields_command},
+    "provider":                 {"emoji": "🔄", "title": "Provider Changed",            "color": "success", "fields": _fields_command},
+    "reset":                    {"emoji": "🔄", "title": "History Reset",               "color": "success", "fields": _fields_command},
+    "config_change":            {"emoji": "⚙️", "title": "Config Changed",              "color": "info",    "fields": _fields_command},
+    "api_connection_created":   {"emoji": "🔌", "title": "API Connection Created",      "color": "success", "fields": _fields_command},
+    "api_connection_edited":    {"emoji": "✏️", "title": "API Connection Edited",        "color": "info",    "fields": _fields_command},
+    "api_connection_removed":   {"emoji": "🗑️", "title": "API Connection Removed",      "color": "warning", "fields": _fields_command},
+    "remove_ai":                {"emoji": "❌", "title": "AI Removed",                  "color": "warning", "fields": _fields_command},
+    
+    # ── LLM Events ─────────────────────────────────────────
+    "llm_response": {
+        "emoji": "🤖", "title": "Debug Mode: {ai_name}",
+        "color": "llm",
+        "fields": _fields_llm_response,
+        "thumbnail": True, "author": True,
+    },
+    "ignore_detected": {
+        "emoji": "🚫", "title": "Ignore Detected: {ai_name}",
+        "color": "warning",
+        "description": lambda d: "AI sent <IGNORE> with extra content (impure)" if d.get("ignore_type") != "pure" else "AI decided not to respond",
+        "fields": _fields_ignore,
+        "thumbnail": True, "author": True,
+    },
+    "card_parsed": {
+        "emoji": "🔍", "title": "Card Debug: {ai_name}",
+        "color": "info",
+        "description": lambda d: f"Parsed as **{d.get('character_card', {}).__class__.__name__}**" if not isinstance(d.get('character_card'), dict) else "Raw card data",
+        "fields": _fields_card_parsed,
+    },
+    
+    # ── System Events ──────────────────────────────────────
+    "sleep_mode_change":  {"emoji": "😴", "title": "Sleep Mode: {ai_name}",   "color": "info",    "fields": _fields_system},
+    "bot_status_change":  {"emoji": "🤖", "title": "Bot Status Changed",      "color": "info",    "fields": _fields_system},
+    "bot_startup":        {"emoji": "🚀", "title": "Bot Started",             "color": "success", "fields": _fields_system},
+    "bot_shutdown":       {"emoji": "🛑", "title": "Bot Shutdown",            "color": "warning", "fields": _fields_system},
+    
+    # ── Error Events ───────────────────────────────────────
+    "error":    {"emoji": "🔴", "title": "{title}", "color": "error",    "fields": _fields_error},
+    "warning":  {"emoji": "🟡", "title": "{title}", "color": "warning",  "fields": _fields_error},
+    "critical": {"emoji": "🔴", "title": "{title}", "color": "critical", "fields": _fields_error},
+}
+
+
+# ─── Color Palette ────────────────────────────────────────────────────────────
+
+COLORS = {
+    "success":  discord.Color.green(),
+    "info":     discord.Color.blue(),
+    "llm":      discord.Color.dark_embed(),
+    "warning":  discord.Color.gold(),
+    "error":    discord.Color.red(),
+    "critical": discord.Color.dark_red(),
+}
+
+
+# ─── Main Class ───────────────────────────────────────────────────────────────
+
 class DebugEmbed:
     """
     Guild-scoped debug embed system.
     
-    Provides structured, visually consistent debug information sent to
-    configured debug channels. All operations are guild-scoped to ensure
-    zero cross-contamination between servers.
+    Events are defined declaratively in EVENT_SCHEMAS. The build pipeline:
+      1. Look up schema for the event
+      2. Resolve title template with data placeholders
+      3. Call field extractor to get embed fields
+      4. Apply enrichments (thumbnail, author icon)
+      5. Add standard footer
+    
+    To add a new event, add a dict to EVENT_SCHEMAS — no new methods needed.
     """
-    
-    # Color palette by category
-    COLORS = {
-        "success": discord.Color.green(),
-        "info": discord.Color.blue(),
-        "llm": discord.Color.dark_embed(),
-        "warning": discord.Color.gold(),
-        "error": discord.Color.red(),
-        "critical": discord.Color.dark_red(),
-    }
-    
-    # Event type to color mapping
-    EVENT_COLORS = {
-        "setup": "success",
-        "character": "success",
-        "provider": "success",
-        "reset": "success",
-        "config_change": "info",
-        "api_connection_created": "success",
-        "api_connection_edited": "info",
-        "api_connection_removed": "warning",
-        "remove_ai": "warning",
-        "llm_response": "llm",
-        "ignore_detected": "warning",
-        "sleep_mode_change": "info",
-        "bot_status_change": "info",
-        "bot_startup": "success",
-        "bot_shutdown": "warning",
-        "error": "error",
-        "warning": "warning",
-        "critical": "critical",
-    }
     
     @classmethod
     async def send(
@@ -77,12 +401,12 @@ class DebugEmbed:
         
         Args:
             guild: Discord guild where the event occurred
-            event: Event type (e.g., "setup", "llm_response", "error")
+            event: Event type key (must exist in EVENT_SCHEMAS)
             data: Event-specific data dictionary
-            force: If True, send even if debug is disabled (for critical events)
+            force: If True, send even if debug is disabled
             
         Returns:
-            True if embed was sent successfully, False otherwise
+            True if embed was sent successfully
         """
         if not guild:
             log.debug("No guild provided, skipping debug embed")
@@ -91,81 +415,149 @@ class DebugEmbed:
         server_id = str(guild.id)
         
         try:
-            # Check if debug is enabled (unless forced)
             if not force and not cls._is_enabled(server_id):
                 return False
             
-            # Get debug channel
             channel = cls._get_debug_channel(guild)
             if not channel:
                 log.debug(f"No debug channel configured for guild {server_id}")
                 return False
             
-            # Build embed based on event type
-            embed = await cls._build_embed(guild, channel, event, data, server_id)
+            embed = await cls.build_embed(guild, channel, event, data, server_id)
             if not embed:
-                log.warning(f"Failed to build embed for event: {event}")
                 return False
             
-            # Send embed
             return await cls._send_embed(channel, embed)
             
         except Exception as e:
-            # Never crash the main flow due to debug failures
             log.error(f"Error sending debug embed for event '{event}': {e}")
             return False
     
     @classmethod
-    async def send_to_all_guilds(
-        cls,
-        bot,
-        event: str,
-        data: Dict[str, Any]
-    ) -> int:
-        """
-        Send debug embed to all guilds with debug enabled.
-        
-        This is used for global bot events (startup, shutdown, status changes)
-        that aren't specific to a single guild.
-        
-        Args:
-            bot: Discord bot instance
-            event: Event type (e.g., "bot_startup", "bot_shutdown")
-            data: Event-specific data dictionary
-            
-        Returns:
-            Number of guilds that successfully received the embed
-        """
+    async def send_to_all_guilds(cls, bot, event: str, data: Dict[str, Any]) -> int:
+        """Send debug embed to all guilds with debug enabled."""
         if not bot or not bot.guilds:
-            log.debug("No guilds available for debug embed broadcast")
             return 0
         
-        success_count = 0
-        
+        count = 0
         for guild in bot.guilds:
             try:
                 if await cls.send(guild, event, data):
-                    success_count += 1
+                    count += 1
             except Exception as e:
                 log.error(f"Error sending debug embed to guild {guild.id}: {e}")
-                continue
         
-        if success_count > 0:
-            log.info(f"Sent '{event}' debug embed to {success_count}/{len(bot.guilds)} guild(s)")
+        if count > 0:
+            log.info(f"Sent '{event}' debug embed to {count}/{len(bot.guilds)} guild(s)")
+        return count
+    
+    # ── Public Builder ────────────────────────────────────────────────────
+    
+    @classmethod
+    async def build_embed(
+        cls,
+        guild: Optional[discord.Guild],
+        channel: Optional[discord.TextChannel],
+        event: str,
+        data: Dict[str, Any],
+        server_id: str
+    ) -> Optional[discord.Embed]:
+        """
+        Build a discord.Embed from an event schema.
         
-        return success_count
+        This is the single generic builder — no per-event methods needed.
+        Can be called directly to get an embed without sending it.
+        """
+        schema = EVENT_SCHEMAS.get(event)
+        if not schema:
+            log.warning(f"Unknown debug event: {event}")
+            return None
+        
+        try:
+            return await cls._build_from_schema(guild, channel, event, schema, data, server_id)
+        except Exception as e:
+            log.error(f"Error building embed for '{event}': {e}")
+            return None
+    
+    # ── Internal ──────────────────────────────────────────────────────────
+    
+    @classmethod
+    async def _build_from_schema(
+        cls,
+        guild: Optional[discord.Guild],
+        channel: Optional[discord.TextChannel],
+        event: str,
+        schema: Dict[str, Any],
+        data: Dict[str, Any],
+        server_id: str
+    ) -> discord.Embed:
+        """Generic embed builder driven by a schema dict."""
+        
+        # Resolve title
+        emoji = schema.get("emoji", "ℹ️")
+        title_template = schema.get("title", event.replace("_", " ").title())
+        title_vars = {
+            "ai_name": data.get("ai_name", ""),
+            "title": data.get("title", "Event"),
+        }
+        title_text = title_template.format_map({k: v for k, v in title_vars.items() if f"{{{k}}}" in title_template})
+        
+        # Resolve description
+        desc = schema.get("description")
+        if callable(desc):
+            try:
+                desc = desc(data)
+            except Exception:
+                desc = None
+        
+        # Resolve color
+        color = COLORS.get(schema.get("color", "info"), discord.Color.blue())
+        
+        # Create embed
+        embed = discord.Embed(
+            title=f"{emoji} {title_text}",
+            description=desc,
+            color=color,
+            timestamp=datetime.now()
+        )
+        
+        # Add fields from extractor
+        field_extractor = schema.get("fields")
+        if field_extractor:
+            for name, value, inline in field_extractor(data):
+                if value:  # Skip empty fields
+                    embed.add_field(name=name, value=str(value), inline=inline)
+        
+        # Enrichment: bot author
+        if schema.get("author") and guild:
+            try:
+                bot = guild.me
+                if bot:
+                    embed.set_author(name=f"@{bot.name}", icon_url=bot.display_avatar.url)
+            except Exception:
+                pass
+        
+        # Enrichment: character card thumbnail
+        if schema.get("thumbnail") and channel:
+            try:
+                session = data.get("session")
+                if session:
+                    from utils.media.thumbnails import get_thumbnail_url
+                    url = await get_thumbnail_url(channel, session, server_id=server_id)
+                    if url:
+                        embed.set_thumbnail(url=url)
+            except Exception:
+                pass
+        
+        # Standard footer
+        version = _get_version()
+        embed.set_footer(text=f"Project Hashi v{version} • Server: {server_id}")
+        
+        return embed
     
     @classmethod
     def _is_enabled(cls, server_id: str) -> bool:
-        """
-        Check if debug embeds are enabled for a server.
-        
-        Args:
-            server_id: Server ID to check
-            
-        Returns:
-            True if enabled, False otherwise
-        """
+        """Check if debug embeds are enabled for a server."""
         try:
             from utils.core.paths import DataPaths
             import os
@@ -185,15 +577,7 @@ class DebugEmbed:
     
     @classmethod
     def _get_debug_channel(cls, guild: discord.Guild) -> Optional[discord.TextChannel]:
-        """
-        Get the configured debug channel for a guild.
-        
-        Args:
-            guild: Discord guild
-            
-        Returns:
-            Debug channel or None if not configured
-        """
+        """Get the configured debug channel for a guild."""
         try:
             from utils.core.paths import DataPaths
             import os
@@ -220,16 +604,7 @@ class DebugEmbed:
     
     @classmethod
     async def _send_embed(cls, channel: discord.TextChannel, embed: discord.Embed) -> bool:
-        """
-        Send an embed to a channel with error handling.
-        
-        Args:
-            channel: Channel to send to
-            embed: Embed to send
-            
-        Returns:
-            True if sent successfully, False otherwise
-        """
+        """Send an embed to a channel with error handling."""
         try:
             await channel.send(embed=embed)
             return True
@@ -242,686 +617,3 @@ class DebugEmbed:
         except Exception as e:
             log.error(f"Error sending debug embed: {e}")
             return False
-    
-    @classmethod
-    async def _build_embed(
-        cls,
-        guild: discord.Guild,
-        channel: discord.TextChannel,
-        event: str,
-        data: Dict[str, Any],
-        server_id: str
-    ) -> Optional[discord.Embed]:
-        """
-        Build an embed based on event type.
-        
-        Args:
-            guild: Discord guild
-            channel: Discord channel
-            event: Event type
-            data: Event data
-            server_id: Server ID for footer
-            
-        Returns:
-            Discord embed or None if build failed
-        """
-        try:
-            # Route to appropriate builder
-            if event in ["setup", "character", "provider", "reset", "config_change",
-                        "api_connection_created", "api_connection_edited",
-                        "api_connection_removed", "remove_ai"]:
-                return cls._build_command_embed(event, data, server_id)
-            elif event == "llm_response":
-                return await cls._build_llm_response_embed(guild, channel, data, server_id)
-            elif event == "ignore_detected":
-                return await cls._build_ignore_embed(guild, channel, data, server_id)
-            elif event in ["sleep_mode_change", "bot_status_change", "bot_startup", "bot_shutdown"]:
-                return cls._build_system_event_embed(event, data, server_id)
-            elif event in ["error", "warning", "critical"]:
-                return cls._build_error_embed(data, server_id)
-            else:
-                log.warning(f"Unknown event type: {event}")
-                return None
-                
-        except Exception as e:
-            log.error(f"Error building embed for event '{event}': {e}")
-            return None
-    
-    @classmethod
-    def _get_color(cls, event: str) -> discord.Color:
-        """Get color for an event type."""
-        color_name = cls.EVENT_COLORS.get(event, "info")
-        return cls.COLORS.get(color_name, discord.Color.blue())
-    
-    @classmethod
-    def _build_footer(cls, server_id: str) -> str:
-        """
-        Build standard footer text.
-        
-        Args:
-            server_id: Server ID
-            
-        Returns:
-            Footer text
-        """
-        try:
-            with open("version.txt", "r") as f:
-                version = f.read().strip()
-        except:
-            version = "Unknown"
-        
-        return f"Project Hashi v{version} • Server: {server_id}"
-    
-    @classmethod
-    async def _get_thumbnail_url(cls, session: Optional[Dict[str, Any]], server_id: str) -> Optional[str]:
-        """
-        Get thumbnail URL from character card or bot avatar.
-        
-        Args:
-            session: AI session data
-            server_id: Server ID
-            
-        Returns:
-            Thumbnail URL or None
-        """
-        if not session:
-            return None
-        
-        try:
-            # Try to extract from character card
-            cache_path = session.get("character_card", {}).get("cache_path")
-            if cache_path:
-                from commands.shared.avatar_utils import AvatarUtils
-                avatar_bytes = await AvatarUtils.extract_from_card(cache_path)
-                
-                if avatar_bytes:
-                    # For now, we can't easily convert bytes to URL without uploading
-                    # This would require creating a temporary file or using Discord's CDN
-                    # For simplicity, we'll skip thumbnail for now and add it later
-                    pass
-            
-            # Could also try bot avatar as fallback, but that requires bot instance
-            return None
-            
-        except Exception as e:
-            log.debug(f"Error getting thumbnail: {e}")
-            return None
-    
-    @classmethod
-    def _create_progress_bar(cls, current: int, maximum: int, length: int = 10) -> str:
-        """
-        Create a visual progress bar.
-        
-        Args:
-            current: Current value
-            maximum: Maximum value
-            length: Bar length in characters
-            
-        Returns:
-            Progress bar string (e.g., "▓▓▓░░░░░░░")
-        """
-        if maximum <= 0:
-            return "░" * length
-        
-        percentage = min(current / maximum, 1.0)
-        filled = int(percentage * length)
-        return "▓" * filled + "░" * (length - filled)
-    
-    @classmethod
-    def _format_number(cls, num: int) -> str:
-        """Format number with k/M suffix."""
-        if num >= 1_000_000:
-            return f"{num / 1_000_000:.1f}M"
-        elif num >= 1_000:
-            return f"{num / 1_000:.1f}k"
-        else:
-            return str(num)
-    
-    @classmethod
-    def _build_command_embed(cls, event: str, data: Dict[str, Any], server_id: str) -> discord.Embed:
-        """
-        Build embed for command completion events.
-        
-        Args:
-            event: Event type
-            data: Event data
-            server_id: Server ID
-            
-        Returns:
-            Discord embed
-        """
-        # Event-specific titles and emojis
-        event_info = {
-            "setup": ("✅", "Setup Complete"),
-            "character": ("🎭", "Character Applied"),
-            "provider": ("🔄", "Provider Changed"),
-            "reset": ("🔄", "History Reset"),
-            "config_change": ("⚙️", "Config Changed"),
-            "api_connection_created": ("🔌", "API Connection Created"),
-            "api_connection_edited": ("✏️", "API Connection Edited"),
-            "api_connection_removed": ("🗑️", "API Connection Removed"),
-            "remove_ai": ("❌", "AI Removed"),
-        }
-        
-        emoji, title_base = event_info.get(event, ("ℹ️", "Command"))
-        
-        # Build title
-        ai_name = data.get("ai_name", "")
-        if ai_name:
-            title = f"{emoji} {title_base}: {ai_name}"
-        else:
-            title = f"{emoji} {title_base}"
-        
-        # Create embed
-        embed = discord.Embed(
-            title=title,
-            color=cls._get_color(event),
-            timestamp=datetime.now()
-        )
-        
-        # Add executor info if available
-        executor = data.get("executor")
-        channel = data.get("channel")
-        if executor or channel:
-            desc_parts = []
-            if executor:
-                desc_parts.append(f"**Executed by:** {executor}")
-            if channel:
-                desc_parts.append(f"**Channel:** {channel}")
-            embed.description = "\n".join(desc_parts)
-        
-        # Add changes/details
-        changes = data.get("changes", {})
-        if changes:
-            for key, value in changes.items():
-                # Format key nicely
-                field_name = key.replace("_", " ").title()
-                embed.add_field(name=field_name, value=str(value), inline=False)
-        
-        # Add connection-specific fields
-        if event.startswith("api_connection"):
-            if "connection_name" in data:
-                embed.add_field(name="Connection", value=data["connection_name"], inline=True)
-            if "provider" in data:
-                embed.add_field(name="Provider", value=data["provider"], inline=True)
-            if "endpoint" in data:
-                embed.add_field(name="Endpoint", value=data["endpoint"], inline=True)
-            if "model" in data:
-                embed.add_field(name="Model", value=data["model"], inline=True)
-        
-        # Add config change specific fields
-        if event == "config_change":
-            if "category" in data:
-                embed.add_field(name="Category", value=data["category"], inline=True)
-            if "setting" in data:
-                embed.add_field(name="Setting", value=data["setting"], inline=True)
-            if "old_value" in data and "new_value" in data:
-                change_text = f"{data['old_value']} → {data['new_value']}"
-                embed.add_field(name="Change", value=change_text, inline=False)
-        
-        # Set footer
-        embed.set_footer(text=cls._build_footer(server_id))
-        
-        return embed
-    
-    @classmethod
-    async def _build_llm_response_embed(
-        cls,
-        guild: discord.Guild,
-        channel: discord.TextChannel,
-        data: Dict[str, Any],
-        server_id: str
-    ) -> discord.Embed:
-        """
-        Build embed for LLM response events.
-        
-        Args:
-            guild: Discord guild
-            channel: Discord channel
-            data: Event data
-            server_id: Server ID
-            
-        Returns:
-            Discord embed
-        """
-        ai_name = data.get("ai_name", "AI")
-        provider_raw = data.get("provider", "unknown")
-        model = data.get("model", "unknown")
-
-        # Get provider display name from registry
-        try:
-            from AI.core.registry import get_registry
-            registry = get_registry()
-            provider_meta = registry.get_metadata(provider_raw.lower())
-            provider_display = provider_meta.display_name
-        except:
-            provider_display = provider_raw
-
-        # Create embed
-        embed = discord.Embed(
-            title=f"Debug Mode: {ai_name}",
-            color=cls._get_color("llm_response"),
-            timestamp=datetime.now()
-        )
-        
-        # Set bot author with icon
-        try:
-            bot = guild.me
-            if bot:
-                embed.set_author(
-                    name=f"@{bot.name}",
-                    icon_url=bot.display_avatar.url
-                )
-        except Exception as e:
-            log.debug(f"Could not set author icon: {e}")
-        
-        # Set character card thumbnail
-        try:
-            session = data.get("session")
-            if session:
-                from utils.media.thumbnails import get_thumbnail_url
-                thumbnail_url = await get_thumbnail_url(
-                    channel,
-                    session,
-                    server_id=server_id
-                )
-                if thumbnail_url:
-                    embed.set_thumbnail(url=thumbnail_url)
-        except Exception as e:
-            log.debug(f"Could not set thumbnail: {e}")
-        
-        # Provider & Model
-        embed.add_field(
-            name="Provider & Model",
-            value=f"{provider_display} • {model}",
-            inline=False
-        )
-        
-        # Channel
-        channel_mention = data.get("channel")
-        if channel_mention:
-            embed.add_field(
-                name="Channel",
-                value=channel_mention,
-                inline=False
-            )
-        
-        # Token Usage
-        tokens = data.get("tokens", {})
-        if tokens:
-            system_tokens = tokens.get("system", 0)
-            context_tokens = tokens.get("context", 0)
-            completion_tokens = tokens.get("completion", 0)
-            total_tokens = tokens.get("total", 0)
-            context_window = tokens.get("context_window", 0)
-            
-            # Clear breakdown: System (static) | Context (messages) on first line
-            # Completion (current response) | Total on second line
-            token_text = f"**System Prompt:** {cls._format_number(system_tokens)} | "
-            token_text += f"**Context:** {cls._format_number(context_tokens)}\n"
-            token_text += f"**Completion:** {cls._format_number(completion_tokens)} | "
-            token_text += f"**Total:** {cls._format_number(total_tokens)}"
-            
-            # Context window progress bar
-            if context_window > 0:
-                percentage = (total_tokens / context_window) * 100
-                progress_bar = cls._create_progress_bar(total_tokens, context_window)
-                token_text += f"\n**Window:** {progress_bar} "
-                token_text += f"{cls._format_number(total_tokens)} / {cls._format_number(context_window)} "
-                token_text += f"({percentage:.1f}%)"
-            
-            embed.add_field(name="Token Usage", value=token_text, inline=False)
-        
-        # Memory
-        memory = data.get("memory", {})
-        if memory:
-            msg_count = memory.get("messages_count", 0)
-            est_tokens = memory.get("estimated_tokens", 0)
-            memory_text = f"{msg_count} messages • ~{cls._format_number(est_tokens)} tokens (history + input)"
-            embed.add_field(name="Memory", value=memory_text, inline=False)
-        
-        # Tool Calls
-        tool_calls = data.get("tool_calls", [])
-        if tool_calls:
-            tool_text = "\n".join([
-                f"• **{call.get('name', 'unknown')}**: {call.get('result', 'N/A')}"
-                for call in tool_calls[:5]  # Limit to 5
-            ])
-            if len(tool_calls) > 5:
-                tool_text += f"\n... and {len(tool_calls) - 5} more"
-            embed.add_field(name="Tool Calls", value=tool_text, inline=False)
-        
-        # Performance - Show both latency and TPS if available
-        latency_ms = data.get("latency_ms")
-        tps = data.get("tps")
-        if latency_ms is not None or tps is not None:
-            perf_parts = []
-            if latency_ms is not None:
-                perf_parts.append(f"**Latency:** {latency_ms}ms")
-            if tps is not None:
-                perf_parts.append(f"**Speed:** {tps:.2f} TPS")
-            
-            perf_text = " | ".join(perf_parts)
-            embed.add_field(name="Performance", value=perf_text, inline=False)
-        
-        # Raw Response (truncated)
-        raw_response = data.get("raw_response", "")
-        if raw_response:
-            # Truncate if too long
-            max_length = 1000
-            if len(raw_response) > max_length:
-                raw_response = raw_response[:max_length] + "..."
-            
-            embed.add_field(
-                name="Raw Response",
-                value=f"```\n{raw_response}\n```",
-                inline=False
-            )
-        
-        # Set footer
-        embed.set_footer(text=cls._build_footer(server_id))
-        
-        return embed
-    
-    @classmethod
-    def _build_system_event_embed(cls, event: str, data: Dict[str, Any], server_id: str) -> discord.Embed:
-        """
-        Build embed for system events (sleep mode, bot status, etc.).
-        
-        Args:
-            event: Event type
-            data: Event data
-            server_id: Server ID
-            
-        Returns:
-            Discord embed
-        """
-        # Event-specific configuration
-        event_config = {
-            "sleep_mode_change": ("😴", "Sleep Mode"),
-            "bot_status_change": ("🤖", "Bot Status Changed"),
-            "bot_startup": ("🚀", "Bot Started"),
-            "bot_shutdown": ("🛑", "Bot Shutdown"),
-        }
-        
-        emoji, title_base = event_config.get(event, ("ℹ️", "System Event"))
-        
-        # Build title
-        ai_name = data.get("ai_name", "")
-        if ai_name:
-            title = f"{emoji} {title_base}: {ai_name}"
-        else:
-            title = f"{emoji} {title_base}"
-        
-        # Create embed
-        embed = discord.Embed(
-            title=title,
-            color=cls._get_color(event),
-            timestamp=datetime.now()
-        )
-        
-        # Event-specific fields
-        if event == "sleep_mode_change":
-            status = data.get("status", "unknown")
-            embed.add_field(name="Status", value=f"{status.title()} sleep mode", inline=True)
-            
-            channel = data.get("channel")
-            if channel:
-                embed.add_field(name="Channel", value=channel, inline=True)
-            
-            reason = data.get("reason")
-            if reason:
-                embed.add_field(name="Reason", value=reason, inline=False)
-            
-            if status == "entered":
-                embed.description = "The AI will wake up when mentioned directly."
-        
-        elif event == "bot_status_change":
-            old_status = data.get("old_status", "unknown")
-            new_status = data.get("new_status", "unknown")
-            embed.add_field(name="Status Change", value=f"{old_status} → {new_status}", inline=False)
-            
-            reason = data.get("reason")
-            if reason:
-                embed.add_field(name="Reason", value=reason, inline=False)
-            
-            ais_in_sleep = data.get("ais_in_sleep", [])
-            if ais_in_sleep:
-                ais_text = "\n".join([f"• {ai}" for ai in ais_in_sleep[:10]])
-                if len(ais_in_sleep) > 10:
-                    ais_text += f"\n... and {len(ais_in_sleep) - 10} more"
-                embed.add_field(name="AIs in Sleep Mode", value=ais_text, inline=False)
-        
-        elif event == "bot_startup":
-            version = data.get("version", "Unknown")
-            servers = data.get("servers", 0)
-            total_ais = data.get("total_ais", 0)
-            
-            embed.add_field(name="Version", value=version, inline=True)
-            embed.add_field(name="Servers", value=str(servers), inline=True)
-            embed.add_field(name="Total AIs", value=str(total_ais), inline=True)
-        
-        elif event == "bot_shutdown":
-            reason = data.get("reason", "Unknown")
-            uptime = data.get("uptime", 0)
-            
-            embed.add_field(name="Reason", value=reason, inline=True)
-            
-            # Format uptime
-            hours = int(uptime // 3600)
-            minutes = int((uptime % 3600) // 60)
-            uptime_str = f"{hours}h {minutes}m"
-            embed.add_field(name="Uptime", value=uptime_str, inline=True)
-        
-        # Set footer
-        embed.set_footer(text=cls._build_footer(server_id))
-        
-        return embed
-    
-    @classmethod
-    def _build_error_embed(cls, data: Dict[str, Any], server_id: str) -> discord.Embed:
-        """
-        Build embed for error/warning events.
-        
-        Args:
-            data: Event data
-            server_id: Server ID
-            
-        Returns:
-            Discord embed
-        """
-        severity = data.get("severity", "error")
-        title = data.get("title", "Error")
-        
-        # Severity emoji
-        severity_emoji = {
-            "critical": "🔴",
-            "error": "🔴",
-            "warning": "🟡",
-            "info": "🔵",
-        }
-        emoji = severity_emoji.get(severity, "🔴")
-        
-        # Create embed
-        embed = discord.Embed(
-            title=f"{emoji} {title}",
-            color=cls._get_color(severity),
-            timestamp=datetime.now()
-        )
-        
-        # Error type
-        error_type = data.get("error_type")
-        if error_type:
-            embed.add_field(name="Error Type", value=error_type, inline=True)
-        
-        # Message
-        message = data.get("message")
-        if message:
-            # Truncate if too long
-            if len(message) > 1000:
-                message = message[:1000] + "..."
-            embed.add_field(name="Message", value=message, inline=False)
-        
-        # Context
-        context = data.get("context", {})
-        if context:
-            context_text = "\n".join([
-                f"**{k.replace('_', ' ').title()}:** {v}"
-                for k, v in context.items()
-            ])
-            embed.add_field(name="Context", value=context_text, inline=False)
-        
-        # Suggestion
-        suggestion = data.get("suggestion")
-        if suggestion:
-            embed.add_field(name="Suggestion", value=suggestion, inline=False)
-        
-        # Set footer
-        embed.set_footer(text=cls._build_footer(server_id))
-        
-        return embed
-    
-    @classmethod
-    async def _build_ignore_embed(
-        cls,
-        guild: discord.Guild,
-        channel: discord.TextChannel,
-        data: Dict[str, Any],
-        server_id: str
-    ) -> discord.Embed:
-        """
-        Build embed for ignore detection events.
-        
-        Args:
-            guild: Discord guild
-            channel: Discord channel
-            data: Event data
-            server_id: Server ID
-            
-        Returns:
-            Discord embed
-        """
-        ai_name = data.get("ai_name", "AI")
-        ignore_type = data.get("ignore_type", "unknown")
-        is_pure = ignore_type == "pure"
-        
-        # Title and color based on ignore type
-        if is_pure:
-            title = f"🚫 Ignore Detected: {ai_name}"
-            color = cls._get_color("ignore_detected")
-            description = "AI decided not to respond to this conversation"
-        else:
-            title = f"⚠️ Impure Ignore Detected: {ai_name}"
-            color = cls.COLORS["error"]
-            description = "AI used <IGNORE> incorrectly with additional content"
-        
-        # Create embed
-        embed = discord.Embed(
-            title=title,
-            description=description,
-            color=color,
-            timestamp=datetime.now()
-        )
-        
-        # Set bot author with icon
-        try:
-            bot = guild.me
-            if bot:
-                embed.set_author(
-                    name=f"@{bot.name}",
-                    icon_url=bot.display_avatar.url
-                )
-        except Exception as e:
-            log.debug(f"Could not set author icon: {e}")
-        
-        # Field 1: Ignore Type
-        embed.add_field(
-            name="Ignore Type",
-            value=ignore_type.title(),
-            inline=True
-        )
-        
-        # Field 2: Channel
-        channel_mention = data.get("channel")
-        if channel_mention:
-            embed.add_field(
-                name="Channel",
-                value=channel_mention,
-                inline=True
-            )
-        
-        # Field 3: Raw Response (truncated)
-        raw_response = data.get("raw_response", "")
-        if raw_response:
-            max_length = 500
-            if len(raw_response) > max_length:
-                raw_response = raw_response[:max_length] + "..."
-            
-            embed.add_field(
-                name="Raw Response",
-                value=f"```\n{raw_response}\n```",
-                inline=False
-            )
-        
-        # Sleep mode fields (only if sleep mode is enabled and pure ignore)
-        sleep_mode_enabled = data.get("sleep_mode_enabled", False)
-        if sleep_mode_enabled and is_pure:
-            # Field 4: Sleep Mode Status
-            sleep_mode_active = data.get("sleep_mode_active", False)
-            status = "Active" if sleep_mode_active else "Inactive"
-            embed.add_field(
-                name="Sleep Mode Status",
-                value=status,
-                inline=True
-            )
-            
-            # Field 5: Consecutive Ignores
-            consecutive = data.get("consecutive_ignores", 0)
-            threshold = data.get("ignore_threshold", 3)
-            embed.add_field(
-                name="Consecutive Ignores",
-                value=f"{consecutive} / {threshold}",
-                inline=True
-            )
-            
-            # Field 6: Sleep Mode Triggered (if just entered)
-            just_entered_sleep = data.get("just_entered_sleep", False)
-            if just_entered_sleep:
-                embed.add_field(
-                    name="Sleep Mode Triggered",
-                    value=f"✅ AI entered sleep mode after {consecutive} consecutive ignores",
-                    inline=False
-                )
-        
-        # Impure ignore guidance
-        if not is_pure:
-            embed.add_field(
-                name="Reason",
-                value="<IGNORE> tag found with additional content",
-                inline=False
-            )
-            embed.add_field(
-                name="Suggestion",
-                value="Use ONLY <IGNORE> without additional text to properly skip responding",
-                inline=False
-            )
-        
-        # Set character card thumbnail
-        try:
-            session = data.get("session")
-            if session:
-                from utils.media.thumbnails import get_thumbnail_url
-                thumbnail_url = await get_thumbnail_url(
-                    channel,
-                    session,
-                    server_id=server_id
-                )
-                if thumbnail_url:
-                    embed.set_thumbnail(url=thumbnail_url)
-        except Exception as e:
-            log.debug(f"Could not set thumbnail: {e}")
-        
-        # Set footer
-        embed.set_footer(text=cls._build_footer(server_id))
-        
-        return embed

@@ -280,6 +280,22 @@ class CardRegistry(commands.Cog):
             
             await interaction.followup.send(success_msg, ephemeral=True)
             
+            # Send debug embed for card parsing
+            try:
+                from utils.core.debug_embed import DebugEmbed
+                await DebugEmbed.send(
+                    guild=interaction.guild,
+                    event="card_parsed",
+                    data={
+                        "ai_name": char_name,
+                        "character_card": character_card,
+                        "executor": interaction.user.mention,
+                        "channel": interaction.channel.mention if interaction.channel else None,
+                    }
+                )
+            except Exception as debug_e:
+                func.log.debug(f"Failed to send card import debug embed: {debug_e}")
+
         except Exception as e:
             func.log.error(f"Error importing card: {e}", exc_info=True)
             await interaction.followup.send(
@@ -560,7 +576,7 @@ class CardRegistry(commands.Cog):
                 "• Use `/import_card` to register a card\n"
                 "• Or use `/setup` with a `card_url` parameter\n"
                 "• Supports PNG, JSON, and CHARX formats\n"
-                "• Character Card V3 spec supported",
+                "• Character Card V1, V2 and V3 spec supported",
                 ephemeral=True
             )
             return

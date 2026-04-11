@@ -42,7 +42,7 @@ class SlashCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
-    @app_commands.command(name="character_info", description="Show detailed Character Card V3 information.")
+    @app_commands.command(name="character_info", description="Show detailed Character Card information.")
     @app_commands.describe(
         ai_name="Name of the AI to view Character Card information (optional if card_name is provided)",
         card_name="Name of a registered card to view (optional if ai_name is provided)"
@@ -55,7 +55,7 @@ class SlashCommands(commands.Cog):
         card_name: str = None
     ):
         """
-        Display detailed Character Card V3 information with image.
+        Display detailed Character Card information with image.
         Can be used with either ai_name or card_name.
         """
         await interaction.response.defer()
@@ -208,7 +208,7 @@ class SlashCommands(commands.Cog):
             
             display_ai_name = f"Card: {card_name}"
         
-        # Build Character Card V3 embed with information
+        # Build Character Card embed with information
         embed, file = await self._build_character_card_embed(
             card_data, display_ai_name, session, card_info, server_id, found_channel_id
         )
@@ -229,13 +229,13 @@ class SlashCommands(commands.Cog):
         channel_id: str
     ) -> tuple:
         """
-        Build a detailed Character Card V3 embed.
+        Build a detailed Character Card embed.
         
         Returns:
             tuple: (embed, file) where file is the character image or None
         """
         
-        # Extract Character Card V3 fields
+        # Extract Character Card fields
         char_name = card_data.get("name", ai_name)
         nickname = card_data.get("nickname")
         display_name = nickname or char_name
